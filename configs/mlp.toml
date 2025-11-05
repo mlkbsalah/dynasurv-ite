@@ -1,0 +1,4 @@
+[MLP]
+n_layers = 2
+n_units = [5, 4]
+output_dim = 4

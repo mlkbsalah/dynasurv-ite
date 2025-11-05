@@ -1,0 +1,9 @@
+[data.settings]
+horizon = 60  # Number of months to predict after the line onset
+n_lines = 4   # Number of lines of therapy to consider per patient
+n_time_bins = 120  # Number of discrete time bins between [line_start, line_start + horizon]
+
+[data.splits]
+batch_size = 64
+val_split = 0.2
+test_split = 0.1

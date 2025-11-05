@@ -1,0 +1,20 @@
+[LSTM_cell]
+[LSTM_cell.MLPx]
+n_layers = 2
+n_units = [5, 4]
+output_dim = 4
+
+[LSTM_cell.MLPp]
+n_layers = 4
+n_units = [4, 3, 8, 6]
+output_dim = 3
+
+[LSTM_cell.MLPsa]
+input_dim = 6 # Hidden state dimension of LSTM
+n_layers = 6
+n_units = [7, 6, 5, 4, 8, 9]
+
+[Optimizer]
+name = "adamw"
+lr = 3e-4
+weight_decay = 1e-4

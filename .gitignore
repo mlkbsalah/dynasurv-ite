@@ -1,0 +1,8 @@
+data/
+slurm/
+*.out
+*.sh
+.toml
+.vscode/
+Makefile
+Dockerfile
