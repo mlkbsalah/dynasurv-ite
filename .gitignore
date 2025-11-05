@@ -7,4 +7,5 @@ slurm/
 Makefile
 Dockerfile
 __pycache__/
+*.egg-info/
 !*/data/
