@@ -1,4 +1,4 @@
-data/
+/data/
 slurm/
 *.out
 *.sh
@@ -6,3 +6,5 @@ slurm/
 .vscode/
 Makefile
 Dockerfile
+__pycache__/
+!*/data/
