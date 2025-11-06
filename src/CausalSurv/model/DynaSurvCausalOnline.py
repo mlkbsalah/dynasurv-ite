@@ -45,19 +45,6 @@ class CausalDynaSurv(L.LightningModule):
 
         self.hidden_length = self.lstm.hidden_length
 
-        # self.treatment_heads = nn.ModuleList([
-        #     nn.ModuleList([
-        #         MLP(
-        #             input_dim=self.hidden_length,
-        #             output_dim=self.output_sa_length,
-        #             n_layers=self.config.get("MLP", {}).get("n_layers", 2),
-        #             n_units=self.config.get("MLP", {}).get("n_units", [16, 8])
-        #         )
-        #         for _ in range(n_treatments)
-        #     ])
-        #     for _ in range(self.n_lines)  # or pass time_steps explicitly
-        # ])
-
         self.treatment_heads = nn.ModuleList([
                 MLP(
                     input_dim=self.hidden_length,
@@ -119,6 +106,38 @@ class CausalDynaSurv(L.LightningModule):
         propensity = torch.stack(propensity_outputs, dim=1)  # (batch, n_lines, n_treatments)
         return cond_sa, propensity
 
+    def predict_factual_survival(self, XPd: torch.Tensor, treatment_index: torch.Tensor, mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Predict factual survival for given treatment indices.
+
+        Args:
+            XPd: (batch, n_lines, features)
+            treatment_index: (batch, n_lines) integer treatment head indices actually received
+
+        Returns:
+            torch.Tensor: (batch, n_lines, output_sa_length) predicted survival probabilities
+        """
+        batch_size, n_lines, _ = XPd.shape
+        h, c, p = self._init_states(batch_size, XPd.device)
+        cond_sa = torch.zeros((batch_size, n_lines, self.output_sa_length), device=XPd.device)
+        propensity = torch.zeros((batch_size, n_lines, self.n_treatments), device=XPd.device)
+
+        for line in range(n_lines):
+            mask_line = mask[:, line]
+            if torch.sum(mask_line) == 0: # avoid burden of computing on only padded lines
+                continue
+            _, h, c, p = self.lstm(XPd[:, line, :], (h, c, p))
+
+            line_treatment_index = treatment_index[:, line]
+            propensity_line = self.propensityhead(h)  # (batch, n_treatments)
+
+            cond_sa_line = torch.stack([self.treatment_heads[patient_factual_treatment](h[i]) # type: ignore
+                                   for i, patient_factual_treatment in enumerate(line_treatment_index)
+                                   ], dim=0)  # (batch, output_sa_length)
+            cond_sa[:, line, :] = self.output_activation(cond_sa_line)
+
+            propensity[:, line, :] = propensity_line
+        return cond_sa, propensity
+
     def training_step(self, batch, batch_idx):
         """Compute factual survival loss.
 
@@ -154,6 +173,7 @@ class CausalDynaSurv(L.LightningModule):
             cond_sa = torch.stack([ self.treatment_heads[patient_factual_treatment](h[i]) 
                 for i, patient_factual_treatment in enumerate(line_treatment_index)
             ], dim=0)  # (batch, output_sa_length)
+            cond_sa = self.output_activation(cond_sa)
 
             # Compute losses only for valid (non-padded) lines
             survival_loss = SURVLoss(sa_true[:, line, :], cond_sa, reduction='none')  # (batch,)
@@ -227,7 +247,6 @@ class CausalDynaSurv(L.LightningModule):
         self.log("train/propensity_loss", avg_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
         
         return loss
-
 
     def configure_optimizers(self): 
         if self._optim_name == "adam":
