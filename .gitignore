@@ -12,5 +12,5 @@ wandb/
 training_logs/
 notebooks/
 *.egg-info/
-
+.DS_Store
 !*/data/
