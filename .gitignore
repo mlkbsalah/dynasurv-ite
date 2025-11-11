@@ -3,9 +3,14 @@ slurm/
 *.out
 *.sh
 .toml
+.pyc
 .vscode/
 Makefile
 Dockerfile
 __pycache__/
+wandb/
+training_logs/
+notebooks/
 *.egg-info/
+
 !*/data/
