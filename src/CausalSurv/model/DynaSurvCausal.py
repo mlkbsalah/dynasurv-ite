@@ -4,10 +4,10 @@ import lightning as L
 import torch
 import torch.nn as nn
 
-from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM
+from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
 from CausalSurv.model.mlp import MLP
 from CausalSurv.metrics.loss import SURVLoss, PROPLoss
-from CausalSurv.data.config_loader import load_config
+from CausalSurv.tools import load_config
 
 
 class CausalDynaSurv(L.LightningModule):
@@ -36,7 +36,7 @@ class CausalDynaSurv(L.LightningModule):
         self.n_lines = n_lines
 
         # Shared LSTM representation learner
-        self.lstm = embed_LSTM(
+        self.lstm = embed_LSTM_ITE(
             x_input_dim=self.x_input_dim,
             p_input_dim=self.p_input_dim,
             output_sa_length=self.output_sa_length,  # not used for heads, but embed_LSTM returns an sa; we will ignore that and use hidden state

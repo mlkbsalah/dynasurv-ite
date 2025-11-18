@@ -6,7 +6,7 @@ import torch.nn as nn
 from CausalSurv.model.mlp import MLP
 
 
-from CausalSurv.data.config_loader import load_config
+from CausalSurv.tools import load_config
 
 class embed_LSTM_ITE(nn.Module):
     """Adaptation of the C-LSTM (Care LSTM, Pham et al. 2017)

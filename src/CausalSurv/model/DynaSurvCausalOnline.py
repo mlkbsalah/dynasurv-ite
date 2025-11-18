@@ -7,7 +7,7 @@ import torch.nn as nn
 from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
 from CausalSurv.model.mlp import MLP
 from CausalSurv.metrics.loss import SURVLoss, PROPLoss
-from CausalSurv.data.config_loader import load_config
+from CausalSurv.tools import load_config
 
 
 class CausalDynaSurv(L.LightningModule):
@@ -138,17 +138,8 @@ class CausalDynaSurv(L.LightningModule):
             propensity[:, line, :] = propensity_line
         return cond_sa, propensity
 
-    def training_step(self, batch, batch_idx):
-        """Compute factual survival loss.
 
-        Expected batch format (tuple):
-            XPd: (batch, n_lines, features)
-            sa_true: (batch, n_lines, 2*n_intervals) survival + event indicators
-            treatment_index: (batch, n_lines) integer treatment head indices actually received
-            time: (batch,) continuous time-to-event (optional, unused here)
-            event: (batch,) event indicator (optional, unused here)
-        """
-  
+    def _compute_step_loss(self, batch) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if len(batch) < 3:
             raise ValueError("Batch must contain at least (XPd, sa_true, treatment_index).")
 
@@ -182,70 +173,50 @@ class CausalDynaSurv(L.LightningModule):
             # Apply mask and average
             masked_survival_loss = (survival_loss * mask_line).sum()
             masked_propensity_loss = (propensity_loss * mask_line).sum()
-            
+            contributing_lines = torch.sum(mask_line)
+
             total_survival_loss += masked_survival_loss
             total_propensity_loss += masked_propensity_loss
-            total_valid_lines += mask_line.sum()
+            total_valid_lines += contributing_lines
+        
+        total_survival_loss = total_survival_loss / (total_valid_lines + 1e-8)
+        total_propensity_loss = total_propensity_loss / (total_valid_lines + 1e-8)
 
-        avg_survival_loss = total_survival_loss / (total_valid_lines + 1e-8)
-        avg_propensity_loss = total_propensity_loss / (total_valid_lines + 1e-8)
-        
-        loss = avg_survival_loss - avg_propensity_loss
-        
+
+        loss = total_survival_loss
+
+
+        return loss, total_survival_loss, total_propensity_loss
+
+
+
+    def training_step(self, batch, batch_idx):
+        """Compute factual survival loss.
+
+        Expected batch format (tuple):
+            XPd: (batch, n_lines, features)
+            sa_true: (batch, n_lines, 2*n_intervals) survival + event indicators
+            treatment_index: (batch, n_lines) integer treatment head indices actually received
+            time: (batch,) continuous time-to-event (optional, unused here)
+            event: (batch,) event indicator (optional, unused here)
+        """
+  
+        loss, total_survival_loss, total_propensity_loss = self._compute_step_loss(batch)
+
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train/survival_loss", avg_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train/propensity_loss", avg_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("train/survival_loss", total_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("train/propensity_loss", total_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
         
         return loss
 
 
     def validation_step(self, batch, batch_idx):
-        if len(batch) < 3:
-            raise ValueError("Batch must contain at least (XPd, sa_true, treatment_index).")
-
-        XPd, sa_true, treatment_index, _, _, mask = batch
-        device = XPd.device
-
-        batch_size, n_lines, _ = XPd.shape
-        h, c, p = self._init_states(batch_size, XPd.device)
-        total_survival_loss = torch.tensor(0.0, device=device)
-        total_propensity_loss = torch.tensor(0.0, device=device)
-        total_valid_lines = torch.tensor(0.0, device=device)
-        for line in range(n_lines):
-            mask_line = mask[:, line]
-            if torch.sum(mask_line) == 0: # avoid burden of computing on only padded lines
-                continue
-            _, h, c, p = self.lstm(XPd[:, line, :], (h, c, p))
-
-            line_treatment_index = treatment_index[:, line]
-
-            propensity = self.propensityhead(h)  # (batch, n_treatments)
-
-            cond_sa = torch.stack([ self.treatment_heads[patient_factual_treatment](h[i]) 
-                for i, patient_factual_treatment in enumerate(line_treatment_index)
-            ], dim=0)  # (batch, output_sa_length)
-
-            # Compute losses only for valid (non-padded) lines
-            survival_loss = SURVLoss(sa_true[:, line, :], cond_sa, reduction='none')  # (batch,)
-            propensity_loss = PROPLoss(propensity, line_treatment_index, reduction='none')  # (batch,)
-            
-            # Apply mask and average
-            masked_survival_loss = (survival_loss * mask_line).sum()
-            masked_propensity_loss = (propensity_loss * mask_line).sum()
-            
-            total_survival_loss += masked_survival_loss
-            total_propensity_loss += masked_propensity_loss
-            total_valid_lines += mask_line.sum()
-
-        avg_survival_loss = total_survival_loss / (total_valid_lines + 1e-8)
-        avg_propensity_loss = total_propensity_loss / (total_valid_lines + 1e-8)
+        loss, avg_survival_loss, avg_propensity_loss = self._compute_step_loss(batch)
         
-        loss = avg_survival_loss - avg_propensity_loss
-        
-        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train/survival_loss", avg_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train/propensity_loss", avg_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
-        
+        self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("val/survival_loss", avg_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("val/propensity_loss", avg_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
+
         return loss
 
     def configure_optimizers(self): 

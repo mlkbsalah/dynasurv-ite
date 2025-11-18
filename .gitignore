@@ -1,12 +1,12 @@
 /data/
 slurm/
 *.out
-*.sh
+# *.sh
 .toml
 .pyc
 .vscode/
-Makefile
-Dockerfile
+# Makefile
+# Dockerfile
 __pycache__/
 wandb/
 training_logs/
@@ -14,3 +14,4 @@ notebooks/
 *.egg-info/
 .DS_Store
 !*/data/
+latex/

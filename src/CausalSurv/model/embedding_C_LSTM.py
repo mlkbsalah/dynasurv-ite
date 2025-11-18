@@ -6,7 +6,7 @@ import torch.nn as nn
 from CausalSurv.model.mlp import MLP
 
 
-from CausalSurv.data.config_loader import load_config
+from CausalSurv.tools import load_config
 
 class embed_LSTM(nn.Module):
     """Adaptation of the C-LSTM (Care LSTM, Pham et al. 2017)
@@ -69,8 +69,7 @@ class embed_LSTM(nn.Module):
         self.MLPsa = MLP(input_dim=self.hidden_length, output_dim=output_sa_length,
                         n_layers=self.cell_config['MLPsa']['n_layers'], n_units=self.cell_config['MLPsa']['n_units'])
         
-        logging.info(f"embed_LSTM initialized with x_embed_dim={self.x_embed_dim}, p_embed_dim={self.p_embed_dim}, hidden_length={self.hidden_length}")
-
+        
     def _forget_gate(self, x: torch.Tensor, d: torch.Tensor, h_prev: torch.Tensor, p_prev: torch.Tensor) -> torch.Tensor:
         """Compute the forget gate activation.
 
@@ -161,7 +160,6 @@ class embed_LSTM(nn.Module):
 
         if XPd.ndim == 3:
             XPd = XPd[:, 0, :]
-
         X = XPd[:, :self.x_input_dim]
         P = XPd[:, self.x_input_dim:-1]
         d = XPd[:, -1:]

@@ -1,40 +1,53 @@
 import torch
 import lightning as L
-from CausalSurv.metrics.scoring import brier_score, integrated_brier_score, concordance_index
+from CausalSurv.metrics.scoring import brier_score, concordance_index
+from CausalSurv.tools.move_to_device import move_to_device
 
 class MetricsCallback(L.Callback):
     def __init__(self, time_bins: torch.Tensor):
         super().__init__()
         self.time_bins = time_bins
-
-    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule):
-        all_factual_preds, all_time, all_event = [], [], []
-
+        
+    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         val_loader = trainer.val_dataloaders
+        c_index_list = []
+        ibs_list = []
+        
+        time_bins = self.time_bins.to(pl_module.device)
 
+        if val_loader is None:
+            return
+        
         with torch.no_grad():
-            for batch in val_loader: # type: ignore
-                XPd, _, treatment_index, time, event = batch
-                XPd = XPd.to(pl_module.device)
-                treatment_index = treatment_index.to(pl_module.device)
-                sa_pred, _ = pl_module(XPd)
-                factual_sa_pred = pl_module._select_factual_head(sa_pred, treatment_index) # type: ignore
-                all_factual_preds.append(factual_sa_pred.cpu())
-                all_time.append(time.cpu())
-                all_event.append(event.cpu())
+            for batch in val_loader: 
+                if len(batch) == 6:
+                    XPd, _, treatment_index, time, event, mask = batch
+                else:
+                    XPd, _, treatment_index, time, event = batch
+                    mask = None
 
-        # Concatenate all batches
-        factual_sa_pred = torch.cat(all_factual_preds, dim=0)  # (batch, n_lines, n_intervals)
-        time = torch.cat(all_time, dim=0)                      # (batch, n_lines)
-        event = torch.cat(all_event, dim=0)                    # (batch, n_lines)
+                XPd, treatment_index, time, event = move_to_device([XPd, treatment_index, time, event], pl_module.device)
+                if mask is not None:
+                    mask = mask.to(pl_module.device)
+                
+                sa_pred = pl_module.predict_factual_survival(XPd, treatment_index, mask) # type: ignore
+                _, ibs = brier_score(sa_pred, time, event, time_bins, mask)
+                c_index = concordance_index(sa_pred, time, event, time_bins, mask)
+                
+                c_index_list.append(c_index.cpu())
+                ibs_list.append(ibs.cpu())
 
-        # Compute metrics
-        ibs = integrated_brier_score(factual_sa_pred, time, event, self.time_bins) # (n_lines,)
-        c_index = concordance_index(factual_sa_pred, time, event, self.time_bins)  # (n_lines,) # what passes shouldb e(batch, n_lines, n_intervals)
+            # Handle batch size of 1
+            if len(c_index_list) == 1:
+                avg_c_index = c_index_list[0]
+                avg_ibs = ibs_list[0]
+            else:
+                avg_c_index = torch.cat(c_index_list).mean(dim=0)
+                avg_ibs = torch.cat(ibs_list).mean(dim=0)
 
-        # Log metrics
-        ibs_log = {f"IBS/line_{i}": ibs[i].item() for i in range(ibs.shape[0])}
-        c_index_log = {f"C_Index/line_{i}": c_index[i].item() for i in range(c_index.shape[0])}
-        if trainer.logger is not None:
-            trainer.logger.log_metrics({**ibs_log,
-                                        **c_index_log}, step=trainer.global_step)
+
+            ibs_log = {f'val/ibs_line_{i}': avg_ibs[i].item() for i in range(avg_ibs.shape[0])}
+            cindex_log = {f'val/c_index_line_{i}': avg_c_index[i].item() for i in range(avg_c_index.shape[0])}
+            
+            if trainer.logger is not None:
+                trainer.logger.log_metrics({**ibs_log, **cindex_log}, step=trainer.global_step)

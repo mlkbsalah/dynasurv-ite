@@ -2,10 +2,11 @@ from typing import Tuple
 
 import lightning as L
 import torch
-import torch.nn.functional as F
+
 from CausalSurv.model.embedding_C_LSTM import embed_LSTM
 from CausalSurv.metrics.loss import SURVLoss
 from CausalSurv.tools import load_config
+from CausalSurv.metrics.scoring import concordance_index, brier_score
 
 class DynaSurv(L.LightningModule):
     """DynaSurv LightningModule
@@ -19,7 +20,7 @@ class DynaSurv(L.LightningModule):
       - output_sa_length: number of survival intervals (n_intervals)
     """
 
-    def __init__(self, x_input_dim: int, p_input_dim: int, output_sa_length: int, config: dict | str) -> None:                
+    def __init__(self, x_input_dim: int, p_input_dim: int, output_sa_length: int, config: dict | str, time_bins: torch.Tensor) -> None:                
         super().__init__()
         self.save_hyperparameters()
 
@@ -30,6 +31,9 @@ class DynaSurv(L.LightningModule):
         self.x_input_dim = x_input_dim
         self.p_input_dim = p_input_dim
         self.output_sa_length = output_sa_length
+        self.time_bins = time_bins
+
+
 
         self.lstm = embed_LSTM(
             x_input_dim=self.x_input_dim,
@@ -37,6 +41,8 @@ class DynaSurv(L.LightningModule):
             output_sa_length=self.output_sa_length,
             cell_config=self.lstm_config
         )
+        self.sigmoid = torch.nn.Sigmoid()
+        
 
         # Optimizer params
         self._optim_name = self.train_config['name'].lower()
@@ -75,36 +81,68 @@ class DynaSurv(L.LightningModule):
 
         for t in range(time_steps):
             sa_t, h, c, p = self.lstm(XPd[:, t, :], (h, c, p))
-            sa_t = F.sigmoid(sa_t)  # Ensure outputs are in (0, 1)
+            sa_t = self.sigmoid(sa_t)  # Ensure outputs are in (0, 1)
             sa_out.append(sa_t)
         sa_seq = torch.stack(sa_out, dim=1)  # (batch_size, time_steps, output_sa_length)
         return sa_seq
 
     def training_step(self, batch, batch_idx):
-        XPd, sa_true, _, _, _ = batch
-        sa_pred = self.forward(XPd)
+        XPd, sa_true, _, time, event, mask = batch
+        sa_pred = self.forward(XPd) # (batch, time, output_sa_length)
         loss = torch.tensor(0.0, device=sa_pred.device)
-        for line in range(sa_true.size(1)):
-            sa_true_line = sa_true[:, line, :]
-            sa_pred_line = sa_pred[:, line, :]
+        total_contributing_losses = torch.tensor(0.0, device=sa_pred.device)
+
+        n_lines = sa_pred.size(1)
+        for line in range(n_lines):
+            mask_line = mask[:, line]
+            if torch.sum(mask_line) == 0:
+                continue
+
+            sa_pred_line = sa_pred[:, line, :]  # (batch, output_sa_length)
+            sa_true_line = sa_true[:, line, :]  # (batch, 2*output_sa_length)
             loss_line = SURVLoss(sa_true_line, sa_pred_line)
-            loss += loss_line
+
+            masked_loss_line = (loss_line * mask_line).sum()
+            contributing_losses = mask_line.sum()
+        
+            loss += masked_loss_line
+            total_contributing_losses += contributing_losses
+           
+        loss = loss / total_contributing_losses
+
+        # c_index = concordance_index(sa_pred, time, event, self.time_bins, mask)
+
+        # self.log("train/c_index_mean", c_index.mean(), prog_bar=True, on_step=True, on_epoch=True)
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
     
     def validation_step(self, batch, batch_idx):
-        XPd, sa_true, _, _, _ = batch
-        sa_pred = self.forward(XPd)
+        XPd, sa_true, _, _, _, mask = batch
+        sa_pred = self.forward(XPd) # (batch, time, output_sa_length)
         loss = torch.tensor(0.0, device=sa_pred.device)
-        for line in range(sa_true.size(1)):
-            sa_true_line = sa_true[:, line, :]
-            sa_pred_line = sa_pred[:, line, :]
+        total_contributing_losses = torch.tensor(0.0, device=sa_pred.device)
+
+        n_lines = sa_pred.size(1)
+        for line in range(n_lines):
+            mask_line = mask[:, line]
+            if torch.sum(mask_line) == 0:
+                continue
+
+            sa_pred_line = sa_pred[:, line, :]  # (batch, output_sa_length)
+            sa_true_line = sa_true[:, line, :]  # (batch, 2*output_sa_length)
             loss_line = SURVLoss(sa_true_line, sa_pred_line)
-            loss += loss_line
-        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
 
+            masked_loss_line = (loss_line * mask_line).sum()
+            contributing_losses = mask_line.sum()
+        
+            loss += masked_loss_line
+            total_contributing_losses += contributing_losses
+           
+        loss = loss / total_contributing_losses
+
+        self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
-
+    
     def configure_optimizers(self):
         if self._optim_name == "adam":
             optimizer = torch.optim.Adam(self.parameters(), lr=self._lr, weight_decay=self._weight_decay)
@@ -116,17 +154,30 @@ class DynaSurv(L.LightningModule):
             raise ValueError(f"Unsupported optimizer: {self._optim_name}")
         return optimizer
     
-    def predict_factual_survival(self, XPd: torch.Tensor, *_) -> torch.Tensor:
-        """Predict survival probabilities for input sequences.
+    def predict_survival_at_times(self, XPd: torch.Tensor, eval_times: torch.Tensor) -> torch.Tensor:
+        """Predict survival probabilities at specified evaluation times.
 
         Args:
-            XPd: Tensor of shape (batch, time, features) where features = input_X_length + input_P_length + 1 (d)
+            XPd: Tensor of shape (batch, n_lines, features)
+            eval_times: Tensor of shape (n_eval_times, n_lines)
 
         Returns:
-            Tensor of shape (batch, time) with predicted survival probabilities
+            surv_probs: Tensor of shape (batch,) 
         """
-        sa_seq = self.forward(XPd)
-        return sa_seq
+        sa_pred = self.forward(XPd)  # (batch, time, output_sa_length)
+        batch_size, n_lines, _ = sa_pred.shape
+        surv_probs = torch.zeros((batch_size, n_lines), device=sa_pred.device)
+
+        bin_indices = torch.searchsorted(self.time_bins, eval_times) - 1
+        bin_indices = torch.clamp(bin_indices, 0, self.output_sa_length - 1)
+
+        for i in range(batch_size):
+                bin_idx = bin_indices[i].item()
+                surv_prob = torch.prod(sa_pred[i, :, :bin_idx+1], dim=-1).mean()
+                surv_probs[i] = surv_prob
+
+        return surv_probs
+        
 
 if __name__ == "__main__":
     batch_size = 99
@@ -137,6 +188,4 @@ if __name__ == "__main__":
 
     features = x_input_dim + p_input_dim + 1
     sample_XPd = torch.randn(size=(batch_size, times_steps, features))  
-    model = DynaSurv(x_input_dim=x_input_dim, p_input_dim=p_input_dim, output_sa_length=output_sa_length, config="../../../configs/dynasurv.toml")
-    sa_pred = model(sample_XPd)
-    print(f"Input shape: {sample_XPd.shape},\nOutput shape: {sa_pred.shape}")
+    # model = DynaSurv(x_input_dim=x_input_dim, p_input_dim=p_input_dim, output_sa_length=output_sa_length, config="../../../configs/dynasurv.toml")

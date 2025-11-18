@@ -1,19 +1,17 @@
 import torch
 import lightning as L
 import torch.utils.data as TorchData
-from CausalSurv.data.config_loader import load_config
 import pandas as pd
+from CausalSurv.tools import load_config
 
 def stack_by_lines(df: pd.DataFrame, cols: list[str]):
-    """Stack variables patient-wise, variable number of lines per patient."""
+    """Stack variables patient-wise, variable number of lines per patient.   list[np.ndarray(patient_i_lines, len(cols))]"""
     patients = df['usubjid'].unique()
     stacked = []
-    lengths = []
     for pid in patients:
         arr = df.loc[df['usubjid'] == pid, cols].to_numpy()
         stacked.append(arr)
-        lengths.append(len(arr))
-    return stacked, lengths
+    return stacked
 
 
 class ESMEDataset(TorchData.Dataset):
@@ -45,6 +43,8 @@ class ESMEDataset(TorchData.Dataset):
         return len(self.X_list)
 
     def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.item()
         x = torch.tensor(self.X_list[idx], dtype=torch.float32)  # (n_lines, n_features)
         p = torch.tensor(self.P_list[idx], dtype=torch.float32)  # (n_lines, n_treatments)
         d = torch.tensor(self.d_list[idx], dtype=torch.float32)  # (n_lines, 1)
@@ -53,7 +53,6 @@ class ESMEDataset(TorchData.Dataset):
 
         n_lines = len(x)
         
-        # Pad sequences to max_lines
         n_features = x.shape[1]
         n_treatments = p.shape[1]
         
@@ -84,11 +83,11 @@ class ESMEDataset(TorchData.Dataset):
             e = event[line]
             
             survived_to_interval = (t >= self.time_bins[:-1])
-            if e == 1:
+            if e == 1: # event occurred
                 event_in_interval = (t >= self.time_bins[:-1]) & (t < self.time_bins[1:])
                 sa_true[line, :self.n_intervals] = survived_to_interval.clone()
                 sa_true[line, self.n_intervals:] = event_in_interval.clone()
-            else:
+            else: # censored
                 midpoints = 0.5 * (self.time_bins[:-1] + self.time_bins[1:])
                 survived_intervals_censored = (t >= midpoints)
                 sa_true[line, :self.n_intervals] = survived_intervals_censored.clone()
@@ -97,7 +96,7 @@ class ESMEDataset(TorchData.Dataset):
         return XPd, sa_true, treatment_indices, time_padded.squeeze(), event_padded.squeeze(), mask
 
 
-class ESMEDataModule(L.LightningDataModule):
+class ESMEOnlineDataModule(L.LightningDataModule):
     def __init__(self, data_dir: str = "", config: dict | str = ""):
         super().__init__()
         self.config = load_config(config)
@@ -118,7 +117,7 @@ class ESMEDataModule(L.LightningDataModule):
 
     def prepare_data(self):
         esme_data = pd.read_parquet(self.data_dir)
-        self.data = esme_data.loc[esme_data['lineid'] <= self.n_lines].copy()
+        self.data = esme_data.loc[esme_data['lineid'] <= self.n_lines].sort_values(by=['usubjid', 'lineid']).reset_index(drop=True).copy()
         print(f"Loaded {len(self.data)} rows, {self.data['usubjid'].nunique()} patients.")
 
     def setup(self, stage: str | None = None):
@@ -128,20 +127,20 @@ class ESMEDataModule(L.LightningDataModule):
         # Define feature, treatment, duration, and event columns
         X_cols = [col for col in self.data.columns if col.startswith('X_') and not col.startswith('X_buffer_time')]
         P_cols = ["T_treatment_category"]
-        d_cols = [col for col in self.data.columns if col.startswith('X_buffer_time')]
+        d_cols = ['X_buffer_time']
         time_cols = ['Y_onset_to_death']
         event_cols = ['Y_death']
 
-        P_encoded = pd.get_dummies(self.data[P_cols].astype(str), prefix="T")
+        P_encoded = pd.get_dummies(self.data[P_cols + ['usubjid']], columns=P_cols, prefix="T") 
         self.treatment_dict = {i: col for i, col in enumerate(P_encoded.columns)}
 
-        X_list, _ = stack_by_lines(self.data, X_cols)
-        P_list, _ = stack_by_lines(P_encoded.join(self.data['usubjid']), P_encoded.columns.to_list())
-        d_list, _ = stack_by_lines(self.data, d_cols)
-        time_list, _ = stack_by_lines(self.data, time_cols)
-        event_list, _ = stack_by_lines(self.data, event_cols)
 
-        # Split by patient indices
+        X_list = stack_by_lines(self.data, X_cols)
+        P_list = stack_by_lines(P_encoded, P_encoded.columns.drop('usubjid').tolist())
+        d_list = stack_by_lines(self.data, d_cols)
+        time_list = stack_by_lines(self.data, time_cols)
+        event_list = stack_by_lines(self.data, event_cols)
+
         n_patients = len(X_list)
         patient_indices = torch.randperm(n_patients).tolist()
         n_test = int(n_patients * self.test_split)
@@ -188,10 +187,10 @@ class ESMEDataModule(L.LightningDataModule):
         return TorchData.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4, persistent_workers=True)
 
     def val_dataloader(self):
-        return TorchData.DataLoader(self.val_dataset, batch_size=len(self.val_dataset), shuffle=False, num_workers=4, persistent_workers=True)
+        return TorchData.DataLoader(self.val_dataset, batch_size=len(self.val_dataset), shuffle=False, num_workers=1, persistent_workers=False)
 
     def test_dataloader(self):
-        return TorchData.DataLoader(self.test_dataset, batch_size=len(self.test_dataset), shuffle=False, num_workers=4, persistent_workers=True)
+        return TorchData.DataLoader(self.test_dataset, batch_size=len(self.test_dataset), shuffle=False, num_workers=1, persistent_workers=False)
 
     def get_input_dimensions(self):
         esme_data = pd.read_parquet(self.data_dir)
@@ -203,8 +202,8 @@ class ESMEDataModule(L.LightningDataModule):
 
 
 if __name__ == "__main__":
-    data_module = ESMEDataModule(
-        data_dir="../../../data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+    data_module = ESMEOnlineDataModule(
+        data_dir="../../../data/synthetic/sy_data.parquet",
         config="../../../configs/data.toml"
     )
     print("DataModule initialized.")

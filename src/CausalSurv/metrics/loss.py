@@ -26,7 +26,7 @@ def SURVLoss(sa_true: torch.Tensor, sa_pred: torch.Tensor, epsilon: float = 1e-7
     cens_uncens = torch.clamp(cens_uncens, min=epsilon)
     uncens = torch.clamp(uncens, min=epsilon)
 
-    loss =  -torch.sum(torch.log(cens_uncens) + torch.log(uncens), dim=1)  # sum over intervals
+    loss =  -torch.sum(torch.log(cens_uncens) + torch.log(uncens), dim=1)
     if reduction == "mean":
         loss = torch.mean(loss)
     elif reduction == "sum":

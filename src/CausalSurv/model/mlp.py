@@ -1,6 +1,6 @@
 import torch 
 import torch.nn as nn
-from CausalSurv.data.config_loader import load_config
+from CausalSurv.tools import load_config
 
 class MLP(nn.Module):
     """A simple Multi-Layer Perceptron (MLP) with ReLU activations."""
