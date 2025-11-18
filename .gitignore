@@ -15,3 +15,4 @@ notebooks/
 .DS_Store
 !*/data/
 latex/
+scripts/lightning_logs/
