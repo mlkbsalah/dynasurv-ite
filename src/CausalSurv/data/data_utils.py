@@ -92,7 +92,7 @@ class ESMEDataModule(L.LightningDataModule):
         self.n_treatments = self.data_config.get('n_treatments', None)
         self.treatment_dict = {} # map treatment index to treatment name (filled after data is loaded)
 
-        self.time_bins = torch.linspace(0, self.horizon, self.n_time_bins + 1)
+        self.time_bins = None
 
         self.batch_size = self.split_config.get('batch_size', 32)
         self.val_split = self.split_config.get('val_split', 0.2)
@@ -140,6 +140,8 @@ class ESMEDataModule(L.LightningDataModule):
 
         time = torch.tensor(time, dtype=torch.float32)
         event = torch.tensor(event, dtype=torch.float32)
+
+        self.time_bins = torch.quantile(torch.tensor(time[:,0]), torch.linspace(0, 1, self.n_time_bins + 1))
 
         ESME_Dataset = ESMEDataset(X, P, d, time, event, self.n_lines, self.time_bins)
         Train_data, Val_data, Test_data = TorchData.random_split(ESME_Dataset, lengths = [1 - self.val_split - self.test_split, self.val_split, self.test_split])
