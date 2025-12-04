@@ -13,7 +13,21 @@ class embed_LSTM(nn.Module):
     with added embedding layers for X, P, and output state (sa).
     """
 
-    def __init__(self, x_input_dim: int, p_input_dim: int, output_sa_length: int, cell_config: dict | str) -> None:
+    def __init__(self, 
+                 x_input_dim: int, 
+                 p_input_dim: int,
+                 hidden_length: int,
+                 output_length: int,
+                 x_embed_dim: int,
+                 p_embed_dim: int,
+                 mlpx_hidden_units: list[int],
+                 mlpp_hidden_units: list[int],
+                 mlpsa_hidden_units: list[int],
+                 mlpx_dropout: float,
+                 mlpp_dropout: float,
+                 mlpsa_dropout: float,
+                 ):
+                 
         """Class constructor
 
         Args:
@@ -26,18 +40,28 @@ class embed_LSTM(nn.Module):
 
         self.x_input_dim = x_input_dim
         self.p_input_dim = p_input_dim
-        self.output_sa_length = output_sa_length
-        self.cell_config = load_config(cell_config)
+        self.output_length = output_length
 
-        self.x_embed_dim = self.cell_config['MLPx']['output_dim']
-        self.p_embed_dim = self.cell_config['MLPp']['output_dim']
-        self.hidden_length = self.cell_config['MLPsa']['input_dim']
+        self.x_embed_dim = x_embed_dim
+        self.p_embed_dim = p_embed_dim
+        self.hidden_length = hidden_length
+
+        self.mlpp_hidden_units = mlpp_hidden_units
+        self.mlpx_hidden_units = mlpx_hidden_units
+        self.mlpp_dropout = mlpp_dropout
+        self.mlpx_dropout = mlpx_dropout
 
         # Embedding MLPs for X and P
-        self.MLPx = MLP(input_dim=self.x_input_dim, output_dim=self.x_embed_dim,
-                        n_layers=self.cell_config['MLPx']['n_layers'], n_units=self.cell_config['MLPx']['n_units'])
-        self.MLPp = MLP(input_dim=self.p_input_dim, output_dim=self.p_embed_dim,
-                        n_layers=self.cell_config['MLPp']['n_layers'], n_units=self.cell_config['MLPp']['n_units'])
+        self.MLPx = MLP(input_dim=self.x_input_dim,
+                        output_dim=self.x_embed_dim,
+                        n_units=self.mlpx_hidden_units,
+                        dropout=self.mlpx_dropout,
+                        )
+        self.MLPp = MLP(input_dim=self.p_input_dim, 
+                        output_dim=self.p_embed_dim,
+                        n_units=self.mlpp_hidden_units,
+                        dropout=self.mlpp_dropout,
+                        )
 
         # Forget gate
         self.linear_forget_Wxf = nn.Linear(self.x_embed_dim, self.hidden_length, bias=True)
@@ -65,10 +89,13 @@ class embed_LSTM(nn.Module):
         # Final hidden activation
         self.activation_final = nn.Tanh()
 
-        # Output MLP (sa)
-        self.MLPsa = MLP(input_dim=self.hidden_length, output_dim=output_sa_length,
-                        n_layers=self.cell_config['MLPsa']['n_layers'], n_units=self.cell_config['MLPsa']['n_units'])
-        
+        # Output MLP
+        self.mlpsa_hidden_units = mlpsa_hidden_units
+        self.mlpsa_dropout = mlpsa_dropout
+        self.MLPsa = MLP(input_dim=self.hidden_length, 
+                         output_dim=self.output_length,
+                         n_units=self.mlpsa_hidden_units,
+                         dropout=self.mlpsa_dropout)
         
     def _forget_gate(self, x: torch.Tensor, d: torch.Tensor, h_prev: torch.Tensor, p_prev: torch.Tensor) -> torch.Tensor:
         """Compute the forget gate activation.
@@ -183,10 +210,18 @@ if __name__ == "__main__":
     output_sa_length = 7
 
     model = embed_LSTM(
-        x_input_dim = x_input_dim,
-        p_input_dim = p_input_dim,
-        output_sa_length = output_sa_length,
-        cell_config="../../../configs/embed_C_LSTM.toml"
+        x_input_dim=x_input_dim,
+        p_input_dim=p_input_dim,
+        hidden_length=16,
+        output_length=output_sa_length,
+        x_embed_dim=8,
+        p_embed_dim=8,
+        mlpx_hidden_units=[16, 16],
+        mlpp_hidden_units=[16, 16],
+        mlpsa_hidden_units=[16, 16],
+        mlpx_dropout=0.1,
+        mlpp_dropout=0.1,
+        mlpsa_dropout=0.1,
     )
 
     time_steps = 19

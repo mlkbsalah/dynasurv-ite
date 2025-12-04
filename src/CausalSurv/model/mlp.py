@@ -5,7 +5,10 @@ from CausalSurv.tools import load_config
 class MLP(nn.Module):
     """A simple Multi-Layer Perceptron (MLP) with ReLU activations."""
 
-    def __init__(self, input_dim: int, output_dim: int, n_layers: int, n_units: list[int]) -> None:
+    def __init__(self, input_dim: int, 
+                 output_dim: int, 
+                 n_units: list[int],
+                 dropout: float) -> None:
         """Class constructor
         Args:
             input_dim (int): Dimension of the input features
@@ -14,20 +17,22 @@ class MLP(nn.Module):
             n_units (list[int]): Number of units in each hidden layer
         """
         super().__init__()
-        assert n_layers == len(n_units), "n_layers must match length of n_units list"
-
-        if n_layers == 0:
+        if len(n_units) == 0:
             print("Warning: MLP with 0 layers, using identity mapping.")
             self.mlp = nn.Identity()
             return
 
         layers = []
-        in_features = input_dim
-        for i in range(n_layers):
-            layers.append(nn.Linear(in_features, n_units[i]))
+        prev_layer = input_dim
+        self.dropout = dropout
+        for i in range(len(n_units)):
+            layers.append(nn.Linear(prev_layer, n_units[i]))
+            layers.append(nn.Dropout(self.dropout))
             layers.append(nn.ReLU())
-            in_features = n_units[i]
-        layers.append(nn.Linear(in_features, output_dim))
+            layers.append(nn.BatchNorm1d(n_units[i]))
+            prev_layer = n_units[i]
+        
+        layers.append(nn.Linear(prev_layer, output_dim))
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -38,18 +43,4 @@ class MLP(nn.Module):
             torch.Tensor: Output tensor
         """
         return self.mlp(x)
-    
-
-if __name__ == "__main__":
-    config = load_config("../../../configs/mlp.toml")
-    batch_size = 4
-    input_dim = 3
-    output_dim = config['MLP']['output_dim']  # type: ignore
-
-    MLP_test = MLP(input_dim=input_dim, output_dim=output_dim, n_layers=config['MLP']['n_layers'], n_units=config['MLP']['n_units']) # type: ignore
-    
-    MLP_test.eval()
-    x_test = torch.zeros(size=(batch_size, input_dim))
-    y_test = MLP_test(x_test)
-    print(y_test.shape)  # should be (batch_size, output_dim)
 

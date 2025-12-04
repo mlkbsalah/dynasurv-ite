@@ -15,7 +15,7 @@ def SURVLoss(sa_true: torch.Tensor, sa_pred: torch.Tensor, epsilon: float = 1e-7
     Returns:
         loss: Scalar loss value (mean over batch and time)
     """
-    n_intervals = sa_pred.size(1)
+    n_intervals = sa_pred.size(-1)
 
     survived_intervals = sa_true[:, :n_intervals]    # (batch, n_intervals)
     event_intervals = sa_true[:, n_intervals:]       # (batch, n_intervals)
@@ -51,3 +51,29 @@ def PROPLoss(propensity: torch.Tensor, treatment_index: torch.Tensor, reduction:
     loss = torch.nn.CrossEntropyLoss(reduction=reduction)(propensity, treatment_index)
     
     return loss
+
+
+class NLLogisticHazard():
+    """Class for logistic hazard discrete time survival model loss."""
+    def __init__(self, reduction='mean'):
+        self.reduction = reduction
+
+    def __call__(self, hazard_estimate:torch.Tensor, idx_durations:torch.Tensor, events:torch.Tensor) -> torch.Tensor:
+        """
+
+        Args:
+            hazard_estimate (torch.Tensor): _description_
+            idx_durations (torch.Tensor): _description_
+            events (torch.Tensor): _description_
+
+        Returns:
+            torch.Tensor: _description_
+        """
+        events = events.view(-1, 1).float()
+        idx_durations = idx_durations.view(-1, 1)
+        y_true = torch.zeros_like(hazard_estimate).scatter(1, idx_durations, events)
+        bce = torch.nn.BCEWithLogitsLoss(reduction='none')(hazard_estimate, y_true)
+        loss = bce.cumsum(dim=1).gather(1, idx_durations).view(-1)
+
+        loss = loss.mean() if self.reduction == 'mean' else loss.sum() if self.reduction == 'sum' else loss
+        return loss
