@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from CausalSurv.model.embedding_C_LSTM import embed_LSTM
 from CausalSurv.metrics.loss import SURVLoss, NLLogisticHazard
 from CausalSurv.tools import load_config
-from sksurv.metrics import concordance_index_censored
+from sksurv.metrics import concordance_index_censored, integrated_brier_score
 
 class DynaSurv(L.LightningModule):
     def __init__(self,
@@ -24,6 +24,8 @@ class DynaSurv(L.LightningModule):
                  mlpp_dropout: float,
                  mlpsa_dropout: float,
                  lr: float,
+                 lr_scheduler_stepsize: int,
+                 lr_scheduler_gamma: float,
                  weight_decay: float,
                  ):          
         super().__init__()
@@ -53,6 +55,8 @@ class DynaSurv(L.LightningModule):
         # Optimizer params
         self.lr = lr
         self.weight_decay = weight_decay
+        self.lr_scheduler_stepsize = lr_scheduler_stepsize
+        self.lr_scheduler_gamma = lr_scheduler_gamma
 
     def _init_states(self, batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Initialize hidden and cell states for LSTM.
@@ -123,13 +127,14 @@ class DynaSurv(L.LightningModule):
             y_hazard = self._predict_hazard_on_line(XPd[:, line, :], time[:, line])
             results = concordance_index_censored(event_line.cpu().numpy().astype(bool), time[:, line].cpu().numpy(), y_hazard.detach().cpu().numpy().flatten())
             
+            
             self.log(f'val_cindex_line_{line}', results[0], prog_bar=True)
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.6)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_scheduler_stepsize, gamma=self.lr_scheduler_gamma)
         return {'optimizer': optimizer, 'lr_scheduler': scheduler}
     
     def predict_survival(self, x: torch.Tensor) -> torch.Tensor:
@@ -181,6 +186,8 @@ if __name__ == "__main__":
         mlpsa_dropout=0.1,
         lr=1e-3,
         weight_decay=1e-5,
+        lr_scheduler_stepsize=50,
+        lr_scheduler_gamma=0.1,
     )
     sa_pred = model(sample_XPd)
     print(f"Input shape: {sample_XPd.shape},\nOutput shape: {sa_pred.shape}")
