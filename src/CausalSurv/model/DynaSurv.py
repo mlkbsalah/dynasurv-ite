@@ -34,8 +34,9 @@ class DynaSurv(L.LightningModule):
         self.x_input_dim = x_input_dim
         self.p_input_dim = p_input_dim
         self.output_length = output_length
-        self.interval_bounds = interval_bounds
+        self.register_buffer("interval_bounds", interval_bounds)
 
+        
         self.lstm = embed_LSTM(x_input_dim=self.x_input_dim,
                                p_input_dim=self.p_input_dim,
                                output_length=self.output_length,
