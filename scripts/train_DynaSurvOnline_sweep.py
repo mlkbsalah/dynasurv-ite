@@ -1,32 +1,33 @@
 import lightning as L
+from pytorch_lightning.profilers import AdvancedProfiler
+from lightning.pytorch.callbacks import LearningRateMonitor, LearningRateFinder
 from lightning.pytorch.loggers import WandbLogger
 
-from CausalSurv.data.data_utils import ESMEDataModule
-from CausalSurv.model.DynaSurv import DynaSurv
+from CausalSurv.data.online_data_utils import ESMEOnlineDataModule
+from CausalSurv.model.DynaSurvOnline import DynaSurvOnline
 
 import wandb
 
 def main():
     wandb.init()
     config = wandb.config
-    data_module = ESMEDataModule(
+    data_module = ESMEOnlineDataModule(
         data_dir="../data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
         n_lines = 2,
-        n_intervals=config.n_intervals,
-        train_batch_size=config.train_batch_size,
+        n_intervals=config.get('n_intervals'),
+        train_batch_size=config.get('train_batch_size'),
         val_split=0.2,
         test_split=0.1,
     )
 
-    input_dims = data_module.get_data_dimensions()
-    print(f"Input dimensions: {input_dims}")
-    model = DynaSurv(
-            x_input_dim=input_dims['x_input_dim'],
-            x_static_dim=input_dims['x_static_dim'],
-            p_input_dim=input_dims['p_input_dim'],
-            p_static_dim=input_dims['p_static_dim'],
-            output_length=input_dims['output_dim'],
-            interval_bounds=input_dims['time_bins'],
+    data_dims = data_module.get_data_dimensions()
+    model = DynaSurvOnline(
+            x_input_dim=data_dims['x_input_dim'],
+            x_static_dim=data_dims['x_static_dim'],
+            p_input_dim=data_dims['p_input_dim'],
+            p_static_dim=data_dims['p_static_dim'],
+            output_length=data_dims['output_dim'],
+            interval_bounds=data_dims['time_bins'],
             lstm_hidden_length = config.lstm_hidden_length,
             x_embed_dim = config.x_embed_dim,
             p_embed_dim = config.p_embed_dim,
@@ -46,10 +47,9 @@ def main():
             lr_scheduler_gamma = config.lr_scheduler_gamma,
     )
     
-
     logger = WandbLogger(
-        project="sweep_DynaSurv_ESME_2lines",
-        tags=["DynaSurv", "ESME", "HR+HER2-"],
+        project="SMOKE_TEST_DynaSurvOnline_ESME_2lines",
+        tags=["DynaSurv", "ESME", "HR+HER2-", "Online"],
         save_dir="../training_logs",
         settings=wandb.Settings(
             _disable_stats=True, # type: ignore
@@ -57,20 +57,25 @@ def main():
             )
         )
     
-
+    callbacks = [
+                 LearningRateMonitor(logging_interval="step"),
+                #  LearningRateFinder(),
+    ]
+    
     trainer = L.Trainer(
         fast_dev_run=False,
-        max_epochs=config.max_epochs,
+        max_epochs=500,
         check_val_every_n_epoch=5,
         log_every_n_steps=5,
-        accelerator="mps",
-        enable_progress_bar=True,
-        logger=logger,
+        accelerator="gpu",
         devices=1,
+        enable_progress_bar=True,
+        logger=logger, #type: ignore
+        callbacks=callbacks, #type: ignore
     )
     
     trainer.fit(model, datamodule=data_module)
-    wandb.finish()
+    # wandb.finish()
 
 
 if __name__ == "__main__":
@@ -109,4 +114,4 @@ if __name__ == "__main__":
         }
 
     sweep_id = wandb.sweep(sweep_config, project="sweep_DynaSurv_ESME_2lines")
-    wandb.agent(sweep_id, function=main, count=100)
+    wandb.agent(sweep_id, function=main, count=200)
