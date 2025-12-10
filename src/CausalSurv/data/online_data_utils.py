@@ -111,7 +111,8 @@ class ESMEOnlineDataModule(L.LightningDataModule):
 
     def prepare_data(self):
         esme_data = pd.read_parquet(self.data_dir)
-        static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
+        static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
+    
 
         merged = esme_data.merge(
             static_data,
@@ -178,7 +179,7 @@ class ESMEOnlineDataModule(L.LightningDataModule):
 
     def get_data_dimensions(self):
         esme_data = pd.read_parquet(self.data_dir)
-        static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
+        static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
         static_data = static_data.loc[static_data['usubjid'].isin(esme_data['usubjid'].unique())].reset_index(drop=True)
         
         x_dim = len([col for col in esme_data.columns if col.startswith('X_') and not col.startswith('X_buffer_time')])
