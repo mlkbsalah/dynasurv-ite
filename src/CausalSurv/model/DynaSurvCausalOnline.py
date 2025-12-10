@@ -1,16 +1,16 @@
-from typing import List, Tuple
+from typing import Tuple
 
-import lightning as L
 import torch
-import torch.nn as nn
+import lightning as L
 
 from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
 from CausalSurv.model.mlp import MLP
-from CausalSurv.metrics.loss import SURVLoss, PROPLoss
-from CausalSurv.tools import load_config
+from CausalSurv.metrics.loss import NLLogisticHazard
+import torch.nn as nn
 
+from sksurv.metrics import concordance_index_censored
 
-class CausalDynaSurv(L.LightningModule):
+class DynaSurvCausalOnline(L.LightningModule):
     """Multi-treatment causal survival model with separate heads.
 
     Args:
@@ -21,62 +21,104 @@ class CausalDynaSurv(L.LightningModule):
         config: Dict or TOML path for model configuration.
     """
 
-    def __init__( self, x_input_dim: int, p_input_dim: int, output_sa_length: int, n_treatments: int, n_lines: int, config: dict | str = "../../configs/dynasurv.toml") -> None:
+    def __init__(self,
+                 x_input_dim: int,
+                 x_static_dim: int,
+                 p_input_dim: int,
+                 p_static_dim: int,
+                 n_treatments: int,
+                 output_length: int,
+                 interval_bounds: torch.Tensor,
+                 lstm_hidden_length: int,
+                 x_embed_dim: int,
+                 p_embed_dim: int,
+                 init_h_hidden: list[int],
+                 init_p_hidden: list[int],
+                 mlpx_hidden_units: list[int],
+                 mlpp_hidden_units: list[int],
+                 mlpsa_hidden_units: list[int],
+                 init_h_dropout: float,
+                 init_p_dropout: float,
+                 mlpx_dropout: float,
+                 mlpp_dropout: float,
+                 mlpsa_dropout: float,
+                 lr: float,
+                 lr_scheduler_stepsize: int,
+                 lr_scheduler_gamma: float,
+                 weight_decay: float,
+                 ):
         super().__init__()
         self.save_hyperparameters()
 
-        self.config = load_config(config)
-        self.train_config = self.config.get("Optimizer", {})
-        self.lstm_config = self.config.get("LSTM_cell", {})
-
         self.x_input_dim = x_input_dim
+        self.x_static_dim = x_static_dim
         self.p_input_dim = p_input_dim
-        self.output_sa_length = output_sa_length
+        self.p_static_dim = p_static_dim
         self.n_treatments = n_treatments
-        self.n_lines = n_lines
+        self.output_length = output_length
+        self.register_buffer("interval_bounds", interval_bounds)
 
-        # Shared LSTM representation learner
-        self.lstm = embed_LSTM_ITE(
-            x_input_dim=self.x_input_dim,
-            p_input_dim=self.p_input_dim,
-            output_sa_length=self.output_sa_length,  # not used for heads, but embed_LSTM_ITE returns an sa; we will ignore that and use hidden state
-            cell_config=self.lstm_config,
-        )
-
-        self.hidden_length = self.lstm.hidden_length
+        
+        self.lstm = embed_LSTM_ITE(x_input_dim=self.x_input_dim,
+                               p_input_dim=self.p_input_dim,
+                               output_length=self.output_length,
+                               hidden_length=lstm_hidden_length,
+                               x_embed_dim=x_embed_dim,
+                               p_embed_dim=p_embed_dim,
+                               mlpx_hidden_units=mlpx_hidden_units,
+                               mlpp_hidden_units=mlpp_hidden_units,
+                               mlpsa_hidden_units=mlpsa_hidden_units,
+                               mlpx_dropout=mlpx_dropout,
+                               mlpp_dropout=mlpp_dropout,
+                               mlpsa_dropout=mlpsa_dropout,
+                               )
+        
+        self.init_h_mlp = MLP(input_dim = x_static_dim,
+                            n_units= init_h_hidden,
+                            output_dim= self.lstm.hidden_length,
+                            dropout=init_h_dropout,
+                            )
+        self.init_p_mlp = MLP(input_dim = p_static_dim,
+                                  n_units= init_p_hidden,
+                                  output_dim= self.lstm.p_embed_dim,
+                                  dropout=init_p_dropout,
+                                  )
 
         self.treatment_heads = nn.ModuleList([
-                MLP(
-                    input_dim=self.hidden_length,
-                    output_dim=self.output_sa_length,
-                    n_layers=self.config.get("MLP", {}).get("n_layers", 2),
-                    n_units=self.config.get("MLP", {}).get("n_units", [16, 8])
+                MLP(input_dim=lstm_hidden_length,
+                    n_units=mlpsa_hidden_units,
+                    output_dim=self.output_length,
+                    dropout=mlpsa_dropout,
                 )
-                for _ in range(n_treatments)
+                for _ in range(self.n_treatments)
         ])
 
         self.propensityhead = MLP(
-                    input_dim=self.hidden_length,
+                    input_dim=self.lstm.hidden_length,
                     output_dim=self.n_treatments,
-                    n_layers=self.config.get("MLP", {}).get("n_layers", 2),
-                    n_units=self.config.get("MLP", {}).get("n_units", [64, 32])
+                    n_units=mlpp_hidden_units,
+                    dropout=mlpp_dropout,
                     )
-        self.output_activation = nn.Sigmoid()
 
+
+        self.loss_fn = NLLogisticHazard(reduction="none")
         # Optimizer parameters
-        self._optim_name = self.train_config.get("name", "adam").lower()
-        self._lr: float = float(self.train_config.get("lr", 3e-4))
-        self._weight_decay: float = float(self.train_config.get("weight_decay", 0.0))
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.lr_scheduler_stepsize = lr_scheduler_stepsize
+        self.lr_scheduler_gamma = lr_scheduler_gamma
 
 
-    def _init_states(self, batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        h0 = torch.zeros(batch_size, self.hidden_length, device=device)
-        c0 = torch.zeros(batch_size, self.hidden_length, device=device)
-        p0 = torch.zeros(batch_size, self.lstm.p_embed_dim, device=device)
+    def _init_states(self, X_static, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x_static_general, x_static_treatment = X_static
+        batch_size = x_static_general.shape[0]
+        h0 = self.init_h_mlp(x_static_general)
+        c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
+        p0 = self.init_p_mlp(x_static_treatment)
         return h0, c0, p0
 
 
-    def forward(self, XPd: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run the shared embed_LSTM and produce treatment head outputs.
 
         Args:
@@ -85,110 +127,68 @@ class CausalDynaSurv(L.LightningModule):
         Returns:
             cond_sa: (batch, n_lines, n_treatments, output_sa_length)
         """
-        assert XPd.ndim == 3, f"Expected (batch, n_lines, features), got {tuple(XPd.shape)}"
+        h, c, p = self._init_states(X_static, XPd.device)
+        hazards_logit = []
 
-        batch_size, n_lines, _ = XPd.shape
-        h, c, p = self._init_states(batch_size, XPd.device)
+        for t in range(XPd.shape[1]):
+            all_responses_t, (h, c, p) = self._predict_response_one_line(XPd[:, t, :], (h, c, p))
+            hazards_logit.append(all_responses_t) # list of (batch, n_treatments, n_intervals)
+        hazards_logit = torch.stack(hazards_logit, dim=1) # (batch, n_lines, n_treatments, n_intervals)
 
-        surv_outputs = [] 
-        propensity_outputs = []
-        for t in range(n_lines):
-            _, h, c, p = self.lstm(XPd[:, t, :], (h, c, p))
-            head_outputs = []  # list of tensors of size (batch, output_sa_length) with length n_treatments
-            for treatment_head_i in self.treatment_heads: # type: ignore
-                head_out = self.output_activation(treatment_head_i(h))
-                head_outputs.append(head_out)
-            time_stack = torch.stack(head_outputs, dim=1)  # (batch, n_treatments, output_sa_length)
-            surv_outputs.append(time_stack)
-            propensity_outputs.append(self.propensityhead(h))  # (batch, n_treatments)
+        propensity = torch.tensor(0)
+        return hazards_logit, propensity
 
-        cond_sa = torch.stack(surv_outputs, dim=1)  # (batch, n_lines, n_treatments, output_sa_length)
-        propensity = torch.stack(propensity_outputs, dim=1)  # (batch, n_lines, n_treatments)
-        return cond_sa, propensity
+    def _predict_response_one_line(self, XPd_t, tuple_in) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        _, h, c, p = self.lstm(XPd_t, tuple_in)
+        treatment_responses = []
+        for treatment_head in self.treatment_heads:
+            response_treatment = treatment_head(h) # (batch, n_intervals)
+            treatment_responses.append(response_treatment) # list of (batch, n_intervals)
+        all_response_t = torch.stack(treatment_responses, dim=1) # (batch, n_treatments, n_intervals)
 
-    def predict_factual_survival(self, XPd: torch.Tensor, treatment_index: torch.Tensor, mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Predict factual survival for given treatment indices.
+        return all_response_t, (h, c, p)
+
+
+    def forward_factual(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor], treatment_idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """forward pass to retreive factual hazards
 
         Args:
-            XPd: (batch, n_lines, features)
-            treatment_index: (batch, n_lines) integer treatment head indices actually received
+            XPd (torch.Tensor): (batch, n_lines, features)
+            X_static (Tuple[torch.Tensor, torch.Tensor]): ( (batch, x_static_dim), (batch, p_static_dim) )
+            treatment_idx (torch.Tensor): (batch, n_lines) integer treatment head indices actually received
 
         Returns:
-            torch.Tensor: (batch, n_lines, output_sa_length) predicted survival probabilities
+            Tuple[torch.Tensor, torch.Tensor]: (factual_hazards_logit, propensity)
         """
-        batch_size, n_lines, _ = XPd.shape
-        h, c, p = self._init_states(batch_size, XPd.device)
-        cond_sa = torch.zeros((batch_size, n_lines, self.output_sa_length), device=XPd.device)
-        propensity = torch.zeros((batch_size, n_lines, self.n_treatments), device=XPd.device)
-
-        for line in range(n_lines):
-            mask_line = mask[:, line]
-            if torch.sum(mask_line) == 0: # avoid burden of computing on only padded lines
-                continue
-            _, h, c, p = self.lstm(XPd[:, line, :], (h, c, p))
-
-            line_treatment_index = treatment_index[:, line]
-            propensity_line = self.propensityhead(h)  # (batch, n_treatments)
-
-            cond_sa_line = torch.stack([self.treatment_heads[patient_factual_treatment](h[i]) # type: ignore
-                                   for i, patient_factual_treatment in enumerate(line_treatment_index)
-                                   ], dim=0)  # (batch, output_sa_length)
-            cond_sa[:, line, :] = self.output_activation(cond_sa_line)
-
-            propensity[:, line, :] = propensity_line
-        return cond_sa, propensity
-
-
-    def _compute_step_loss(self, batch) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if len(batch) < 3:
-            raise ValueError("Batch must contain at least (XPd, sa_true, treatment_index).")
-
-        XPd, sa_true, treatment_index, _, _, mask = batch
-        device = XPd.device
-
-        batch_size, n_lines, _ = XPd.shape
-        h, c, p = self._init_states(batch_size, XPd.device)
-        total_survival_loss = torch.tensor(0.0, device=device)
-        total_propensity_loss = torch.tensor(0.0, device=device)
-        total_valid_lines = torch.tensor(0.0, device=device)
-        for line in range(n_lines):
-            mask_line = mask[:, line]
-            if torch.sum(mask_line) == 0: # avoid burden of computing on only padded lines
-                continue
-            _, h, c, p = self.lstm(XPd[:, line, :], (h, c, p))
-
-            line_treatment_index = treatment_index[:, line]
-
-            propensity = self.propensityhead(h)  # (batch, n_treatments)
-
-            cond_sa = torch.stack([ self.treatment_heads[patient_factual_treatment](h[i]) 
-                for i, patient_factual_treatment in enumerate(line_treatment_index)
-            ], dim=0)  # (batch, output_sa_length)
-            cond_sa = self.output_activation(cond_sa)
-
-            # Compute losses only for valid (non-padded) lines
-            survival_loss = SURVLoss(sa_true[:, line, :], cond_sa, reduction='none')  # (batch,)
-            propensity_loss = PROPLoss(propensity, line_treatment_index, reduction='none')  # (batch,)
-            
-            # Apply mask and average
-            masked_survival_loss = (survival_loss * mask_line).sum()
-            masked_propensity_loss = (propensity_loss * mask_line).sum()
-            contributing_lines = torch.sum(mask_line)
-
-            total_survival_loss += masked_survival_loss
-            total_propensity_loss += masked_propensity_loss
-            total_valid_lines += contributing_lines
         
-        total_survival_loss = total_survival_loss / (total_valid_lines + 1e-8)
-        total_propensity_loss = total_propensity_loss / (total_valid_lines + 1e-8)
+        hazards_logit, propensity = self.forward(XPd, X_static)  # (batch, n_lines, n_treatments, n_intervals) / (batch, n_lines, n_treatments)
+        gather_idx = treatment_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, hazards_logit.shape[-1])  # (batch, n_lines, 1, n_intervals)
+        factual_hazards_logit = torch.gather(hazards_logit, dim=2, index=gather_idx).squeeze(2)  # (batch, n_lines, n_intervals)
+        return factual_hazards_logit, propensity
 
+    def _compute_step_loss(self, XPd, X_static, treatment_idx, interval_idx, event, mask) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        haz_pred_logit, propensity = self.forward_factual(XPd, X_static, treatment_idx)  # (batch, n_lines, n_intervals) / (batch, n_lines, n_treatments)
+        loss = torch.tensor(0.0, device=XPd.device)
+        surv_loss = torch.tensor(0.0, device=XPd.device)
+        prop_loss = torch.tensor(0.0, device=XPd.device)
+        total_contributing_losses = torch.tensor(0.0, device=XPd.device)
 
-        loss = total_survival_loss
+        n_lines = XPd.shape[1]
+        for time_step in range(n_lines):
+            mask_line = mask[:, time_step]
+            interval_idx_line = interval_idx[:, time_step]
+            event_line = event[:, time_step]
+            haz_pred_line = haz_pred_logit[:, time_step, :]
 
+            surv_loss_line = self.loss_fn(haz_pred_line, interval_idx_line, event_line) # (batch, )
+            surv_loss_line = surv_loss_line * mask_line
+            surv_loss += torch.sum(surv_loss_line)
+            total_contributing_losses += mask_line.sum()
 
-        return loss, total_survival_loss, total_propensity_loss
+        surv_loss = surv_loss / total_contributing_losses
+        loss = surv_loss
 
-
+        return loss, surv_loss, prop_loss
 
     def training_step(self, batch, batch_idx):
         """Compute factual survival loss.
@@ -200,66 +200,94 @@ class CausalDynaSurv(L.LightningModule):
             time: (batch,) continuous time-to-event (optional, unused here)
             event: (batch,) event indicator (optional, unused here)
         """
-  
-        loss, total_survival_loss, total_propensity_loss = self._compute_step_loss(batch)
+        XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch  
+        loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
 
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train/survival_loss", total_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train/propensity_loss", total_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
+        # self.log("train/survival_loss", total_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
+        # self.log("train/propensity_loss", total_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
         
         return loss
+
+    def predict_hazard(self, XPd, X_static, eval_time, treatment_idx):
+        hazards_on_grid = torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
+        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
+        interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
+
+        hazards = torch.gather(hazards_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
+        return hazards
 
 
     def validation_step(self, batch, batch_idx):
-        loss, avg_survival_loss, avg_propensity_loss = self._compute_step_loss(batch)
-        
+        XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
+        loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
         self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("val/survival_loss", avg_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("val/propensity_loss", avg_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
 
+        hazards = self.predict_hazard(XPd, X_static, time, treatment_idx)  # (batch, n_lines)
+        for time_step in range(hazards.size(1)):
+            mask_time_step = mask[:, time_step]  # (batch, )
+            bool_mask_time_step = mask_time_step.bool()
+
+            hazard_line = hazards[bool_mask_time_step, time_step]
+            time_line = time[bool_mask_time_step, time_step]
+            event_line = event[bool_mask_time_step, time_step].bool()
+
+            ci_time_step = concordance_index_censored(event_line.cpu(), time_line.cpu(), hazard_line.cpu())[0]
+            self.log(f"val/ci_time_step_{time_step+1}", ci_time_step, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
     def configure_optimizers(self): 
-        if self._optim_name == "adam":
-            opt = torch.optim.Adam(self.parameters(), lr=self._lr, weight_decay=self._weight_decay)
-        elif self._optim_name == "adamw":
-            opt = torch.optim.AdamW(self.parameters(), lr=self._lr, weight_decay=self._weight_decay)
-        elif self._optim_name == "sgd":
-            opt = torch.optim.SGD(self.parameters(), lr=self._lr, weight_decay=self._weight_decay, momentum=0.9)
-        else:
-            raise ValueError(f"Unsupported optimizer: {self._optim_name}")
-        return opt
-
-
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_scheduler_stepsize, gamma=self.lr_scheduler_gamma)
+        return [optimizer], [scheduler]
 
 
 if __name__ == "__main__":
-    # SMOKE TEST
-    batch_size = 3
-    n_lines = 5
-    x_input_dim = 4
-    p_input_dim = 3
-    n_intervals = 6
-    n_treatments = 2
+    batch_size = 99
+    times_steps = 4
+    x_input_dim = 10
+    p_input_dim = 5
+    output_sa_length = 77
 
+    x_static_dim = 8
+    p_static_dim = 6
 
     features = x_input_dim + p_input_dim + 1
-    XPd = torch.randn(batch_size, n_lines-3, features)
-    model = CausalDynaSurv(x_input_dim, p_input_dim, n_intervals, n_treatments=n_treatments, n_lines=n_lines, config="../../../configs/dynasurv.toml")
-    out, prop = model(XPd)
-    # print("cond_sa shape (batch, time, n_treatments, n_intervals):", out.shape)
-    # surv = model.predict_counterfactual_survival(XPd)
-    # print("survival shape:", surv.shape) # (batch, time, n_treatments, n_intervals)
-    # print("propensity shape:", prop.shape) # (batch, time, n_treatments)
+    sample_XPd = torch.randn(size=(batch_size, times_steps, features))
+    sample_X_static_general = torch.randn(size=(batch_size, x_static_dim))
+    sample_X_static_treatment = torch.randn(size=(batch_size, p_static_dim))
+    sample_X_static = (sample_X_static_general, sample_X_static_treatment)
 
-    # # Test training step
-    sa_true = torch.randint(0, 2, (batch_size, n_lines, 2 * n_intervals)).float()
-    treatment_index = torch.randint(0, n_treatments, (batch_size,n_lines))
-    mask = torch.ones(batch_size, n_lines)
-    batch = (XPd, sa_true, treatment_index, None, None, mask)
-    # loss = model.training_step(batch, 0)
-    # print("Training step loss:", loss.item())
+    treatment_idx = torch.randint(0, p_input_dim, (batch_size, times_steps))
 
-    # Test validation step
-    val_loss = model.training_step(batch, 0)
-    print("Validation step loss:", val_loss)
+    model = DynaSurvCausalOnline(
+        x_input_dim=x_input_dim,
+        p_input_dim=p_input_dim,
+        n_treatments=p_input_dim,
+        x_static_dim=x_static_dim,
+        p_static_dim=p_static_dim,
+        output_length=output_sa_length,
+        interval_bounds=torch.linspace(0, 100, steps=output_sa_length + 1),
+        lstm_hidden_length=32,
+        x_embed_dim=16,
+        p_embed_dim=16,
+        init_h_hidden=[32, 16],
+        init_p_hidden=[32, 16],
+        mlpx_hidden_units=[32, 16],
+        mlpp_hidden_units=[32, 16],
+        mlpsa_hidden_units=[32, 16],
+        init_h_dropout=0.1,
+        init_p_dropout=0.1,
+        mlpx_dropout=0.1,
+        mlpp_dropout=0.1,
+        mlpsa_dropout=0.1,
+        lr=1e-3,
+        weight_decay=1e-5,
+        lr_scheduler_stepsize=50,
+        lr_scheduler_gamma=0.1,
+    )
+    hazard_pred = torch.sigmoid(model(sample_XPd, sample_X_static)[0])
+    factual_hazard_pred = torch.sigmoid(model.forward_factual(sample_XPd, sample_X_static, treatment_idx=treatment_idx)[0])
+    print(f"Input shape: {sample_XPd.shape},\nOutput shape: {hazard_pred.shape}")
+    print(f"Factual hazard shape: {factual_hazard_pred.shape}")
+    

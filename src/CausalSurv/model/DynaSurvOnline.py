@@ -129,9 +129,7 @@ class DynaSurvOnline(L.LightningModule):
             hazards_seq_logit = torch.stack(hazards_out_logit, dim=1)  # (batch_size, time_steps, output_sa_length)
             return hazards_seq_logit
 
-
-    def training_step(self, batch, batch_idx):
-        XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
+    def compute_loss(self, XPd, X_static, interval_idx, event, mask):
         haz_pred_logit = self.forward(XPd, X_static) # (batch, time, output_sa_length)
         loss = torch.tensor(0.0, device=haz_pred_logit.device)
         total_contributing_losses = torch.tensor(0.0, device=haz_pred_logit.device)
@@ -149,56 +147,52 @@ class DynaSurvOnline(L.LightningModule):
             total_contributing_losses += mask_line.sum()
 
         loss = loss / total_contributing_losses
+        return loss       
+
+    def training_step(self, batch, batch_idx):
+        XPd, X_static, interval_idx, _, _, event, mask = batch
+        loss = self.compute_loss(XPd, X_static, interval_idx, event, mask)
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
-    
+
     def validation_step(self, batch, batch_idx):
-        XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
-        haz_pred_logit = self.forward(XPd, X_static) # (batch, time, output_sa_length)
-        loss = torch.tensor(0.0, device=haz_pred_logit.device)
-        total_contributing_losses = torch.tensor(0.0, device=haz_pred_logit.device)
+        XPd, X_static, interval_idx, _, time, event, mask = batch
+        loss = self.compute_loss(XPd, X_static, interval_idx, event, mask)
+        self.log("val/loss_step", loss, prog_bar=True, on_step=True, on_epoch=False)
 
-        n_time_steps = haz_pred_logit.size(1)
-        for time_step in range(n_time_steps):
-            mask_time_step = mask[:, time_step] # (batch, )
+        
+        hazards = self.predict_hazard(XPd, X_static, time)  # (batch, time)
+
+        for time_step in range(hazards.size(1)):
+            mask_time_step = mask[:, time_step]  # (batch, )
             bool_mask_time_step = mask_time_step.bool()
-            interval_idx_time_step = interval_idx[:, time_step]
-            event_time_step = event[:, time_step]
 
-            haz_pred_time_step_logit = haz_pred_logit[:, time_step, :]
-            loss_time_step = self.loss_fn(haz_pred_time_step_logit, interval_idx_time_step, event_time_step) # (batch, )
-            loss_time_step = loss_time_step * mask_time_step
-            loss += torch.sum(loss_time_step)
-            total_contributing_losses += mask_time_step.sum()
+            hazard_line = hazards[bool_mask_time_step, time_step]
+            time_line = time[bool_mask_time_step, time_step]
+            event_line = event[bool_mask_time_step, time_step].bool()
 
-            y_hazard = self._predict_hazard_on_line(XPd[bool_mask_time_step, time_step, :], (X_static[0][bool_mask_time_step], X_static[1][bool_mask_time_step]), time[bool_mask_time_step, time_step])
-            results = concordance_index_censored(event_time_step[bool_mask_time_step].cpu().numpy().astype(bool), time[bool_mask_time_step, time_step].cpu().numpy(), y_hazard.detach().cpu().numpy().flatten())
+            ci_time_step = concordance_index_censored(event_line.cpu(), time_line.cpu(), hazard_line.cpu())[0]
+            self.log(f"val/ci_time_step_{time_step+1}", ci_time_step, prog_bar=True, on_step=False, on_epoch=True)
 
-            self.log(f'val_cindex_time_step_{time_step}', results[0], prog_bar=True)
-        
-        loss = loss / total_contributing_losses
-        self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        
         return loss
     
-    def _predict_hazard_on_line(self, XPd_line: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor], eval_time: torch.Tensor) -> torch.Tensor:
-        """Predict hazard for a single line at given times.
+    def predict_hazard(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor], eval_time: torch.Tensor):
+        """_summary_
 
         Args:
-            XPd_line: Tensor of shape (batch, features) for a single line
-            X_static: Tuple of Tensors for static features
-            eval_time: Tensor of shape (batch,) with event/censoring times
+            XPd (torch.Tensor): (batch, time, features)
+            X_static (Tuple[torch.Tensor, torch.Tensor]): _static features
+            eval_time (torch.Tensor): (batch, time)
+
         Returns:
-            y_hazard: Tensor of shape (batch, 1) with predicted hazard values
+            torch.Tensor: (batch, time) predicted hazards at eval_time
         """
-        eval_time = eval_time.view(-1, 1)
-        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore
+        hazards_on_grid = torch.sigmoid(self.forward(XPd, X_static)) # (batch, time, output_sa_length)
+        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, time)
         interval_idx = interval_idx.clamp(min=0, max=self.output_length - 1)
 
-        hazards_on_grid = torch.sigmoid(self.forward(XPd_line.unsqueeze(1), X_static).squeeze(1)) # (batch, output_sa_length)
-        hazards = hazards_on_grid.gather(1, interval_idx)
-
-        return hazards       
+        hazards = torch.gather(hazards_on_grid, 2, interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, time)
+        return hazards
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
