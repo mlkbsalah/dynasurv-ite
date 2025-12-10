@@ -168,7 +168,7 @@ class ESMEOnlineDataModule(L.LightningDataModule):
 
 
     def train_dataloader(self):
-        return TorchData.DataLoader(self.train_dataset, batch_size=self.train_batch_size, shuffle=True, num_workers=13, persistent_workers=True)
+        return TorchData.DataLoader(self.train_dataset, batch_size=self.train_batch_size, shuffle=True, num_workers=4, persistent_workers=True)
 
     def val_dataloader(self):
         return TorchData.DataLoader(self.val_dataset, batch_size=len(self.val_dataset), shuffle=False, num_workers=1, persistent_workers=True)
