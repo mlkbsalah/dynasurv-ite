@@ -71,7 +71,7 @@ def main():
         max_epochs=10,
         check_val_every_n_epoch=5,
         log_every_n_steps=5,
-        accelerator="cpu",
+        accelerator="gpu",
         devices=1,
         enable_progress_bar=True,
         logger=logger, #type: ignore
