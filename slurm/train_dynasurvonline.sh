@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=dynasurvonline_training
+#SBATCH --job-name=DynaSurvOnlineTrain
 #SBATCH --output=%x.o%j
 #SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1 
@@ -12,7 +12,6 @@ source activate pytorch_env
 
 PROJECT_DIR="/workdir/bensalama/DynaSurv"
 cd "$PROJECT_DIR/scripts"
-echo $PWD
 
 export PYTHONPATH="$PROJECT_DIR/src"
 

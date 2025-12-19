@@ -12,8 +12,7 @@ source activate pytorch_env
 
 PROJECT_DIR="/workdir/bensalama/DynaSurv"
 cd "$PROJECT_DIR/scripts"
-echo $PWD
 
 export PYTHONPATH="$PROJECT_DIR/src"
 
-python3 train_DynaSurvCausalOnline_sweep.py
+python3 train_DynaSurvOnline_sweep.py
