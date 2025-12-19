@@ -61,7 +61,7 @@ def concordance_index(sa_pred: torch.Tensor, time: torch.Tensor, event: torch.Te
                 surv_prob = torch.prod(sa_pred[i, l, :bin_idx+1])
                 survival_at_event_times[i, l] = surv_prob
     
-    ipcw_weights = torch.zeros((batch_size, n_lines), device=device)
+    # ipcw_weights = torch.zeros((batch_size, n_lines), device=device)
     
     for l in range(n_lines):
         masked_indices = mask[:, l] == 1
@@ -71,20 +71,20 @@ def concordance_index(sa_pred: torch.Tensor, time: torch.Tensor, event: torch.Te
             
             unique_times, G_km = kaplan_meier_estimate(line_times, line_censored)
             
-            for i in range(batch_size):
-                if mask[i, l]:
-                    t_i = time[i, l].item()
-                    if t_i <= unique_times[0].item():
-                        G_t = G_km[0].item()
-                    elif t_i >= unique_times[-1].item():
-                        G_t = G_km[-1].item()
-                    else:
-                        idx = torch.searchsorted(unique_times, time[i, l])
-                        t0, t1 = unique_times[idx-1].item(), unique_times[idx].item()
-                        G0, G1 = G_km[idx-1].item(), G_km[idx].item()
-                        G_t = G0 + (G1 - G0) * (t_i - t0) / (t1 - t0)
+            # for i in range(batch_size):
+            #     if mask[i, l]:
+            #         t_i = time[i, l].item()
+            #         if t_i <= unique_times[0].item():
+            #             G_t = G_km[0].item()
+            #         elif t_i >= unique_times[-1].item():
+            #             G_t = G_km[-1].item()
+            #         else:
+            #             idx = torch.searchsorted(unique_times, time[i, l])
+            #             t0, t1 = unique_times[idx-1].item(), unique_times[idx].item()
+            #             G0, G1 = G_km[idx-1].item(), G_km[idx].item()
+            #             G_t = G0 + (G1 - G0) * (t_i - t0) / (t1 - t0)
                     
-                    ipcw_weights[i, l] = 1.0 / (max(G_t, 1e-6) ** 2)
+            #         ipcw_weights[i, l] = 1.0 / (max(G_t, 1e-6) ** 2)
     
     for l in range(n_lines):
         masked_indices = mask[:, l] == 1
@@ -92,7 +92,7 @@ def concordance_index(sa_pred: torch.Tensor, time: torch.Tensor, event: torch.Te
             masked_time = time[masked_indices, l]
             masked_event = event[masked_indices, l].bool()
             masked_survival = survival_at_event_times[masked_indices, l]
-            masked_ipcw = ipcw_weights[masked_indices, l]
+            # masked_ipcw = ipcw_weights[masked_indices, l]
             
             c_index = ConcordanceIndex()
             c_index_value = c_index(
