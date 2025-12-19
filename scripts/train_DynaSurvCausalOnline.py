@@ -33,26 +33,29 @@ def main(config):
                            mlpx_hidden_units = config.get('mlpx_hidden_units'),
                            mlpp_hidden_units = config.get('mlpp_hidden_units'),
                            mlpsa_hidden_units = config.get('mlpsa_hidden_units'),
+                           mlpprop_hidden_units = config.get('mlpprop_hidden_units'),
                            init_h_dropout = config.get('init_h_dropout'),
                            init_p_dropout = config.get('init_p_dropout'),
+                           mlpprop_dropout= config.get('mlpprop_dropout'),
                            mlpx_dropout = config.get('mlpx_dropout'),
                            mlpp_dropout = config.get('mlpp_dropout'),
                            mlpsa_dropout = config.get('mlpsa_dropout'),
+                           lambda_prop_loss = config.get('lambda_prop_loss'),
                            lr = config.get('lr'),
                            weight_decay = config.get('weight_decay'),
                            lr_scheduler_stepsize = config.get('lr_scheduler_stepsize'),
                            lr_scheduler_gamma = config.get('lr_scheduler_gamma'),
                            )
     
-    # logger = WandbLogger(
-    #     project="SMOKE_TEST_DynaSurvOnline_ESME_2lines",
-    #     tags=["DynaSurv", "ESME", "HR+HER2-", "Online"],
-    #     save_dir="../training_logs",
-    #     settings=wandb.Settings(
-    #         _disable_stats=True, # type: ignore
-    #         _disable_meta=True, # type: ignore
-    #         )
-    #     )
+    logger = WandbLogger(
+        project="4lines_sweped",
+        tags=["DynaSurv", "ESME", "HR+HER2-", "Online", "4lines"],
+        save_dir="../training_logs",
+        settings=wandb.Settings(
+            _disable_stats=True, # type: ignore
+            _disable_meta=True, # type: ignore
+            )
+        )
     
     callbacks = [
                  LearningRateMonitor(logging_interval="step"),
@@ -61,14 +64,14 @@ def main(config):
     
     trainer = L.Trainer(
         fast_dev_run=False,
-        max_epochs=100,
-        check_val_every_n_epoch=5,
+        max_epochs=10,
+        check_val_every_n_epoch=2,
         log_every_n_steps=5,
-        accelerator="cpu",
+        accelerator="mps",
         enable_progress_bar=True,
-        # logger=logger, #type: ignore
+        logger=logger, #type: ignore
         callbacks=callbacks, #type: ignore
-        profiler = "simple"
+        # profiler = "pytorch",
     )
     
     trainer.fit(model, datamodule=data_module)
@@ -76,30 +79,34 @@ def main(config):
 
 
 if __name__ == "__main__":
-    config = {'lr': 0.008,
-              'lstm_hidden_length': 16,
-              'max_epochs': 1000,
-              'mlpp_dropout': 0.41651302880731145,
-              'mlpp_hidden_units': [32],
-              'mlpsa_dropout': 0.28089900571923276,
-              'mlpsa_hidden_units': [32, 16],
-              'mlpx_dropout': 0.4511565951423924,
-              'mlpx_hidden_units': [32, 32],
-              'init_p_dropout': 0.3, 
-              'init_p_hidden': [32],
-              'init_h_dropout': 0.2,
-              'init_h_hidden': [32],
-              'n_intervals': 5,
-              'output_length': 5,
-              'p_embed_dim': 8,
-              'p_input_dim': 11,
-              'train_batch_size': 128,
-              'weight_decay': 0.0012964898763545834,
-              'x_embed_dim': 16,
-              'x_input_dim': 68,
-              'lr_scheduler_stepsize': 100,
-              'lr_scheduler_gamma': 0.5,
-              }
+    config = {
+    "init_h_dropout": 0.14104338869137617,
+    "init_h_hidden": [32],
+    "init_p_dropout": 0.3064003851259076,
+    "init_p_hidden": [32],
+    "lambda_prop_loss": 0.33,
+    "lr": 0.008375248313716659,
+    "lr_scheduler_gamma": 0.9,
+    "lr_scheduler_stepsize": 200,
+    "lstm_hidden_length": 64,
+    "max_epochs": 500,
+    "mlpp_dropout": 0.08590933259285016,
+    "mlpp_hidden_units": [32],
+    "mlpsa_dropout": 0.2499182741949038,
+    "mlpsa_hidden_units": [128, 64],
+    "mlpx_dropout": 0.2203446155455437,
+    "mlpx_hidden_units": [32, 32],
+    "mlpprop_hidden_units": [32, 16],
+    "mlpprop_dropout": 0.15,
+    "n_intervals": 5,
+    "n_treatments": 11,
+    "p_embed_dim": 32,
+    "p_static_dim": 17,
+    "train_batch_size": 128,
+    "weight_decay": 0.008887843976818027,
+    "x_embed_dim": 64,
+}
+    
     n_bootstraps = 1
     for i in range(n_bootstraps):
         print(f"Bootstrap iteration {i+1}/{n_bootstraps}")

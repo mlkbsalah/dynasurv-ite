@@ -3,12 +3,19 @@ from typing import Tuple
 import torch
 import lightning as L
 
+from CausalSurv.metrics import loss
 from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
 from CausalSurv.model.mlp import MLP
 from CausalSurv.metrics.loss import NLLogisticHazard
 import torch.nn as nn
 
 from sksurv.metrics import concordance_index_censored
+from sksurv.nonparametric import SurvivalFunctionEstimator, CensoringDistributionEstimator
+from sksurv.util import Surv
+
+from torchsurv.metrics.brier_score import BrierScore
+
+import numpy as np
 
 class DynaSurvCausalOnline(L.LightningModule):
     """Multi-treatment causal survival model with separate heads.
@@ -37,11 +44,14 @@ class DynaSurvCausalOnline(L.LightningModule):
                  mlpx_hidden_units: list[int],
                  mlpp_hidden_units: list[int],
                  mlpsa_hidden_units: list[int],
+                 mlpprop_hidden_units: list[int],
                  init_h_dropout: float,
                  init_p_dropout: float,
                  mlpx_dropout: float,
                  mlpp_dropout: float,
                  mlpsa_dropout: float,
+                 mlpprop_dropout: float,
+                 lambda_prop_loss: float,
                  lr: float,
                  lr_scheduler_stepsize: int,
                  lr_scheduler_gamma: float,
@@ -84,30 +94,36 @@ class DynaSurvCausalOnline(L.LightningModule):
                                   dropout=init_p_dropout,
                                   )
 
-        self.treatment_heads = nn.ModuleList([
-                MLP(input_dim=lstm_hidden_length,
+        self.treatment_head = MLP(
+                    input_dim=self.lstm.hidden_length,
+                    output_dim=output_length * n_treatments,
                     n_units=mlpsa_hidden_units,
-                    output_dim=self.output_length,
                     dropout=mlpsa_dropout,
-                )
-                for _ in range(self.n_treatments)
-        ])
+                    )
 
         self.propensityhead = MLP(
                     input_dim=self.lstm.hidden_length,
                     output_dim=self.n_treatments,
-                    n_units=mlpp_hidden_units,
-                    dropout=mlpp_dropout,
+                    n_units=mlpprop_hidden_units,
+                    dropout=mlpprop_dropout,
                     )
 
 
-        self.loss_fn = NLLogisticHazard(reduction="none")
+        self.surv_loss_fn = NLLogisticHazard(reduction="none")
+        self.propensity_loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+
         # Optimizer parameters
+        self.lambda_prop_loss = lambda_prop_loss
         self.lr = lr
         self.weight_decay = weight_decay
         self.lr_scheduler_stepsize = lr_scheduler_stepsize
         self.lr_scheduler_gamma = lr_scheduler_gamma
 
+        # IPCW buffer
+        self.train_times = None
+        self.train_events = None
+        self.kmf_list = []
+        self.km_ready = False
 
     def _init_states(self, X_static, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x_static_general, x_static_treatment = X_static
@@ -129,25 +145,23 @@ class DynaSurvCausalOnline(L.LightningModule):
         """
         h, c, p = self._init_states(X_static, XPd.device)
         hazards_logit = []
+        propensity = []
 
         for t in range(XPd.shape[1]):
-            all_responses_t, (h, c, p) = self._predict_response_one_line(XPd[:, t, :], (h, c, p))
+            all_responses_t, propensity_t, (h, c, p) = self._predict_response_one_line(XPd[:, t, :], (h, c, p))
             hazards_logit.append(all_responses_t) # list of (batch, n_treatments, n_intervals)
+            propensity.append(propensity_t)  # list of (batch, n_treatments)
         hazards_logit = torch.stack(hazards_logit, dim=1) # (batch, n_lines, n_treatments, n_intervals)
+        propensity = torch.stack(propensity, dim=1) # (batch, n_lines, n_treatments)
 
-        propensity = torch.tensor(0)
         return hazards_logit, propensity
 
-    def _predict_response_one_line(self, XPd_t, tuple_in) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def _predict_response_one_line(self, XPd_t, tuple_in) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         _, h, c, p = self.lstm(XPd_t, tuple_in)
-        treatment_responses = []
-        for treatment_head in self.treatment_heads:
-            response_treatment = treatment_head(h) # (batch, n_intervals)
-            treatment_responses.append(response_treatment) # list of (batch, n_intervals)
-        all_response_t = torch.stack(treatment_responses, dim=1) # (batch, n_treatments, n_intervals)
+        propensity_t = torch.softmax(self.propensityhead(h), dim=-1)  # (batch, n_treatments)
+        all_response_t = self.treatment_head(h).view(-1, self.n_treatments, self.output_length)  # (batch, n_treatments, n_intervals)
 
-        return all_response_t, (h, c, p)
-
+        return all_response_t, propensity_t, (h, c, p)
 
     def forward_factual(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor], treatment_idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """forward pass to retreive factual hazards
@@ -168,47 +182,67 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def _compute_step_loss(self, XPd, X_static, treatment_idx, interval_idx, event, mask) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         haz_pred_logit, propensity = self.forward_factual(XPd, X_static, treatment_idx)  # (batch, n_lines, n_intervals) / (batch, n_lines, n_treatments)
-        loss = torch.tensor(0.0, device=XPd.device)
-        surv_loss = torch.tensor(0.0, device=XPd.device)
-        prop_loss = torch.tensor(0.0, device=XPd.device)
-        total_contributing_losses = torch.tensor(0.0, device=XPd.device)
+        
+        batch, n_lines, n_intervals = haz_pred_logit.shape
+        haz_pred_logit_flat = haz_pred_logit.reshape(-1, n_intervals)
+        interval_idx_flat = interval_idx.reshape(-1)
+        event_flat = event.reshape(-1)
 
-        n_lines = XPd.shape[1]
-        for time_step in range(n_lines):
-            mask_line = mask[:, time_step]
-            interval_idx_line = interval_idx[:, time_step]
-            event_line = event[:, time_step]
-            haz_pred_line = haz_pred_logit[:, time_step, :]
+        surv_loss_flat = self.surv_loss_fn(haz_pred_logit_flat, interval_idx_flat, event_flat)  # (batch * n_lines, )
+        surv_loss = surv_loss_flat.reshape(batch, n_lines) * mask
 
-            surv_loss_line = self.loss_fn(haz_pred_line, interval_idx_line, event_line) # (batch, )
-            surv_loss_line = surv_loss_line * mask_line
-            surv_loss += torch.sum(surv_loss_line)
-            total_contributing_losses += mask_line.sum()
+        prop_loss_flat = self.propensity_loss_fn(propensity.reshape(-1, self.n_treatments), treatment_idx.reshape(-1)) 
+        prop_loss = prop_loss_flat.reshape(batch, n_lines) * mask
 
-        surv_loss = surv_loss / total_contributing_losses
-        loss = surv_loss
+        prop_loss = prop_loss.sum() / mask.sum()
+        surv_loss = surv_loss.sum() / mask.sum()
 
+        loss = surv_loss - self.lambda_prop_loss * prop_loss
         return loss, surv_loss, prop_loss
 
+    def _accumulate_censoring_data(self, time, event, mask):
+        """Collect censoring information for IPCW estimation during epoch 0."""
+        if self.train_times is None:
+            n_lines = time.shape[1]
+            self.train_times = [[] for _ in range(n_lines)]
+            self.train_events = [[] for _ in range(n_lines)]
+
+        for line in range(time.shape[1]):
+            valid = mask[:, line].bool()
+            if not valid.any():
+                continue
+
+            t = time[valid, line].detach().cpu().numpy()
+            e = event[valid, line].detach().cpu().numpy()
+
+            self.train_events[line].extend(e.tolist()) # type: ignore
+            self.train_times[line].extend(t.tolist())
+
     def training_step(self, batch, batch_idx):
-        """Compute factual survival loss.
+        """perform a training step"""
 
-        Expected batch format (tuple):
-            XPd: (batch, n_lines, features)
-            sa_true: (batch, n_lines, 2*n_intervals) survival + event indicators
-            treatment_index: (batch, n_lines) integer treatment head indices actually received
-            time: (batch,) continuous time-to-event (optional, unused here)
-            event: (batch,) event indicator (optional, unused here)
-        """
         XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch  
-        loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
-
-        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        # self.log("train/survival_loss", total_survival_loss, prog_bar=True, on_step=True, on_epoch=True)
-        # self.log("train/propensity_loss", total_propensity_loss, prog_bar=True, on_step=True, on_epoch=True)
         
-        return loss
+        if self.current_epoch == 0 and not self.km_ready:
+            self._accumulate_censoring_data(time, event, mask)
 
+        loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
+            
+        self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("train/survival_loss", surv_loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("train/propensity_loss", prop_loss, prog_bar=True, on_step=True, on_epoch=True)
+
+        return loss
+    
+    def on_train_epoch_end(self):
+        if self.train_times is not None and self.train_events is not None and not self.km_ready:
+            if self.current_epoch == 0:
+                for line in range(len(self.train_times)):
+                    y_surv = Surv.from_arrays(np.array(self.train_events[line]), np.array(self.train_times[line]))
+                    kmf = CensoringDistributionEstimator().fit(y_surv)
+                    self.kmf_list.append(kmf)
+                self.km_ready = True
+            
     def predict_hazard(self, XPd, X_static, eval_time, treatment_idx):
         hazards_on_grid = torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
         interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
@@ -217,22 +251,51 @@ class DynaSurvCausalOnline(L.LightningModule):
         hazards = torch.gather(hazards_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
         return hazards
 
+    def predict_survival(self, XPd, X_static, eval_time, treatment_idx):
+        hazards_on_grid = torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
+        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
+        interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
+
+        survival_on_grid = torch.cumprod(1 - hazards_on_grid, dim=2)  # (batch, n_lines, n_intervals)
+        survival = torch.gather(survival_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
+        return survival
+
+
 
     def validation_step(self, batch, batch_idx):
         XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
         loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
-        self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val/survival_loss", surv_loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val/propensity_loss", prop_loss, prog_bar=True, on_step=False, on_epoch=True)
+
+        if self.trainer.sanity_checking:
+            return loss
+        
 
         hazards = self.predict_hazard(XPd, X_static, time, treatment_idx)  # (batch, n_lines)
+        survival_on_grid = torch.cumprod(1 - torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0]), dim=2)  # (batch, n_lines, n_intervals)
         for time_step in range(hazards.size(1)):
             mask_time_step = mask[:, time_step]  # (batch, )
             bool_mask_time_step = mask_time_step.bool()
 
             hazard_line = hazards[bool_mask_time_step, time_step]
+            survival_grid_line = survival_on_grid[bool_mask_time_step, time_step] # (n_valid, n_intervals)
             time_line = time[bool_mask_time_step, time_step]
             event_line = event[bool_mask_time_step, time_step].bool()
+            interval_idx_line = interval_idx[bool_mask_time_step, time_step]
+
 
             ci_time_step = concordance_index_censored(event_line.cpu(), time_line.cpu(), hazard_line.cpu())[0]
+            integrated_brier_score_step = torch.mean(BrierScore()(survival_grid_line.cpu(), 
+                                                                  event_line.cpu(), 
+                                                                  time_line.cpu(), 
+                                                                  self.interval_bounds[:-1].cpu(), # type: ignore
+                                                                  weight_new_time=self.kmf_list[time_step].predict_ipcw(Surv.from_arrays(event_line.cpu(), self.interval_bounds[interval_idx_line].cpu())) # type: ignore
+                                                                  )
+                                                    )
+            
+            self.log(f"val/ibs_time_step_{time_step+1}", integrated_brier_score_step, prog_bar=True, on_step=False, on_epoch=True)
             self.log(f"val/ci_time_step_{time_step+1}", ci_time_step, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
@@ -276,11 +339,14 @@ if __name__ == "__main__":
         mlpx_hidden_units=[32, 16],
         mlpp_hidden_units=[32, 16],
         mlpsa_hidden_units=[32, 16],
+        mlpprop_hidden_units=[32, 16],
         init_h_dropout=0.1,
         init_p_dropout=0.1,
         mlpx_dropout=0.1,
         mlpp_dropout=0.1,
         mlpsa_dropout=0.1,
+        mlpprop_dropout=0.1,
+        lambda_prop_loss=0.1,
         lr=1e-3,
         weight_decay=1e-5,
         lr_scheduler_stepsize=50,

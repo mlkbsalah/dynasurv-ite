@@ -37,11 +37,14 @@ def main():
             mlpx_hidden_units = config.mlpx_hidden_units,
             mlpp_hidden_units = config.mlpp_hidden_units,
             mlpsa_hidden_units = config.mlpsa_hidden_units,
+            mlpprop_hidden_units = config.mlpprop_hidden_units,
             init_h_dropout= config.init_h_dropout,
             init_p_dropout = config.init_p_dropout,
             mlpx_dropout = config.mlpx_dropout,
             mlpp_dropout = config.mlpp_dropout,
             mlpsa_dropout = config.mlpsa_dropout,
+            mlpprop_dropout= config.mlpprop_dropout,
+            lambda_prop_loss = config.lambda_prop_loss,
             lr = config.lr,
             weight_decay = config.weight_decay,
             lr_scheduler_stepsize = config.lr_scheduler_stepsize,
@@ -49,7 +52,7 @@ def main():
     )
     
     logger = WandbLogger(
-        project="SMOKE_TEST_DynaSurvOnline_ESME_4lines",
+        project="SMOKE_TEST_4lines_adversarial",
         tags=["DynaSurv", "ESME", "HR+HER2-", "Online"],
         save_dir="../training_logs",
         settings=wandb.Settings(
@@ -65,10 +68,10 @@ def main():
     
     trainer = L.Trainer(
         fast_dev_run=False,
-        max_epochs=500,
+        max_epochs=10,
         check_val_every_n_epoch=5,
         log_every_n_steps=5,
-        accelerator="mps",
+        accelerator="cpu",
         devices=1,
         enable_progress_bar=True,
         logger=logger, #type: ignore
@@ -97,6 +100,7 @@ if __name__ == "__main__":
             "mlpsa_hidden_units": {"values": [[32, 16],[64, 32],[128, 64]]},
             "init_h_hidden": {"values": [[32],[64],[128]]},
             "init_p_hidden": {"values": [[16],[32],[64]]},
+            "mlpprop_hidden_units": {"values": [[16, 8],[32, 16],[64, 32]]},
 
             # Dropouts
             "mlpx_dropout": {"min": 0.0,"max": 0.5},
@@ -104,8 +108,10 @@ if __name__ == "__main__":
             "mlpsa_dropout": {"min": 0.0,"max": 0.5},
             "init_h_dropout": {"min": 0.0,"max": 0.5},
             "init_p_dropout": {"min": 0.0,"max": 0.5},
+            "mlpprop_dropout": {"min": 0.0,"max": 0.5},
 
             # Optimization
+            "lambda_prop_loss": {"min": 0.0, "max": 1.0},
             "max_epochs": {"value": 500},
             "lr": {"min": 1e-5,"max": 1e-2,},
             "weight_decay": {"min": 1e-6,"max": 1e-2,},
@@ -115,4 +121,4 @@ if __name__ == "__main__":
         }
 
     sweep_id = wandb.sweep(sweep_config, project="sweep_DynaSurv_ESME_4lines")
-    wandb.agent(sweep_id, function=main, count=200)
+    wandb.agent(sweep_id, function=main, count=3)
