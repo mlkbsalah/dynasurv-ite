@@ -2,6 +2,7 @@
 #SBATCH --job-name=dynasurvonline_training
 #SBATCH --output=%x.o%j
 #SBATCH --time=24:00:00
+#SBATCH --mem=64G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --partition=gpua100
