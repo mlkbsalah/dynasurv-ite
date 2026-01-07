@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=dynasurvonline_training
+#SBATCH --job-name=sweep_DynaSurvCausalOnline:x
 #SBATCH --output=%x.o%j
 #SBATCH --time=24:00:00
 #SBATCH --mem=64G
