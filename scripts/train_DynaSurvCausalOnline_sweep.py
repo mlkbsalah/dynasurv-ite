@@ -68,7 +68,7 @@ def main():
     
     trainer = L.Trainer(
         fast_dev_run=False,
-        max_epochs=10,
+        max_epochs=config.max_epochs,
         check_val_every_n_epoch=5,
         log_every_n_steps=5,
         accelerator="gpu",
