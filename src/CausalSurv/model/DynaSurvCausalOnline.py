@@ -56,6 +56,7 @@ class DynaSurvCausalOnline(L.LightningModule):
                  lr_scheduler_stepsize: int,
                  lr_scheduler_gamma: float,
                  weight_decay: float,
+                 attention: bool
                  ):
         super().__init__()
         self.save_hyperparameters()
@@ -81,6 +82,7 @@ class DynaSurvCausalOnline(L.LightningModule):
                                mlpx_dropout=mlpx_dropout,
                                mlpp_dropout=mlpp_dropout,
                                mlpsa_dropout=mlpsa_dropout,
+                               attention=attention,
                                )
         
         self.init_h_mlp = MLP(input_dim = x_static_dim,
@@ -351,6 +353,7 @@ if __name__ == "__main__":
         weight_decay=1e-5,
         lr_scheduler_stepsize=50,
         lr_scheduler_gamma=0.1,
+        attention=True,
     )
     hazard_pred = torch.sigmoid(model(sample_XPd, sample_X_static)[0])
     factual_hazard_pred = torch.sigmoid(model.forward_factual(sample_XPd, sample_X_static, treatment_idx=treatment_idx)[0])
