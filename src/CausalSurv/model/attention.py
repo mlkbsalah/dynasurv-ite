@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 class FeatureAttention(nn.Module):
     """
@@ -12,7 +11,7 @@ class FeatureAttention(nn.Module):
         hidden_dim (int, optional): Size of hidden layer in attention MLP. 
                                     If None, defaults to input_dim // 2.
     """
-    def __init__(self, input_dim: int, hidden_dim: int = None):
+    def __init__(self, input_dim: int, hidden_dim: int | None):
         super().__init__()
         self.input_dim = input_dim
         if hidden_dim is None:

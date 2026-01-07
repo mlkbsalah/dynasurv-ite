@@ -1,12 +1,7 @@
-import logging
-logging.basicConfig(level=logging.INFO)
-
 import torch
 import torch.nn as nn
 from CausalSurv.model.mlp import MLP
-
-
-from CausalSurv.tools import load_config
+from CausalSurv.model.attention import FeatureAttention
 
 class embed_LSTM_ITE(nn.Module):
     """Adaptation of the C-LSTM (Care LSTM, Pham et al. 2017)
@@ -26,6 +21,7 @@ class embed_LSTM_ITE(nn.Module):
                  mlpx_dropout: float,
                  mlpp_dropout: float,
                  mlpsa_dropout: float,
+                 attention: bool = False,
                  ):
         
         """Class constructor
@@ -51,7 +47,12 @@ class embed_LSTM_ITE(nn.Module):
         self.mlpp_dropout = mlpp_dropout
         self.mlpx_dropout = mlpx_dropout
 
-        # Embedding MLPs for X and P
+        ## Embedding MLPs for X and P
+        # Attention layers
+        self.attention_X = FeatureAttention(input_dim=self.x_input_dim, hidden_dim=self.x_input_dim//2) if attention else None
+        self.attention_P = FeatureAttention(input_dim=self.p_input_dim, hidden_dim=self.p_input_dim//2) if attention else None
+
+        # MLPs
         self.MLPx = MLP(input_dim=self.x_input_dim,
                         output_dim=self.x_embed_dim,
                         n_units=self.mlpx_hidden_units,
@@ -62,7 +63,7 @@ class embed_LSTM_ITE(nn.Module):
                         n_units=self.mlpp_hidden_units,
                         dropout=self.mlpp_dropout,
                         )
-
+        
 
         # Forget gate
         self.linear_forget_Wxf = nn.Linear(self.x_embed_dim, self.hidden_length, bias=True)
@@ -190,8 +191,11 @@ class embed_LSTM_ITE(nn.Module):
         P = XPd[:, self.x_input_dim:-1]
         d = XPd[:, -1:]
 
-        x = self.MLPx(X)  
-        p = self.MLPp(P) 
+        weighted_X, wX = self.attention_X(X) if self.attention_X is not None else (X, None)
+        weighted_P, wP = self.attention_P(P) if self.attention_P is not None else (P, None)
+
+        x = self.MLPx(weighted_X) 
+        p = self.MLPp(weighted_P) 
 
         i = self._input_gate(x, h_prev)
         f = self._forget_gate(x, d, h_prev, p_prev)
@@ -221,6 +225,7 @@ if __name__ == "__main__":
         mlpx_dropout=0.1,
         mlpp_dropout=0.1,
         mlpsa_dropout=0.1,
+        attention=True,
     )
 
 

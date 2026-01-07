@@ -45,17 +45,18 @@ def main(config):
                            weight_decay = config.get('weight_decay'),
                            lr_scheduler_stepsize = config.get('lr_scheduler_stepsize'),
                            lr_scheduler_gamma = config.get('lr_scheduler_gamma'),
+                           attention = config.get('attention')
                            )
     
-    logger = WandbLogger(
-        project="4lines_sweped",
-        tags=["DynaSurv", "ESME", "HR+HER2-", "Online", "4lines"],
-        save_dir="../training_logs",
-        settings=wandb.Settings(
-            _disable_stats=True, # type: ignore
-            _disable_meta=True, # type: ignore
-            )
-        )
+    # logger = WandbLogger(
+    #     project="4lines_sweped",
+    #     tags=["DynaSurv", "ESME", "HR+HER2-", "Online", "4lines"],
+    #     save_dir="../training_logs",
+    #     settings=wandb.Settings(
+    #         _disable_stats=True, # type: ignore
+    #         _disable_meta=True, # type: ignore
+    #         )
+    #     )
     
     callbacks = [
                  LearningRateMonitor(logging_interval="step"),
@@ -69,7 +70,7 @@ def main(config):
         log_every_n_steps=5,
         accelerator="mps",
         enable_progress_bar=True,
-        logger=logger, #type: ignore
+        # logger=logger, #type: ignore
         callbacks=callbacks, #type: ignore
         # profiler = "pytorch",
     )
@@ -105,6 +106,7 @@ if __name__ == "__main__":
     "train_batch_size": 128,
     "weight_decay": 0.008887843976818027,
     "x_embed_dim": 64,
+    "attention": True,
 }
     
     n_bootstraps = 1

@@ -68,10 +68,10 @@ def main():
     
     trainer = L.Trainer(
         fast_dev_run=False,
-        max_epochs=10,
+        max_epochs=config.max_epochs,
         check_val_every_n_epoch=5,
         log_every_n_steps=5,
-        accelerator="cpu",
+        accelerator="gpu",
         devices=1,
         enable_progress_bar=True,
         logger=logger, #type: ignore
@@ -97,9 +97,9 @@ if __name__ == "__main__":
             "p_embed_dim": {"values": [8, 16, 32]},
             "mlpx_hidden_units": {"values": [[64, 32],[128, 64],[32, 32]]},
             "mlpp_hidden_units": {"values": [[16],[32],[64]]},
-            "mlpsa_hidden_units": {"values": [[32, 16],[64, 32],[128, 64]]},
-            "init_h_hidden": {"values": [[32],[64],[128]]},
-            "init_p_hidden": {"values": [[16],[32],[64]]},
+            "mlpsa_hidden_units": {"values": [[32, 16],[64, 32],[128, 64], [64, 64], [32, 32]]},
+            "init_h_hidden": {"values": [[32],[64],[128], [32, 32], [64, 64]]},
+            "init_p_hidden": {"values": [[16],[32],[64], [16, 16], [32, 32]]},
             "mlpprop_hidden_units": {"values": [[16, 8],[32, 16],[64, 32]]},
 
             # Dropouts
@@ -121,4 +121,4 @@ if __name__ == "__main__":
         }
 
     sweep_id = wandb.sweep(sweep_config, project="sweep_DynaSurv_ESME_4lines")
-    wandb.agent(sweep_id, function=main, count=3)
+    wandb.agent(sweep_id, function=main, count=50)
