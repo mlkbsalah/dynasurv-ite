@@ -163,7 +163,7 @@ def sample_config():
 
 if __name__ == "__main__":
     import json
-    N_TRIALS = 10
+    N_TRIALS = 50
 
     best_ci = -np.inf
     best_config = None
