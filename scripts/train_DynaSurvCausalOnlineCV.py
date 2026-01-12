@@ -26,7 +26,7 @@ def main(config):
     for k in range(NUMBER_OF_FOLDS):
         print(f"Starting fold {k+1} out of {NUMBER_OF_FOLDS}...")
         DataModuleCV = ESMEOnlineDataModuleCV(
-            data_dir = "../data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+            data_dir = "/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
             n_lines = 4,
             n_intervals=config['n_intervals'],
             batch_size=config['train_batch_size'],
