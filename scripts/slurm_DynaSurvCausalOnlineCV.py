@@ -27,8 +27,8 @@ def main(config, split_seed, trial_id, n_folds):
         print(f"[Trial {trial_id}] Starting fold {k+1}/{n_folds}")
 
         DataModuleCV = ESMEOnlineDataModuleCV(
-            # data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
-            data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+            data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+            # data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
             n_lines=4,
             n_intervals=config["n_intervals"],
             batch_size=config["train_batch_size"],
