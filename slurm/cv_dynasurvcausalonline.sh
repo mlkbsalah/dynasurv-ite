@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=DynaSurvCausalOnlineCV
 #SBATCH --output=logs/%x.o%j
-#SBATCH --time=24:00:00
+#SBATCH --time=5:00:00
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -18,6 +18,12 @@ cd "$PROJECT_DIR/scripts"
 export PYTHONPATH="$PROJECT_DIR/src"
 
 python3 slurm_DynaSurvCausalOnlineCV.py \
+<<<<<<< HEAD
         --trial_id ${SLURM_ARRAY_TASK_ID} \
         --split_seed $SPLIT_SEED \
         --n_folds 5
+=======
+	--trial_id ${SLURM_ARRAY_TASK_ID} \
+	--split_seed 1956 \
+	--n_folds 5
+>>>>>>> b035e6e (Clean operation)
