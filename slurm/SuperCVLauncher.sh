@@ -7,7 +7,7 @@ SPLIT_SEED=$(( $(date +%s) % 2147483647 ))
 echo "Using 32-bit CV split seed: $SPLIT_SEED"
 
 #Submit trials
-ARRAY_JOB_ID=$(sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED --array=0-$((N_TRIALS-1)) slurm_DynaSurvCausalOnlineCV.sh)
+ARRAY_JOB_ID=$(sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED --array=0-$((N_TRIALS-1)) cv_dynasurvcausalonline.sh)
 echo "Submitted job array ID: $ARRAY_JOB_ID"
 
 #Aggregate results after all trials complete
