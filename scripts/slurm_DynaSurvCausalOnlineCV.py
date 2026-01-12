@@ -84,7 +84,7 @@ def main(config, split_seed, trial_id, n_folds):
         ]
 
         logger = WandbLogger(
-            project="test_sweep_CV",
+            project="RandomSearch_DynaSurvCausalOnline_ESME_HR+HER2-_4lines",
             name=f"trial_{trial_id}_fold_{k}",
             group=f"seed_{split_seed}",
             reinit=True,
@@ -98,7 +98,7 @@ def main(config, split_seed, trial_id, n_folds):
             logger=logger,
             callbacks=callbacks,
             enable_checkpointing=False,
-            check_val_every_n_epoch=2,
+            check_val_every_n_epoch=10,
         )
 
         trainer.fit(model, datamodule=DataModuleCV)
@@ -141,7 +141,7 @@ def sample_config():
         "init_p_dropout": np.random.uniform(0.0, 0.5),
         "mlpprop_dropout": np.random.uniform(0.0, 0.5),
         "lambda_prop_loss": np.random.uniform(0.0, 1.0),
-        "max_epochs": 5,
+        "max_epochs": 300,
         "lr": 10 ** np.random.uniform(-5, -2),
         "weight_decay": 10 ** np.random.uniform(-6, -2),
         "lr_scheduler_stepsize": random.choice([50, 100, 200]),

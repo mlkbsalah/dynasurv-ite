@@ -1,6 +1,6 @@
 #!/bin/bash
 
-N_TRIALS=10
+N_TRIALS=100
 
 #Generate a random split seed
 SPLIT_SEED=$(( $(date +%s) % 2147483647 ))
