@@ -17,4 +17,7 @@ cd "$PROJECT_DIR/scripts"
 
 export PYTHONPATH="$PROJECT_DIR/src"
 
-python3 train_DynaSurvCausalOnlineCV.py
+python3 slurm_DynaSurvCausalOnlineCV.py \
+        --trial_id ${SLURM_ARRAY_TASK_ID} \
+        --split_seed $SPLIT_SEED \
+        --n_folds 5
