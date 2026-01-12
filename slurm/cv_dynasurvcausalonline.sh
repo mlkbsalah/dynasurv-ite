@@ -18,12 +18,6 @@ cd "$PROJECT_DIR/scripts"
 export PYTHONPATH="$PROJECT_DIR/src"
 
 python3 slurm_DynaSurvCausalOnlineCV.py \
-<<<<<<< HEAD
         --trial_id ${SLURM_ARRAY_TASK_ID} \
         --split_seed $SPLIT_SEED \
         --n_folds 5
-=======
-	--trial_id ${SLURM_ARRAY_TASK_ID} \
-	--split_seed 1956 \
-	--n_folds 5
->>>>>>> b035e6e (Clean operation)
