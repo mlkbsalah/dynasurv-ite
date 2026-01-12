@@ -27,7 +27,8 @@ def main(config, split_seed, trial_id, n_folds):
         print(f"[Trial {trial_id}] Starting fold {k+1}/{n_folds}")
 
         DataModuleCV = ESMEOnlineDataModuleCV(
-            data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+            # data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+            data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
             n_lines=4,
             n_intervals=config["n_intervals"],
             batch_size=config["train_batch_size"],
@@ -73,13 +74,13 @@ def main(config, split_seed, trial_id, n_folds):
         callbacks = [
             LearningRateMonitor(logging_interval="step"),
             EarlyStopping(monitor="average_ci", mode="max", patience=20),
-            ModelCheckpoint(
-                monitor="average_ci",
-                mode="max",
-                save_top_k=1,
-                dirpath=f"../models/HR+HER2-/4lines/CV_sweep/seed_{split_seed}/trial_{trial_id}",
-                filename=f"fold{k+1}" + "_{epoch:02d}_{average_ci:.4f}",
-            ),
+            # ModelCheckpoint(
+            #     monitor="average_ci",
+            #     mode="max",
+            #     save_top_k=1,
+            #     dirpath=f"../models/HR+HER2-/4lines/CV_sweep/seed_{split_seed}/trial_{trial_id}",
+            #     filename=f"fold{k+1}" + "_{epoch:02d}_{average_ci:.4f}",
+            # ),
         ]
 
         logger = WandbLogger(
@@ -96,6 +97,7 @@ def main(config, split_seed, trial_id, n_folds):
             devices=1,
             logger=logger,
             callbacks=callbacks,
+            enable_checkpointing=False,
             check_val_every_n_epoch=2,
         )
 
@@ -109,8 +111,9 @@ def main(config, split_seed, trial_id, n_folds):
     return {
         "mean_loss": float(np.mean(loss_folds)),
         "mean_ci": float(np.mean(average_ci_folds)),
-        "mean_ibs": float(np.mean(average_ibs_folds)),
         "std_ci": float(np.std(average_ci_folds)),
+        "mean_ibs": float(np.mean(average_ibs_folds)),
+        "std_ibs": float(np.std(average_ibs_folds)),
     }
 
 
@@ -159,7 +162,7 @@ if __name__ == "__main__":
     config = sample_config()
     results = main(config, args.split_seed, args.trial_id, args.n_folds)
 
-    out_dir = f"results/seed_{args.split_seed}"
+    out_dir = f"../models/HR+HER2-/4lines/seed_{args.split_seed}"
     os.makedirs(out_dir, exist_ok=True)
 
     with open(f"{out_dir}/trial_{args.trial_id}.json", "w") as f:
