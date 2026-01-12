@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=sweep_DynaSurvCausalOnline:x
-#SBATCH --output=%x.o%j
+#SBATCH --job-name=DynaSurvCausalOnlineCV
+#SBATCH --output=logs/%x.o%j
 #SBATCH --time=24:00:00
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --partition=gpua100
+#SBATCH --partition=gpu
 
 module load anaconda3/2024.06/gcc-13.2.0
 module load cuda/12.8.0/gcc-13.2.0
@@ -17,4 +17,4 @@ cd "$PROJECT_DIR/scripts"
 
 export PYTHONPATH="$PROJECT_DIR/src"
 
-python3 train_DynaSurvCausalOnline_sweep.py
+python3 train_DynaSurvCausalOnlineCV.py

@@ -92,7 +92,7 @@ def main(config):
         trainer = L.Trainer(
             max_epochs=config['max_epochs'],
             check_val_every_n_epoch=2,
-            accelerator="mps",
+            accelerator="gpu",
             devices=1,
             enable_progress_bar=True,
             logger=logger, 
