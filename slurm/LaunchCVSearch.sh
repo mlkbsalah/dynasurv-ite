@@ -46,9 +46,7 @@ if [[ -z "$N_FOLDS" || -z "$SPLIT_SEED" ]]; then
 fi
 
 if [[ -z "$PROJECT_NAME" ]]; then 
-	echo "Warning: unspecified project name, logging disabled"
+	echo "Warning: unspecified project name, logging disabled" >&2
 fi
-
-echo $PROJECT_NAME
 
 sbatch --parsable --export=ALL,N_FOLDS=$N_FOLDS,SPLIT_SEED=$SPLIT_SEED,PROJECT_NAME=$PROJECT_NAME --array=0-$((N_TRIALS-1)) DynaSurvCausalOnlineCVSearch.sh

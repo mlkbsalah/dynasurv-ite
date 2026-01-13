@@ -18,13 +18,6 @@ cd "$PROJECT_DIR/scripts"
 
 export PYTHONPATH="$PROJECT_DIR/src"
 
-
-echo ${SLURM_ARRAY_TASK_ID}
-echo $SPLIT_SEED
-echo $N_FOLDS
-echo $PROJECT_NAME
-
-
 # Script
 python3 DynaSurvCausalOnlineCVSearch.py \
         --trial_id ${SLURM_ARRAY_TASK_ID} \
