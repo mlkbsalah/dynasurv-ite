@@ -82,11 +82,11 @@ def main(config, split_seed, trial_id, n_folds, project_name):
             #     filename=f"fold{k+1}" + "_{epoch:02d}_{average_ci:.4f}",
             # ),
         ]
-	
-		if project_name == "":
-			logger = False
-		else:
-			logger = WandbLogger(
+        
+        if project_name == "":
+            logger = False
+        else:
+            logger = WandbLogger(
 				project=project_name,
            		name=f"trial_{trial_id}_fold_{k}",
             	group=f"seed_{split_seed}",
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     print(f"Running trial {args.trial_id} with split seed {args.split_seed} and {args.n_folds} folds")
 
     config = sample_config()
-    results = main(config, args.split_seed, args.trial_id, args.n_folds, agrs.project_name)
+    results = main(config, args.split_seed, args.trial_id, args.n_folds, args.project_name)
 
     out_dir = f"../models/HR+HER2-/4lines/seed_{args.split_seed}"
     os.makedirs(out_dir, exist_ok=True)
