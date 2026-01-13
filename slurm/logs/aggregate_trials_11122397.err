@@ -1,2 +1,0 @@
-usage: aggregate_trials.py [-h] --seed SEED
-aggregate_trials.py: error: argument --seed: expected one argument
