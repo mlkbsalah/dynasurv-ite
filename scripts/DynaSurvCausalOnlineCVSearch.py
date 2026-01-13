@@ -73,7 +73,6 @@ def main(config, split_seed, trial_id, n_folds, project_name):
 
         callbacks = [
             LearningRateMonitor(logging_interval="step"),
-            EarlyStopping(monitor="average_ci", mode="max", patience=20),
             # ModelCheckpoint(
             #     monitor="average_ci",
             #     mode="max",
@@ -94,13 +93,14 @@ def main(config, split_seed, trial_id, n_folds, project_name):
             	reinit=True,
             	save_dir="../training_logs",
 				)	
+            callbacks.append(LearningRateMonitor(logging_interval="epoch"))
 
         trainer = L.Trainer(
             max_epochs=config["max_epochs"],
             accelerator="gpu",
             devices=1,
             logger=logger,
-            callbacks=callbacks,
+            callbacks=callbacks, #type: ignore
             enable_checkpointing=False,
             check_val_every_n_epoch=10,
         )
