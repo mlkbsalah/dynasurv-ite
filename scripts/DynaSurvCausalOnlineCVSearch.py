@@ -103,6 +103,7 @@ def main(config, split_seed, trial_id, n_folds, project_name):
             logger=logger,
             callbacks=callbacks, #type: ignore
             enable_checkpointing=False,
+            enable_progress_bar=False,
             check_val_every_n_epoch=2,
         )
 
@@ -113,7 +114,7 @@ def main(config, split_seed, trial_id, n_folds, project_name):
         average_ci_folds.append(val_res["average_ci"])
         average_ibs_folds.append(val_res["average_ibs"])
 	
-    wandb.finish()
+        wandb.finish()
 
     return {
         "mean_loss": float(np.mean(loss_folds)),
