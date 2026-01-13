@@ -98,12 +98,12 @@ def main(config, split_seed, trial_id, n_folds, project_name):
 
         trainer = L.Trainer(
             max_epochs=config["max_epochs"],
-            accelerator="auto",
+            accelerator="gpu",
             devices=1,
             logger=logger,
             callbacks=callbacks, #type: ignore
             enable_checkpointing=False,
-            check_val_every_n_epoch=10,
+            check_val_every_n_epoch=2,
         )
 
         trainer.fit(model, datamodule=DataModuleCV)
@@ -148,7 +148,7 @@ def sample_config():
         "init_p_dropout": np.random.uniform(0.0, 0.5),
         "mlpprop_dropout": np.random.uniform(0.0, 0.5),
         "lambda_prop_loss": np.random.uniform(0.0, 1.0),
-        "max_epochs": 300,
+        "max_epochs": 5,
         "lr": 10 ** np.random.uniform(-5, -2),
         "weight_decay": 10 ** np.random.uniform(-6, -2),
         "lr_scheduler_stepsize": random.choice([50, 100, 200]),

@@ -4,7 +4,8 @@
 #SBATCH --time=5:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
-#SBATCH --partition=cpu_long
+#SBATCH --gres=gpu:1
+#SBATCH --partition=gpu
 
 # Module and env setup
 module load anaconda3/2024.06/gcc-13.2.0
