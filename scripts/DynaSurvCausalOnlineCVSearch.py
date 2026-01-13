@@ -72,7 +72,8 @@ def main(config, split_seed, trial_id, n_folds, project_name):
         )
 
         callbacks = [
-            LearningRateMonitor(logging_interval="step"),
+            EarlyStopping(monitor="average_ci", mode="max", patience=30, verbose=True),
+            # LearningRateMonitor(logging_interval="step"),
             # ModelCheckpoint(
             #     monitor="average_ci",
             #     mode="max",
