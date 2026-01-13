@@ -31,6 +31,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+echo "Launching CV run"
+
 #Submit trials
 ARRAY_JOB_ID=$(./LaunchCVSearch.sh \
     --n_trials "$N_TRIALS" \
