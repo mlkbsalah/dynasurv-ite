@@ -1,6 +1,7 @@
 #!/bin/bash
 
 N_TRIALS=1
+PROJECT_NAME=""
 
 # Parse flags
 while [[ $# -gt 0 ]]; do
@@ -48,5 +49,6 @@ if [[ -z "$PROJECT_NAME" ]]; then
 	echo "Warning: unspecified project name, logging disabled"
 fi
 
+echo $PROJECT_NAME
 
 sbatch --parsable --export=ALL,N_FOLDS=$N_FOLDS,SPLIT_SEED=$SPLIT_SEED,PROJECT_NAME=$PROJECT_NAME --array=0-$((N_TRIALS-1)) DynaSurvCausalOnlineCVSearch.sh

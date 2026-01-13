@@ -83,8 +83,9 @@ def main(config, split_seed, trial_id, n_folds, project_name):
             # ),
         ]
         
-        if project_name == "":
+        if not project_name:
             logger = False
+
         else:
             logger = WandbLogger(
 				project=project_name,
@@ -160,7 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_id", type=int, required=True)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
-    parser.add_argument("--project_name", type=str)
+    parser.add_argument("--project_name", type=str, default=None)
 
     args = parser.parse_args()
 
