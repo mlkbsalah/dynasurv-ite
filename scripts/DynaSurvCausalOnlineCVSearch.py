@@ -90,7 +90,7 @@ def main(config, split_seed, trial_id, n_folds, project_name):
             logger = WandbLogger(
 				project=project_name,
            		name=f"trial_{trial_id}_fold_{k}",
-            	group=f"seed_{trial_id}_CV",
+            	group=f"trial_{trial_id}_CV",
             	reinit=True,
             	save_dir="../training_logs",
 				)	
