@@ -98,7 +98,7 @@ def main(config, split_seed, trial_id, n_folds, project_name):
 
         trainer = L.Trainer(
             max_epochs=config["max_epochs"],
-            accelerator="gpu",
+            accelerator="auto",
             devices=1,
             logger=logger,
             callbacks=callbacks, #type: ignore

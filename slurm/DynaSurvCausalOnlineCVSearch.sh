@@ -2,10 +2,9 @@
 #SBATCH --job-name=DynaSurvCausalOnlineCV
 #SBATCH --output=logs/%x.o%j
 #SBATCH --time=5:00:00
-#SBATCH --mem=32G
-#SBATCH --gres=gpu:1
+#SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
-#SBATCH --partition=gpu
+#SBATCH --partition=cpu_long
 
 # Module and env setup
 module load anaconda3/2024.06/gcc-13.2.0
