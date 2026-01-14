@@ -200,15 +200,9 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         """perform a validation step"""
-        if self.train_times is not None and self.train_events is not None and not self.km_ready:
-            for line in range(len(self.train_times)):
-                y_surv = Surv.from_arrays(np.array(self.train_events[line]), np.array(self.train_times[line]))
-                kmf = CensoringDistributionEstimator().fit(y_surv)
-                self.kmf_list.append(kmf)
-            self.km_ready = True
-
-
+        self._compute_censoring_km()
         XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
+        
         loss, surv_loss, prop_loss = self._compute_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/survival_loss", surv_loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -232,20 +226,13 @@ class DynaSurvCausalOnline(L.LightningModule):
             event_line = event[bool_mask_time_step, time_step].bool()
             interval_idx_line = interval_idx[bool_mask_time_step, time_step]
 
-
             ci_time_step = concordance_index_censored(event_line.detach().cpu(), time_line.detach().cpu(), hazard_line.detach().cpu())[0]
+            integrated_brier_score_step = self._compute_ipcw_ibs(survival_grid_line, event_line, time_line, time_step, interval_idx_line)
+            
             ci.append(ci_time_step)
-            self.log(f"val/ci_time_step_{time_step+1}", ci_time_step, prog_bar=True, on_step=False, on_epoch=True)
-
-            surv = Surv.from_arrays(event_line.detach().cpu(), self.interval_bounds[interval_idx_line].detach().cpu())  # type: ignore
-            weights = self.kmf_list[time_step].predict_ipcw(surv)
-            integrated_brier_score_step = torch.mean(BrierScore()(survival_grid_line.cpu(), 
-                                                                  event_line.cpu(), 
-                                                                  time_line.cpu(), 
-                                                                  self.interval_bounds[:-1].cpu(), # type: ignore
-                                                                  weight_new_time=weights),
-                                                                  )
             ibs.append(integrated_brier_score_step.detach().cpu())
+            
+            self.log(f"val/ci_time_step_{time_step+1}", ci_time_step, prog_bar=True, on_step=False, on_epoch=True)
             self.log(f"val/ibs_time_step_{time_step+1}", integrated_brier_score_step, prog_bar=True, on_step=False, on_epoch=True)
                                                     
         self.log(f"average_ci", np.mean(ci), prog_bar=True, on_step=False, on_epoch=True) # type: ignore
@@ -293,21 +280,27 @@ class DynaSurvCausalOnline(L.LightningModule):
             self.train_events[line].extend(e.tolist()) # type: ignore
             self.train_times[line].extend(t.tolist())
 
-    def _compute_ipcw_ibs(self, survival, event, time, step, interval_idx, mask) -> torch.Tensor:
+    def _compute_ipcw_ibs(self, survival, event, time, step, interval_idx) -> torch.Tensor:
         """Compute IPCW Brier score for a batch."""
         surv = Surv.from_arrays(event.detach().cpu(), self.interval_bounds[interval_idx].detach().cpu())  # type: ignore
-        weights = self.kmf.predict_ipcw(surv)
+        weights = self.kmf_list[step].predict_ipcw(surv)
+        integrated_brier_score = torch.mean(BrierScore()(survival.cpu(),
+                                                        event.cpu(),
+                                                        time.cpu(),
+                                                        self.interval_bounds[:-1].cpu(), # type: ignore
+                                                        weight_new_time=weights),
+                                                        )
+        return integrated_brier_score
 
-        surv = Surv.from_arrays(event_line.detach().cpu(), self.interval_bounds[interval_idx_line].detach().cpu())  # type: ignore
-        weights = self.kmf_list[time_step].predict_ipcw(surv)
-        integrated_brier_score_step = torch.mean(BrierScore()(survival_grid_line.cpu(), 
-                                                                event_line.cpu(), 
-                                                                time_line.cpu(), 
-                                                                self.interval_bounds[:-1].cpu(), # type: ignore
-                                                                weight_new_time=weights),
-                                                                )
-        ibs.append(integrated_brier_score_step.detach().cpu())
-
+    def _compute_censoring_km(self) -> None:
+        """Compute the Kaplan-Meier estimator for censoring distribution."""
+        if self.train_times is not None and self.train_events is not None and not self.km_ready:
+            for line in range(len(self.train_times)):
+                y_surv = Surv.from_arrays(np.array(self.train_events[line]), np.array(self.train_times[line]))
+                kmf = CensoringDistributionEstimator().fit(y_surv)
+                self.kmf_list.append(kmf)
+            self.km_ready = True
+        
     # ====================== Inference methods ============================
     def predict(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """ Return a tuple of (hazards, survivals) for all treatments and time steps.
@@ -321,8 +314,6 @@ class DynaSurvCausalOnline(L.LightningModule):
                 survivals: (batch, n_lines, n_treatments, n_intervals)
         """
         return (torch.zeros(1), torch.zeros(1))  # Placeholder
-
-    
 
     def predict_hazard(self, XPd, X_static, eval_time, treatment_idx):
         hazards_on_grid = torch.sigmoid(self.get_factual_predictions(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
@@ -341,7 +332,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         survival = torch.gather(survival_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
         return survival
 
-
+    # ====================== Optimizer configuration ======================
     def configure_optimizers(self): 
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=self.lr_scheduler_stepsize, gamma=self.lr_scheduler_gamma)
