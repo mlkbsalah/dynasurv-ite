@@ -15,8 +15,6 @@ from torchsurv.metrics.brier_score import BrierScore
 
 import numpy as np
 
-import logging
-
 class DynaSurvCausalOnline(L.LightningModule):
     """Multi-treatment causal survival model with separate heads.
 
@@ -127,29 +125,24 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.kmf_list = []
         self.km_ready = False
 
-    def _init_states(self, X_static, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        x_static_general, x_static_treatment = X_static
-        batch_size = x_static_general.shape[0]
-        h0 = self.init_h_mlp(x_static_general)
-        c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
-        p0 = self.init_p_mlp(x_static_treatment)
-        return h0, c0, p0
-
+    # ====================== Core model logic =============================
     def forward(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Run the shared embed_LSTM and produce treatment head outputs.
+        """forward pass to retreive all hazards and propensity scores for all treatments and time steps
 
         Args:
             XPd: (batch, n_lines, features = x_input_dim + p_input_dim + 1)
+            X_static: ( (batch, x_static_dim), (batch, p_static_dim) )
+
 
         Returns:
             cond_sa: (batch, n_lines, n_treatments, output_sa_length)
         """
-        h, c, p = self._init_states(X_static, XPd.device)
+        h, c, p = self._init_lstm_states(X_static, XPd.device)
         hazards_logit = []
         propensity = []
 
         for t in range(XPd.shape[1]):
-            all_responses_t, propensity_t, (h, c, p) = self._predict_response_one_line(XPd[:, t, :], (h, c, p))
+            all_responses_t, propensity_t, (h, c, p) = self._forward_one_step(XPd[:, t, :], (h, c, p))
             hazards_logit.append(all_responses_t) # list of (batch, n_treatments, n_intervals)
             propensity.append(propensity_t)  # list of (batch, n_treatments)
         hazards_logit = torch.stack(hazards_logit, dim=1) # (batch, n_lines, n_treatments, n_intervals)
@@ -157,21 +150,27 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         return hazards_logit, propensity
 
-    def _predict_response_one_line(self, XPd_t, tuple_in) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def _init_lstm_states(self, X_static, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x_static_general, x_static_treatment = X_static
+        batch_size = x_static_general.shape[0]
+        h0 = self.init_h_mlp(x_static_general)
+        c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
+        p0 = self.init_p_mlp(x_static_treatment)
+        return h0, c0, p0
+
+    def _forward_one_step(self, XPd_t, tuple_in) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         _, h, c, p = self.lstm(XPd_t, tuple_in)
         propensity_t = torch.softmax(self.propensityhead(h), dim=-1)  # (batch, n_treatments)
         all_response_t = self.treatment_head(h).view(-1, self.n_treatments, self.output_length)  # (batch, n_treatments, n_intervals)
 
         return all_response_t, propensity_t, (h, c, p)
 
-    def forward_factual(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor], treatment_idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """forward pass to retreive factual hazards
-
+    def get_factual_predictions(self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor], treatment_idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get the factual hazard predictions and propensity scores based on the treatment actually received.
         Args:
             XPd (torch.Tensor): (batch, n_lines, features)
             X_static (Tuple[torch.Tensor, torch.Tensor]): ( (batch, x_static_dim), (batch, p_static_dim) )
             treatment_idx (torch.Tensor): (batch, n_lines) integer treatment head indices actually received
-
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: (factual_hazards_logit, propensity)
         """
@@ -181,100 +180,26 @@ class DynaSurvCausalOnline(L.LightningModule):
         factual_hazards_logit = torch.gather(hazards_logit, dim=2, index=gather_idx).squeeze(2)  # (batch, n_lines, n_intervals)
         return factual_hazards_logit, propensity
 
-    def _compute_step_loss(self, XPd, X_static, treatment_idx, interval_idx, event, mask) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        haz_pred_logit, propensity = self.forward_factual(XPd, X_static, treatment_idx)  # (batch, n_lines, n_intervals) / (batch, n_lines, n_treatments)
-        
-        batch, n_lines, n_intervals = haz_pred_logit.shape
-        haz_pred_logit_flat = haz_pred_logit.reshape(-1, n_intervals)
-        interval_idx_flat = interval_idx.reshape(-1)
-        event_flat = event.reshape(-1)
 
-        surv_loss_flat = self.surv_loss_fn(haz_pred_logit_flat, interval_idx_flat, event_flat)  # (batch * n_lines, )
-        surv_loss = surv_loss_flat.reshape(batch, n_lines) * mask
-
-        prop_loss_flat = self.propensity_loss_fn(propensity.reshape(-1, self.n_treatments), treatment_idx.reshape(-1)) 
-        prop_loss = prop_loss_flat.reshape(batch, n_lines) * mask
-
-        prop_loss = prop_loss.sum() / mask.sum()
-        surv_loss = surv_loss.sum() / mask.sum()
-
-        loss = surv_loss - self.lambda_prop_loss * prop_loss
-        return loss, surv_loss, prop_loss
-
-    def _accumulate_censoring_data(self, time, event, mask):
-        """Collect censoring information for IPCW estimation during epoch 0."""
-        # print("="*20)
-        # print("Accumulating censoring data for IPCW estimation...")
-        # print("="*20)
-        if self.train_times is None:
-            n_lines = time.shape[1]
-            self.train_times = [[] for _ in range(n_lines)]
-            self.train_events = [[] for _ in range(n_lines)]
-
-        for line in range(time.shape[1]):
-            valid = mask[:, line].bool()
-            if not valid.any():
-                continue
-
-            t = time[valid, line].detach().cpu().numpy()
-            e = event[valid, line].detach().cpu().numpy()
-
-            self.train_events[line].extend(e.tolist()) # type: ignore
-            self.train_times[line].extend(t.tolist())
-        # print("Accumulation done.")
-        # print("="*20)
-        # print(len(self.train_times[0]))
-        # print(len(self.train_events[0]))
-        # print("="*20)
-
+    # ====================== Training and evaluation ======================
     def training_step(self, batch, batch_idx):
         """perform a training step"""
 
         XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch  
         
         if self.current_epoch == 0 and not self.km_ready:
-            self._accumulate_censoring_data(time, event, mask)
+            self._accumulate_data(time, event, mask)
 
-        loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
+        loss, surv_loss, prop_loss = self._compute_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
             
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/survival_loss", surv_loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log("train/propensity_loss", prop_loss, prog_bar=True, on_step=True, on_epoch=True)
 
         return loss
-    
-    # def on_train_epoch_end(self):
-    #     logging.info("on_train_epoch_end called")
-    #     logging.info(f"km_ready status before check: {self.km_ready}")
-    #     logging.info(f"current_epoch: {self.current_epoch}")
-    #     logging.info(f"train_times length: {len(self.train_times) if self.train_times is not None else 'None'}")
-    #     logging.info(f"train_events length: {len(self.train_events) if self.train_events is not None else 'None'}")
-    #     if self.train_times is not None and self.train_events is not None and not self.km_ready:
-    #         if self.current_epoch == 0:
-    #             for line in range(len(self.train_times)):
-    #                 y_surv = Surv.from_arrays(np.array(self.train_events[line]), np.array(self.train_times[line]))
-    #                 kmf = CensoringDistributionEstimator().fit(y_surv)
-    #                 self.kmf_list.append(kmf)
-    #             self.km_ready = True
-            
-    def predict_hazard(self, XPd, X_static, eval_time, treatment_idx):
-        hazards_on_grid = torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
-        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
-        interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
-
-        hazards = torch.gather(hazards_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
-        return hazards
-
-    def predict_survival(self, XPd, X_static, eval_time, treatment_idx):
-        hazards_on_grid = torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
-        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
-        interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
-
-        survival_on_grid = torch.cumprod(1 - hazards_on_grid, dim=2)  # (batch, n_lines, n_intervals)
-        survival = torch.gather(survival_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
-        return survival
 
     def validation_step(self, batch, batch_idx):
+        """perform a validation step"""
         if self.train_times is not None and self.train_events is not None and not self.km_ready:
             for line in range(len(self.train_times)):
                 y_surv = Surv.from_arrays(np.array(self.train_events[line]), np.array(self.train_times[line]))
@@ -284,7 +209,7 @@ class DynaSurvCausalOnline(L.LightningModule):
 
 
         XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
-        loss, surv_loss, prop_loss = self._compute_step_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
+        loss, surv_loss, prop_loss = self._compute_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/survival_loss", surv_loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/propensity_loss", prop_loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -294,7 +219,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         
 
         hazards = self.predict_hazard(XPd, X_static, time, treatment_idx)  # (batch, n_lines)
-        survival_on_grid = torch.cumprod(1 - torch.sigmoid(self.forward_factual(XPd, X_static, treatment_idx)[0]), dim=2)  # (batch, n_lines, n_intervals)
+        survival_on_grid = torch.cumprod(1 - torch.sigmoid(self.get_factual_predictions(XPd, X_static, treatment_idx)[0]), dim=2)  # (batch, n_lines, n_intervals)
         ci = []
         ibs = []
         for time_step in range(hazards.size(1)):
@@ -313,7 +238,6 @@ class DynaSurvCausalOnline(L.LightningModule):
             self.log(f"val/ci_time_step_{time_step+1}", ci_time_step, prog_bar=True, on_step=False, on_epoch=True)
 
             surv = Surv.from_arrays(event_line.detach().cpu(), self.interval_bounds[interval_idx_line].detach().cpu())  # type: ignore
-            # print(time_step)
             weights = self.kmf_list[time_step].predict_ipcw(surv)
             integrated_brier_score_step = torch.mean(BrierScore()(survival_grid_line.cpu(), 
                                                                   event_line.cpu(), 
@@ -324,13 +248,99 @@ class DynaSurvCausalOnline(L.LightningModule):
             ibs.append(integrated_brier_score_step.detach().cpu())
             self.log(f"val/ibs_time_step_{time_step+1}", integrated_brier_score_step, prog_bar=True, on_step=False, on_epoch=True)
                                                     
-        # print(ci)
         self.log(f"average_ci", np.mean(ci), prog_bar=True, on_step=False, on_epoch=True) # type: ignore
         self.log(f"average_ibs", np.mean(ibs), prog_bar=True, on_step=False, on_epoch=True) # type: ignore
         return loss, np.mean(ci), np.mean(ibs)
-
+            
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx)
+
+    def _compute_loss(self, XPd, X_static, treatment_idx, interval_idx, event, mask) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        haz_pred_logit, propensity = self.get_factual_predictions(XPd, X_static, treatment_idx)  # (batch, n_lines, n_intervals) / (batch, n_lines, n_treatments)
+        
+        batch, n_lines, n_intervals = haz_pred_logit.shape
+        haz_pred_logit_flat = haz_pred_logit.reshape(-1, n_intervals)
+        interval_idx_flat = interval_idx.reshape(-1)
+        event_flat = event.reshape(-1)
+
+        surv_loss_flat = self.surv_loss_fn(haz_pred_logit_flat, interval_idx_flat, event_flat)  # (batch * n_lines, )
+        surv_loss = surv_loss_flat.reshape(batch, n_lines) * mask
+
+        prop_loss_flat = self.propensity_loss_fn(propensity.reshape(-1, self.n_treatments), treatment_idx.reshape(-1)) 
+        prop_loss = prop_loss_flat.reshape(batch, n_lines) * mask
+
+        prop_loss = prop_loss.sum() / mask.sum()
+        surv_loss = surv_loss.sum() / mask.sum()
+
+        loss = surv_loss - self.lambda_prop_loss * prop_loss
+        return loss, surv_loss, prop_loss
+    
+    def _accumulate_data(self, time, event, mask):
+        """Collect censoring information for IPCW estimation during epoch 0."""
+        if self.train_times is None:
+            n_lines = time.shape[1]
+            self.train_times = [[] for _ in range(n_lines)]
+            self.train_events = [[] for _ in range(n_lines)]
+
+        for line in range(time.shape[1]):
+            valid = mask[:, line].bool()
+            if not valid.any():
+                continue
+
+            t = time[valid, line].detach().cpu().numpy()
+            e = event[valid, line].detach().cpu().numpy()
+
+            self.train_events[line].extend(e.tolist()) # type: ignore
+            self.train_times[line].extend(t.tolist())
+
+    def _compute_ipcw_ibs(self, survival, event, time, step, interval_idx, mask) -> torch.Tensor:
+        """Compute IPCW Brier score for a batch."""
+        surv = Surv.from_arrays(event.detach().cpu(), self.interval_bounds[interval_idx].detach().cpu())  # type: ignore
+        weights = self.kmf.predict_ipcw(surv)
+
+        surv = Surv.from_arrays(event_line.detach().cpu(), self.interval_bounds[interval_idx_line].detach().cpu())  # type: ignore
+        weights = self.kmf_list[time_step].predict_ipcw(surv)
+        integrated_brier_score_step = torch.mean(BrierScore()(survival_grid_line.cpu(), 
+                                                                event_line.cpu(), 
+                                                                time_line.cpu(), 
+                                                                self.interval_bounds[:-1].cpu(), # type: ignore
+                                                                weight_new_time=weights),
+                                                                )
+        ibs.append(integrated_brier_score_step.detach().cpu())
+
+    # ====================== Inference methods ============================
+    def predict(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """ Return a tuple of (hazards, survivals) for all treatments and time steps.
+        
+        Args:
+            XPd: (batch, n_lines, features)
+            X_static: ( (batch, x_static_dim), (batch, p_static_dim) )
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                hazards: (batch, n_lines, n_treatments, n_intervals)
+                survivals: (batch, n_lines, n_treatments, n_intervals)
+        """
+        return (torch.zeros(1), torch.zeros(1))  # Placeholder
+
+    
+
+    def predict_hazard(self, XPd, X_static, eval_time, treatment_idx):
+        hazards_on_grid = torch.sigmoid(self.get_factual_predictions(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
+        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
+        interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
+
+        hazards = torch.gather(hazards_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
+        return hazards
+    
+    def predict_survival(self, XPd, X_static, eval_time, treatment_idx):
+        hazards_on_grid = torch.sigmoid(self.get_factual_predictions(XPd, X_static, treatment_idx)[0])  # (batch, n_lines, n_intervals)
+        interval_idx = torch.bucketize(eval_time, self.interval_bounds) - 1  # type: ignore (batch, n_lines)
+        interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
+
+        survival_on_grid = torch.cumprod(1 - hazards_on_grid, dim=2)  # (batch, n_lines, n_intervals)
+        survival = torch.gather(survival_on_grid, dim=2, index=interval_idx.unsqueeze(-1)).squeeze(-1)  # (batch, n_lines)
+        return survival
+
 
     def configure_optimizers(self): 
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -387,7 +397,7 @@ if __name__ == "__main__":
         attention=True,
     )
     hazard_pred = torch.sigmoid(model(sample_XPd, sample_X_static)[0])
-    factual_hazard_pred = torch.sigmoid(model.forward_factual(sample_XPd, sample_X_static, treatment_idx=treatment_idx)[0])
+    factual_hazard_pred = torch.sigmoid(model.get_factual_predictions(sample_XPd, sample_X_static, treatment_idx=treatment_idx)[0])
     print(f"Input shape: {sample_XPd.shape},\nOutput shape: {hazard_pred.shape}")
     print(f"Factual hazard shape: {factual_hazard_pred.shape}")
     
