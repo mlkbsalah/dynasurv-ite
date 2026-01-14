@@ -149,7 +149,7 @@ def sample_config():
         "init_p_dropout": np.random.uniform(0.0, 0.5),
         "mlpprop_dropout": np.random.uniform(0.0, 0.5),
         "lambda_prop_loss": np.random.uniform(0.0, 1.0),
-        "max_epochs": 5,
+        "max_epochs": 300,
         "lr": 10 ** np.random.uniform(-5, -2),
         "weight_decay": 10 ** np.random.uniform(-6, -2),
         "lr_scheduler_stepsize": random.choice([50, 100, 200]),

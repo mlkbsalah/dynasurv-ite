@@ -1,0 +1,50 @@
+{
+  "trial_id": 26,
+  "split_seed": 1768340925,
+  "config": {
+    "n_intervals": 10,
+    "train_batch_size": 64,
+    "lstm_hidden_length": 64,
+    "x_embed_dim": 32,
+    "p_embed_dim": 16,
+    "mlpx_hidden_units": [
+      64,
+      32
+    ],
+    "mlpp_hidden_units": [
+      32
+    ],
+    "mlpsa_hidden_units": [
+      32,
+      16
+    ],
+    "init_h_hidden": [
+      128
+    ],
+    "init_p_hidden": [
+      64
+    ],
+    "mlpprop_hidden_units": [
+      64,
+      32
+    ],
+    "attention": true,
+    "mlpx_dropout": 0.19945315885628345,
+    "mlpp_dropout": 0.03215121880866462,
+    "mlpsa_dropout": 0.13592821091896917,
+    "init_h_dropout": 0.06709416347424546,
+    "init_p_dropout": 0.077767913355419,
+    "mlpprop_dropout": 0.010988189293411277,
+    "lambda_prop_loss": 0.021432858812777233,
+    "max_epochs": 300,
+    "lr": 0.004110182567010808,
+    "weight_decay": 0.0006125353154858933,
+    "lr_scheduler_stepsize": 50,
+    "lr_scheduler_gamma": 0.1
+  },
+  "mean_loss": 1.314687430858612,
+  "mean_ci": 0.6359651029109955,
+  "std_ci": 0.027106711878918905,
+  "mean_ibs": 0.09043916538357735,
+  "std_ibs": 0.004461382757871333
+}
