@@ -122,8 +122,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
     def prepare_data(self):
         esme_data = pd.read_parquet(self.data_dir)
-        static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
-        # static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")  # --- IGNORE ---
+        # static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
+        static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")  # --- IGNORE ---
 
         merged = esme_data.merge(
             static_data,
@@ -161,15 +161,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         self.ESMEDataset = ESMEOnlineDataset(X_list, X_static, P_list, P_static, d_list, time_list, event_list, self.n_lines, self.interval_bounds)
 
-        print(f"Loaded {len(self.data)} rows, {self.data['usubjid'].nunique()} patients.")
-
-
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
             self.prepare_data()
         assert self.ESMEDataset is not None, "ESMEDataset must be initialized before setup."
-        assert self.fold_idx is not None and self.num_folds is not None and self.split_seed is not None, "fold_idx, num_folds, and split_seed must be provided for cross-validation."
 
+
+        assert self.split_seed is not None, "split_seed must be provided for reproducible splits."
         total_size = len(self.ESMEDataset)
         holdout_size = int(self.holdout_size * total_size)
         cv_size = total_size - holdout_size
@@ -179,6 +177,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
 
         if stage == 'fit' or stage is None:
+            assert self.fold_idx is not None and self.num_folds is not None, "fold_idx and num_folds must be provided for cross-validation."
             kfold = KFold(n_splits=self.num_folds or 5, shuffle=True, random_state=self.split_seed)
             all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))] # type: ignore
             train_idx, val_idx = all_splits[self.fold_idx]
@@ -202,8 +201,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
     def get_data_dimensions(self):
         esme_data = pd.read_parquet(self.data_dir)
-        static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
-        # static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")  # --- IGNORE ---
+        # static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
+        static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")  # --- IGNORE ---
         static_data = static_data.loc[static_data['usubjid'].isin(esme_data['usubjid'].unique())].reset_index(drop=True)
         
         x_dim = len([col for col in esme_data.columns if col.startswith('X_') and not col.startswith('X_buffer_time')])
