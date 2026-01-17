@@ -1,0 +1,1259 @@
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: Currently logged in as: malekbensalah-perso (malekbensalah-perso-centralesup-lec) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: WARNING Using a boolean value for 'reinit' is deprecated. Use 'return_previous' or 'finish_previous' instead.
+wandb: setting up run jdzo3wcx
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_150531-jdzo3wcx
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_0
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/jdzo3wcx
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Running trial 63 with split seed 1768340925 and 10 folds
+[Trial 63] Starting fold 1/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.533
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.537
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.538
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.540
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.544
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.552
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.556
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.561
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.564
+Metric average_ci improved by 0.014 >= min_delta = 0.0. New best score: 0.577
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.583
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.584
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.592
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.594
+Metric average_ci improved by 0.011 >= min_delta = 0.0. New best score: 0.606
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.608
+Metric average_ci improved by 0.012 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.624
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.633
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.638
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.641
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.642
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.642
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.645
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.648
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.649
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.649
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.649
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.650
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.651
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.651. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading config.yaml
+wandb: uploading history steps 669-672, summary, console lines 50-71
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▃▃▄▄▃▂▁▁▂▂▃▄▅▅▅▅▆▇▇▇▇▇██████████████████
+wandb:                 average_ibs █████▇▇▇▇▆▆▅▅▄▄▄▄▄▄▃▃▃▃▃▂▃▂▂▂▂▂▂▂▁▂▂▁▁▁▁
+wandb:                       epoch ▁▁▁▁▁▂▂▂▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▆▆▇▇█████
+wandb:                    lr-AdamW ████████████████████▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁
+wandb:                  train/loss ███▇▇▇▇▆▆▆▅▅▅▄▄▄▄▃▃▃▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▃▃▅▅▆▆▆▆▆▇▇▇▇▇▇▇▇▇▇████████████████████
+wandb:  train/propensity_loss_step ▁▁▁▁▁▂▂▂▃▄▅▅▆▆▆▇▇▇▇▇▇▇▇▇▇███████████████
+wandb:   train/survival_loss_epoch █▇▇▇▇▆▆▅▅▅▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step ▇█▇▆▆▅▆▅▅▅▃▄▃▃▃▃▄▂▂▂▂▄▂▃▄▃▃▂▂▃▂▃▃▂▂▁▂▁▂▂
+wandb:         trainer/global_step ▁▁▁▁▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▄▅▅▅▅▅▆▆▆▆▇▇▇▇▇▇███
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.64459
+wandb:                 average_ibs 0.08304
+wandb:                       epoch 210
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.67469
+wandb: train/propensity_loss_epoch 2.53665
+wandb:  train/propensity_loss_step 2.53467
+wandb:   train/survival_loss_epoch 1.34525
+wandb:    train/survival_loss_step 1.35534
+wandb:         trainer/global_step 7350
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_0 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/jdzo3wcx
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_150531-jdzo3wcx/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run ty6v9o93
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_151514-ty6v9o93
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_1
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/ty6v9o93
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci            0.644594132900238
+       average_ibs          0.08303631842136383
+   val/ci_time_step_1       0.6502976417541504
+   val/ci_time_step_2       0.6357628107070923
+   val/ci_time_step_3       0.6526194214820862
+   val/ci_time_step_4       0.6396967172622681
+   val/ibs_time_step_1      0.11308026313781738
+   val/ibs_time_step_2      0.08183535188436508
+   val/ibs_time_step_3      0.07031628489494324
+   val/ibs_time_step_4      0.06691336631774902
+        val/loss            0.6446022987365723
+   val/propensity_loss       2.539903163909912
+    val/survival_loss       1.3160194158554077
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 2/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.509
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.518
+Metric average_ci improved by 0.015 >= min_delta = 0.0. New best score: 0.533
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.540
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.543
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.544
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.547
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.553
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.555
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.560
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.561
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.564
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.570
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.575
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.582
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.586
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.590
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.591
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.594
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.597
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.598
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.601
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.603
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.609
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.610
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.611
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.613
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.616
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.625
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.625
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.626
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.627
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.627
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.629
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.629
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.635
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.635
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.636
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.636
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.642
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.642. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: uploading history steps 740-757; updating run metadata
+wandb: updating run metadata
+wandb: uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▁▃▃▃▃▄▄▃▃▃▄▅▅▅▅▆▆▆▇▇▇▇▇▇▇▇██████████████
+wandb:                 average_ibs █████▇▇▇▇▆▄▃▃▃▂▂▂▂▂▂▂▃▂▂▂▂▂▂▂▂▁▁▂▂▂▁▂▁▁▁
+wandb:                       epoch ▁▁▁▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▄▄▄▄▄▅▅▅▆▆▆▆▆▆▆▇▇▇▇▇█
+wandb:                    lr-AdamW ████████████████████▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁
+wandb:                  train/loss █▇▇▆▅▅▄▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▂▂▃▃▅▅▆▆▆▇▇▇▇▇█████████████████████████
+wandb:  train/propensity_loss_step ▁▁▁▂▂▃▄▄▅▅▆▆▆▆▆▆▇▇▇▇▇▇▇▇████████████████
+wandb:   train/survival_loss_epoch ██▆▆▆▅▅▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▁▂▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step ▇█▅▆▇▇▅▅▇▅▆▅▃▂▄▂▂▄▂▂▄▃▃▄▂▂▂▂▁▂▃▂▂▁▃▂▂▁▂▂
+wandb:         trainer/global_step ▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▄▄▄▄▅▅▅▅▅▅▆▆▆▆▇▇▇▇▇▇█████
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.63568
+wandb:                 average_ibs 0.08773
+wandb:                       epoch 238
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.66391
+wandb: train/propensity_loss_epoch 2.53709
+wandb:  train/propensity_loss_step 2.53634
+wandb:   train/survival_loss_epoch 1.33458
+wandb:    train/survival_loss_step 1.35781
+wandb:         trainer/global_step 8330
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_1 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/ty6v9o93
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_151514-ty6v9o93/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run r8sdckx7
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_152619-r8sdckx7
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_2
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/r8sdckx7
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6356829404830933
+       average_ibs          0.08772997558116913
+   val/ci_time_step_1       0.6662440896034241
+   val/ci_time_step_2       0.6418125629425049
+   val/ci_time_step_3       0.6307387948036194
+   val/ci_time_step_4       0.6039361357688904
+   val/ibs_time_step_1      0.1261483132839203
+   val/ibs_time_step_2      0.08790931850671768
+   val/ibs_time_step_3      0.07301290333271027
+   val/ibs_time_step_4      0.06384939700365067
+        val/loss            0.7000595331192017
+   val/propensity_loss      2.5383663177490234
+    val/survival_loss        1.371070384979248
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 3/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.411
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.414
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.418
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.421
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.422
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.425
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.427
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.431
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.438
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.445
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.451
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.458
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.462
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.470
+Metric average_ci improved by 0.016 >= min_delta = 0.0. New best score: 0.486
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.496
+Metric average_ci improved by 0.016 >= min_delta = 0.0. New best score: 0.512
+Metric average_ci improved by 0.014 >= min_delta = 0.0. New best score: 0.526
+Metric average_ci improved by 0.024 >= min_delta = 0.0. New best score: 0.550
+Metric average_ci improved by 0.011 >= min_delta = 0.0. New best score: 0.561
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.568
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.575
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.579
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.583
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.590
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.592
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.599
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.603
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.606
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.609
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.616
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.621
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.623
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.624
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.626
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.627
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.629
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.631
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.632
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.633
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.636
+`Trainer.fit` stopped: `max_epochs=300` reached.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading history steps 954-960, summary, console lines 64-85
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▁▁▁▃▃▆▆▆▇▇▇▇▇███████████████████████████
+wandb:                 average_ibs ▇▇▇▇████▇▆▅▄▄▄▄▄▃▄▃▃▃▂▃▂▃▃▂▂▂▂▃▂▁▂▂▂▂▂▂▁
+wandb:                       epoch ▁▁▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▆▆▇▇▇▇▇▇█
+wandb:                    lr-AdamW █████████████████▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                  train/loss ██▇▆▆▅▅▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▁▂▃▆▇▇▇▇██████████████████████████████
+wandb:  train/propensity_loss_step ▁▂▄▄▅▅▆▆▆▆▇▇▇▇▇▇████████████████████████
+wandb:   train/survival_loss_epoch ████▇▆▆▅▅▅▄▃▃▃▃▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step █████▇▆▆▅▅▄▄▄▄▃▃▄▄▃▃▂▄▄▃▃▃▃▃▃▃▃▃▁▂▄▂▃▂▂▃
+wandb:         trainer/global_step ▁▁▁▁▂▂▂▂▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇▇████
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.62447
+wandb:                 average_ibs 0.08563
+wandb:                       epoch 300
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.64568
+wandb: train/propensity_loss_epoch 2.541
+wandb:  train/propensity_loss_step 2.53927
+wandb:   train/survival_loss_epoch 1.31739
+wandb:    train/survival_loss_step 1.36137
+wandb:         trainer/global_step 10500
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_2 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/r8sdckx7
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_152619-r8sdckx7/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run 6n7gzh9n
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_154013-6n7gzh9n
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_3
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/6n7gzh9n
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6244673132896423
+       average_ibs          0.08562959730625153
+   val/ci_time_step_1       0.6415389776229858
+   val/ci_time_step_2       0.6133471727371216
+   val/ci_time_step_3       0.6151715517044067
+   val/ci_time_step_4       0.6278114914894104
+   val/ibs_time_step_1      0.11727370321750641
+   val/ibs_time_step_2      0.08697369694709778
+   val/ibs_time_step_3      0.07314524054527283
+   val/ibs_time_step_4      0.06512574851512909
+        val/loss            0.6695243716239929
+   val/propensity_loss      2.5402302742004395
+    val/survival_loss       1.3410279750823975
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 4/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.566
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.573
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.581
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.584
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.588
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.593
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.603
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.604
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.606
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.607
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.612
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.619
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.623
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.624
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.633
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.634
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.636
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.637
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.637
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.638
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.638
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.640
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.641
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.642
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.643
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.644
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.644
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.645
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.645
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.646
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.646
+`Trainer.fit` stopped: `max_epochs=300` reached.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: updating run metadata; uploading output.log; uploading history steps 945-960, summary, console lines 58-79
+wandb: uploading data
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▄▄▃▂▂▁▁▃▅▅▆▆▇▇▇▇▇▇█████████████████▇████
+wandb:                 average_ibs █▇▆▆▅▄▄▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▂▂▁▂▁▁▁
+wandb:                       epoch ▁▁▁▁▂▂▂▂▂▂▂▂▃▃▄▄▄▄▄▄▄▅▅▅▅▆▆▆▆▆▆▆▇▇▇█████
+wandb:                    lr-AdamW ██████████▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                  train/loss █▇▇▇▇▆▆▆▆▅▄▄▃▃▃▃▃▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▁▂▂▄▄▄▄▅▆▇▇███████████████████████████
+wandb:  train/propensity_loss_step ▁▁▂▃▄▄▅▅▅▇▇▇▇▇▇█████████████████████████
+wandb:   train/survival_loss_epoch ███▇▆▆▅▅▅▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step █▇▇█▆▅▄▃▄▃▅▄▄▃▃▂▃▂▃▃▂▃▂▃▃▂▃▄▂▁▂▂▂▂▄▂▂▂▂▃
+wandb:         trainer/global_step ▁▁▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▄▄▄▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇███
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.64349
+wandb:                 average_ibs 0.0874
+wandb:                       epoch 300
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.64608
+wandb: train/propensity_loss_epoch 2.53884
+wandb:  train/propensity_loss_step 2.53919
+wandb:   train/survival_loss_epoch 1.31722
+wandb:    train/survival_loss_step 1.39483
+wandb:         trainer/global_step 10500
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_3 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/6n7gzh9n
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_154013-6n7gzh9n/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run mya8e0u3
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_155348-mya8e0u3
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_4
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/mya8e0u3
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6434923410415649
+       average_ibs          0.08740416169166565
+   val/ci_time_step_1       0.6665989756584167
+   val/ci_time_step_2       0.6472427845001221
+   val/ci_time_step_3       0.6352580785751343
+   val/ci_time_step_4       0.6248695254325867
+   val/ibs_time_step_1      0.12361587584018707
+   val/ibs_time_step_2      0.08731485903263092
+   val/ibs_time_step_3      0.07333121448755264
+   val/ibs_time_step_4      0.06535471230745316
+        val/loss            0.6828557848930359
+   val/propensity_loss       2.538616418838501
+    val/survival_loss       1.3539327383041382
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 5/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.550
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.551
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.551
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.555
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.563
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.568
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.569
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.570
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.579
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.584
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.591
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.592
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.594
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.600
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.606
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.612
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.614
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.616
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.626
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.631
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.633
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.635
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.636
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.636
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.636. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: uploading history steps 718-735, console lines 45-46; updating run metadata
+wandb: uploading history steps 718-735, console lines 45-46; uploading config.yaml
+wandb: uploading history steps 718-735, console lines 45-46
+wandb: uploading history steps 736-736, summary, console lines 47-66
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▁▁▁▂▂▃▃▃▃▃▆▇▇▇▇▇███▇████████▇█▇████▇▇▇▇█
+wandb:                 average_ibs █▇▆▆▆▆▅▅▅▅▄▄▄▄▃▃▃▃▃▃▂▃▂▂▃▃▂▂▂▂▂▂▂▁▂▁▂▁▁▂
+wandb:                       epoch ▁▁▁▁▁▁▂▂▂▂▂▂▃▃▃▃▃▃▃▃▄▄▄▄▄▄▄▅▅▆▆▇▇▇▇▇▇▇▇█
+wandb:                    lr-AdamW █████████████████████▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁
+wandb:                  train/loss ███▇▇▆▆▆▅▅▄▄▄▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▃▃▃▃▃▃▄▄▅▆▆▆▆▇▇▇▇▇▇████████████████████
+wandb:  train/propensity_loss_step ▁▁▁▁▂▅▅▅▅▆▇▇▇▇▇▇▇███████████████████████
+wandb:   train/survival_loss_epoch ███▇▇▇▇▆▆▆▅▅▅▅▅▄▄▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step █▆▇▆▆▅▆▆▅▅▄▅▄▆▅▅▃▃▄▃▄▄▃▄▄▃▄▃▃▃▃▂▄▃▃▃▂▂▄▁
+wandb:         trainer/global_step ▁▁▁▂▂▂▃▃▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▅▆▆▆▇▇▇▇▇▇████
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.62793
+wandb:                 average_ibs 0.08511
+wandb:                       epoch 230
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.66426
+wandb: train/propensity_loss_epoch 2.53832
+wandb:  train/propensity_loss_step 2.53817
+wandb:   train/survival_loss_epoch 1.33526
+wandb:    train/survival_loss_step 1.36075
+wandb:         trainer/global_step 8050
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_4 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/mya8e0u3
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_155348-mya8e0u3/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run m409lnz4
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_160416-m409lnz4
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_5
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/m409lnz4
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6279308199882507
+       average_ibs          0.08510737121105194
+   val/ci_time_step_1        0.65133136510849
+   val/ci_time_step_2       0.6288596987724304
+   val/ci_time_step_3        0.623123824596405
+   val/ci_time_step_4       0.6084082722663879
+   val/ibs_time_step_1       0.11990986764431
+   val/ibs_time_step_2      0.08323758095502853
+   val/ibs_time_step_3      0.07409874349832535
+   val/ibs_time_step_4      0.06318329274654388
+        val/loss             0.671924352645874
+   val/propensity_loss      2.5425236225128174
+    val/survival_loss        1.344034194946289
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 6/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.508
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.512
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.512
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.515
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.516
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.525
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.536
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.545
+Metric average_ci improved by 0.013 >= min_delta = 0.0. New best score: 0.559
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.567
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.572
+Metric average_ci improved by 0.021 >= min_delta = 0.0. New best score: 0.592
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.595
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.602
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.605
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.613
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.631
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.636
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.643
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.647
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.651
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.656
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.661
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.666
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.670
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.672
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.675
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.677
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.677
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.679
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.680
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.680. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading config.yaml
+wandb: uploading history steps 410-422, summary, console lines 52-73
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▁▁▁▂▂▃▄▄▅▅▅▆▆▇▇▇▇████████▇▇▇▇█▇▇▇▇▇▇▇▇▇▇
+wandb:                 average_ibs ██▇▇▇▆▆▆▆▆▆▆▆▆▆▆▆▆▇▆▆▆▆▄▃▃▃▃▃▃▂▂▂▂▂▁▂▂▂▁
+wandb:                       epoch ▁▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▅▅▅▆▆▆▆▆▆▆▆▇▇▇▇▇▇█
+wandb:                    lr-AdamW ██████████████████████████████▁▁▁▁▁▁▁▁▁▁
+wandb:                  train/loss ██▇▇▇▆▆▆▆▆▅▅▅▅▄▄▄▄▄▄▃▃▃▃▃▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▁▁▁▁▁▂▃▃▃▄▄▄▅▅▅▅▆▆▆▆▇▇▇▇▇▇████████████
+wandb:  train/propensity_loss_step ▁▁▁▁▁▁▂▂▂▂▂▃▃▃▄▆▆▆▆▇▇▇▇▇▇▇▇█▇▇██████████
+wandb:   train/survival_loss_epoch █▇▇▇▇▇▇▇▇▇▆▆▆▆▅▅▅▅▅▄▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▁▁▁▁▁
+wandb:    train/survival_loss_step ██▇▆▆▇▇█▆▇▆▅▅▆▇▇▃▅▆▆▄▄▄▄▃▄▄▃▄▃▄▃▃▂▃▁▃▄▂▄
+wandb:         trainer/global_step ▁▁▁▁▁▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▅▅▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇███
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.65723
+wandb:                 average_ibs 0.09956
+wandb:                       epoch 132
+wandb:                    lr-AdamW 3e-05
+wandb:                  train/loss 0.70038
+wandb: train/propensity_loss_epoch 2.53405
+wandb:  train/propensity_loss_step 2.53388
+wandb:   train/survival_loss_epoch 1.37025
+wandb:    train/survival_loss_step 1.3804
+wandb:         trainer/global_step 4620
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_5 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/m409lnz4
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_160416-m409lnz4/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run xrfrcncc
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_161023-xrfrcncc
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_6
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/xrfrcncc
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6572301387786865
+       average_ibs          0.0995611697435379
+   val/ci_time_step_1       0.6524093747138977
+   val/ci_time_step_2       0.6507861018180847
+   val/ci_time_step_3       0.6594548225402832
+   val/ci_time_step_4       0.6662701368331909
+   val/ibs_time_step_1      0.14092881977558136
+   val/ibs_time_step_2       0.098680280148983
+   val/ibs_time_step_3      0.08361668884754181
+   val/ibs_time_step_4      0.07501886785030365
+        val/loss            0.7635484337806702
+   val/propensity_loss      2.5391972064971924
+    val/survival_loss       1.4347789287567139
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 7/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.532
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.539
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.544
+Metric average_ci improved by 0.015 >= min_delta = 0.0. New best score: 0.559
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.561
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.566
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.577
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.578
+Metric average_ci improved by 0.011 >= min_delta = 0.0. New best score: 0.589
+Metric average_ci improved by 0.012 >= min_delta = 0.0. New best score: 0.601
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.601
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.609
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.623
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.624
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.629
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.634
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.634
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.637
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.637
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.637
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.642
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.643
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.645
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.647
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.647
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.648
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.651
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.652
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.652
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.654
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.655
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.655
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.657
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.657
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.660
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.660. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading history steps 647-659, summary, console lines 59-80
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▁▁▂▂▃▅▅▆▆▆▆▆▆▆▆▇▇▇▇▇▇▇▇▇████████████████
+wandb:                 average_ibs ███▇▇▆▆▅▄▄▃▃▃▂▂▂▂▂▂▂▂▂▂▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                       epoch ▁▁▁▂▂▂▂▂▃▃▃▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▆▆▆▆▇▇▇▇█████
+wandb:                    lr-AdamW ████████████████████████▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁
+wandb:                  train/loss ██▇▇▇▆▆▆▆▆▆▅▅▅▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▁▂▃▃▄▄▄▄▄▅▅▅▅▇▇▇▇▇▇▇▇█████████████████
+wandb:  train/propensity_loss_step ▁▁▁▁▂▂▂▂▃▃▄▄▆▆▆▇▇▇▇▇▇▇▇█████████████████
+wandb:   train/survival_loss_epoch █▇▇▇▇▇▆▆▆▆▆▆▅▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step █▆▅▆▆▆▆▃▃▄▄▄▃▄▃▃▃▂▃▁▄▂▃▂▂▂▃▃▁▂▃▂▂▂▂▂▁▂▁▂
+wandb:         trainer/global_step ▁▁▁▁▂▂▂▂▃▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇█
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.65683
+wandb:                 average_ibs 0.088
+wandb:                       epoch 206
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.66648
+wandb: train/propensity_loss_epoch 2.53566
+wandb:  train/propensity_loss_step 2.53772
+wandb:   train/survival_loss_epoch 1.33678
+wandb:    train/survival_loss_step 1.34504
+wandb:         trainer/global_step 7210
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_6 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/xrfrcncc
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_161023-xrfrcncc/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run 7empud2q
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_161948-7empud2q
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_7
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/7empud2q
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6568265557289124
+       average_ibs          0.08800145983695984
+   val/ci_time_step_1       0.6763967275619507
+   val/ci_time_step_2       0.6582075953483582
+   val/ci_time_step_3       0.6508346796035767
+   val/ci_time_step_4       0.6418672204017639
+   val/ibs_time_step_1      0.12372396141290665
+   val/ibs_time_step_2      0.09002655744552612
+   val/ibs_time_step_3      0.07499028742313385
+   val/ibs_time_step_4      0.06326504051685333
+        val/loss            0.6772329807281494
+   val/propensity_loss       2.538862466812134
+    val/survival_loss       1.3483749628067017
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 8/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.521
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.522
+Metric average_ci improved by 0.011 >= min_delta = 0.0. New best score: 0.533
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.533
+Metric average_ci improved by 0.008 >= min_delta = 0.0. New best score: 0.541
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.546
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.554
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.556
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.563
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.566
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.568
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.572
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.574
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.576
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.578
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.583
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.587
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.589
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.592
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.596
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.604
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.605
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.608
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.610
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.620
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.626
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.626
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.628
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.631
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.636
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.637
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.640
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.641
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.641
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.642
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.644
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.645
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.646
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.646. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading output.log; uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▂▁▁▁▁▄▄▄▄▅▅▅▆▆▆▇▇▇▇▇▇███████████████████
+wandb:                 average_ibs █▇▇▆▅▄▄▄▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▂▁▁▂▁▁▁▁▁▁▁▁▁▁▁
+wandb:                       epoch ▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▄▅▅▆▆▆▆▆▆▇▇▇▇▇█████
+wandb:                    lr-AdamW ██████████████████▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁
+wandb:                  train/loss █▇▇▆▆▅▄▄▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▁▂▂▃▄▄▅▅▇▇▇▇▇▇▇███████████████████████
+wandb:  train/propensity_loss_step ▁▂▂▂▄▅▅▆▆▆▇▇▇▇▇▇████████████████████████
+wandb:   train/survival_loss_epoch █▇▇▇▇▆▆▅▅▅▄▄▄▃▃▃▃▃▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step █▇▆▅▇▅▆▄▅▆▄▄▄▃▄▄▃▃▂▃▃▃▂▃▃▃▂▃▃▃▂▂▂▃▃▁▃▁▂▁
+wandb:         trainer/global_step ▁▁▂▂▂▂▃▃▃▃▃▃▃▃▃▄▄▄▄▄▄▄▅▅▅▆▆▆▆▆▇▇▇▇▇█████
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.64236
+wandb:                 average_ibs 0.0844
+wandb:                       epoch 238
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.66744
+wandb: train/propensity_loss_epoch 2.53717
+wandb:  train/propensity_loss_step 2.5346
+wandb:   train/survival_loss_epoch 1.33814
+wandb:    train/survival_loss_step 1.29467
+wandb:         trainer/global_step 8330
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_7 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/7empud2q
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_161948-7empud2q/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run ntxi188t
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_163036-ntxi188t
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_8
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/ntxi188t
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6423566341400146
+       average_ibs          0.08440088480710983
+   val/ci_time_step_1       0.6668120622634888
+   val/ci_time_step_2        0.637494683265686
+   val/ci_time_step_3       0.6268108487129211
+   val/ci_time_step_4       0.6383089423179626
+   val/ibs_time_step_1      0.12499403208494186
+   val/ibs_time_step_2      0.08390136063098907
+   val/ibs_time_step_3      0.06794144213199615
+   val/ibs_time_step_4     0.060766737908124924
+        val/loss            0.6723587512969971
+   val/propensity_loss       2.538539409637451
+    val/survival_loss        1.343415379524231
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 9/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.487
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.491
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.496
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.499
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.501
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.507
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.509
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.514
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.523
+Metric average_ci improved by 0.012 >= min_delta = 0.0. New best score: 0.535
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.538
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.548
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.553
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.560
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.561
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.564
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.567
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.569
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.570
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.576
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.579
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.581
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.586
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.591
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.598
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.598
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.602
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.604
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.613
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.613
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.615
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.617
+Metric average_ci improved by 0.005 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.623
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.624
+Monitored metric average_ci did not improve in the last 30 records. Best score: 0.624. Signaling Trainer to stop.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading output.log; uploading wandb-summary.json
+wandb: uploading history steps 699-710, summary, console lines 56-77
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▁▁▂▂▃▄▄▅▅▅▅▅▅▅▅▇▇▇▇█████████████████████
+wandb:                 average_ibs ███▇▇▇▇▇▇▆▆▅▅▅▅▄▄▄▃▃▃▃▃▃▃▂▂▂▂▂▂▂▂▁▂▁▁▁▁▁
+wandb:                       epoch ▁▁▁▁▂▂▂▂▂▃▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▆▆▇▇▇▇▇██
+wandb:                    lr-AdamW ████████████████████▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁
+wandb:                  train/loss ██▇▇▇▆▆▆▅▅▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▁▂▃▄▅▅▅▅▆▇▇▇▇▇▇▇▇▇████████████████████
+wandb:  train/propensity_loss_step ▁▁▂▂▂▃▃▃▄▄▆▆▆▆▆▆▇▇▇▇▇▇▇█████████████████
+wandb:   train/survival_loss_epoch ██▇▇▇▇▆▆▆▆▆▆▆▅▅▄▄▄▄▃▃▃▃▃▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step ██▆▆█▇▆▆▆▆▄▅▄▃▃▄▄▃▄▃▅▄▃▄▄▂▄▂▂▃▂▁▃▂▂▃▂▁▂▁
+wandb:         trainer/global_step ▁▁▁▁▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▆▆▆▆▇▇▇▇▇▇▇███
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.62181
+wandb:                 average_ibs 0.09054
+wandb:                       epoch 222
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.66374
+wandb: train/propensity_loss_epoch 2.5364
+wandb:  train/propensity_loss_step 2.53818
+wandb:   train/survival_loss_epoch 1.33423
+wandb:    train/survival_loss_step 1.36106
+wandb:         trainer/global_step 7770
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_8 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/ntxi188t
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_163036-ntxi188t/logs
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+wandb: setting up run ozeosc51
+wandb: Tracking run with wandb version 0.22.3
+wandb: Run data is saved locally in ../training_logs/wandb/run-20260114_164037-ozeosc51
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run trial_63_fold_9
+wandb: ⭐️ View project at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: 🚀 View run at https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/ozeosc51
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name               | Type             | Params | Mode 
+----------------------------------------------------------------
+0 | lstm               | embed_LSTM_ITE   | 55.9 K | train
+1 | init_h_mlp         | MLP              | 2.7 K  | train
+2 | init_p_mlp         | MLP              | 2.0 K  | train
+3 | treatment_head     | MLP              | 10.1 K | train
+4 | propensityhead     | MLP              | 6.8 K  | train
+5 | propensity_loss_fn | CrossEntropyLoss | 0      | train
+----------------------------------------------------------------
+77.5 K    Trainable params
+0         Non-trainable params
+77.5 K    Total params
+0.310     Total estimated model params size (MB)
+99        Modules in train mode
+0         Modules in eval mode
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6218113899230957
+       average_ibs          0.09054090082645416
+   val/ci_time_step_1       0.6333361268043518
+   val/ci_time_step_2        0.617232620716095
+   val/ci_time_step_3       0.6223421096801758
+   val/ci_time_step_4       0.6143346428871155
+   val/ibs_time_step_1      0.12762847542762756
+   val/ibs_time_step_2      0.09001491963863373
+   val/ibs_time_step_3      0.07547073811292648
+   val/ibs_time_step_4      0.06904947012662888
+        val/loss            0.7048856616020203
+   val/propensity_loss       2.538926124572754
+    val/survival_loss        1.376044511795044
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[Trial 63] Starting fold 10/10
+Loaded 50285 rows, 19657 patients.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py:310: The number of training batches (35) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Metric average_ci improved. New best score: 0.558
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.561
+Metric average_ci improved by 0.012 >= min_delta = 0.0. New best score: 0.574
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.580
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.587
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.593
+Metric average_ci improved by 0.010 >= min_delta = 0.0. New best score: 0.603
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.606
+Metric average_ci improved by 0.006 >= min_delta = 0.0. New best score: 0.612
+Metric average_ci improved by 0.009 >= min_delta = 0.0. New best score: 0.622
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.626
+Metric average_ci improved by 0.004 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.630
+Metric average_ci improved by 0.007 >= min_delta = 0.0. New best score: 0.638
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.639
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.643
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.644
+Metric average_ci improved by 0.003 >= min_delta = 0.0. New best score: 0.648
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.649
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.649
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.651
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.651
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.652
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.652
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.654
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.654
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.656
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.656
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.657
+Metric average_ci improved by 0.002 >= min_delta = 0.0. New best score: 0.658
+Metric average_ci improved by 0.000 >= min_delta = 0.0. New best score: 0.659
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.660
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.661
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.662
+Metric average_ci improved by 0.001 >= min_delta = 0.0. New best score: 0.663
+`Trainer.fit` stopped: `max_epochs=300` reached.
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python3 DynaSurvCausalOnlineCVSearch.py --trial_id 63 --spl ...
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/gpfs/users/bensalama/.conda/envs/pytorch_env/lib/python3.12/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:433: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+Loaded 50285 rows, 19657 patients.
+wandb: updating run metadata
+wandb: uploading history steps 955-960, summary, console lines 55-76
+wandb: 
+wandb: Run history:
+wandb:                  average_ci ▃▃▂▂▁▄▄▄▆▆▇▇▇█▇█████████████████████████
+wandb:                 average_ibs █▇▇▇▇▆▆▅▅▅▄▄▃▃▃▃▃▃▃▃▃▂▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁
+wandb:                       epoch ▁▁▁▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇▇███
+wandb:                    lr-AdamW ████████████████████▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁
+wandb:                  train/loss █▇▆▆▅▅▄▄▄▄▄▄▄▃▃▃▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/propensity_loss_epoch ▁▁▃▄▄▅▅▅▅▆▇▇▇▇▇█████████████████████████
+wandb:  train/propensity_loss_step ▁▂▂▃▄▆▆▆▇▇▇▇▇▇▇█▇▇██████████████████████
+wandb:   train/survival_loss_epoch ███▇▅▄▄▄▄▃▃▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    train/survival_loss_step ▇█▆▅▆▄▆▃▄▅▅▄▃▅▃▃▃▃▄▂▂▃▄▄▃▄▃▄▂▃▂▄▃▃▂▂▃▁▁▄
+wandb:         trainer/global_step ▁▁▁▂▂▂▂▂▃▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▆▆▇▇▇███
+wandb:                         +11 ...
+wandb: 
+wandb: Run summary:
+wandb:                  average_ci 0.65232
+wandb:                 average_ibs 0.08883
+wandb:                       epoch 300
+wandb:                    lr-AdamW 2e-05
+wandb:                  train/loss 0.64726
+wandb: train/propensity_loss_epoch 2.53922
+wandb:  train/propensity_loss_step 2.54047
+wandb:   train/survival_loss_epoch 1.3185
+wandb:    train/survival_loss_step 1.38102
+wandb:         trainer/global_step 10500
+wandb:                         +11 ...
+wandb: 
+wandb: 🚀 View run trial_63_fold_9 at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-/runs/ozeosc51
+wandb: ⭐️ View project at: https://wandb.ai/malekbensalah-perso-centralesup-lec/RandomCVSearch_4lines_HR%2BHER2-
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ../training_logs/wandb/run-20260114_164037-ozeosc51/logs
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Validate metric           DataLoader 0
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       average_ci           0.6523182988166809
+       average_ibs          0.08883483707904816
+   val/ci_time_step_1       0.6626833081245422
+   val/ci_time_step_2       0.6578921675682068
+   val/ci_time_step_3        0.646179735660553
+   val/ci_time_step_4       0.6425178647041321
+   val/ibs_time_step_1      0.1222730502486229
+   val/ibs_time_step_2      0.09097176790237427
+   val/ibs_time_step_3      0.07500393688678741
+   val/ibs_time_step_4      0.06709058582782745
+        val/loss            0.6818061470985413
+   val/propensity_loss      2.5389933586120605
+    val/survival_loss        1.352982759475708
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

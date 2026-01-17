@@ -2,12 +2,11 @@ import argparse
 import json
 import os
 import random
-from datetime import datetime
 
 import lightning as L
 import numpy as np
 import wandb
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import LearningRateMonitor, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.CV_online_data_utils import ESMEOnlineDataModuleCV
@@ -94,7 +93,7 @@ def main(config, split_seed, trial_id, n_folds, project_name):
             	reinit=True,
             	save_dir="../training_logs",
 				)	
-            callbacks.append(LearningRateMonitor(logging_interval="epoch"))
+            callbacks.append(LearningRateMonitor(logging_interval="epoch")) #type: ignore
 
         trainer = L.Trainer(
             max_epochs=config["max_epochs"],
@@ -149,7 +148,7 @@ def sample_config():
         "init_p_dropout": np.random.uniform(0.0, 0.5),
         "mlpprop_dropout": np.random.uniform(0.0, 0.5),
         "lambda_prop_loss": np.random.uniform(0.0, 1.0),
-        "max_epochs": 5,
+        "max_epochs": 300,
         "lr": 10 ** np.random.uniform(-5, -2),
         "weight_decay": 10 ** np.random.uniform(-6, -2),
         "lr_scheduler_stepsize": random.choice([50, 100, 200]),
@@ -163,6 +162,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_id", type=int, required=False)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
+    
     parser.add_argument("--project_name", type=str, default=None)
 
     args = parser.parse_args()

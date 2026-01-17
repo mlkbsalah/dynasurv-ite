@@ -95,6 +95,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                  n_lines: int, 
                  n_intervals: int,
                  batch_size: int,
+                 final_training: bool = False,
                  fold_idx: int | None = None,
                  num_folds: int | None = None,
                  split_seed: int | None = None,
@@ -114,6 +115,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.split_seed = split_seed
         self.holdout_size = holdout_size
         self.num_workers = num_workers
+        self.final_training = final_training
 
         self.data = None
         self.ESMEDataset = None
@@ -174,20 +176,24 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         generator = torch.Generator().manual_seed(self.split_seed)
         self.cv_dataset, self.holdout_dataset = TorchData.random_split(self.ESMEDataset, [cv_size, holdout_size], generator=generator)
         
+        if self.final_training:
+            if stage == 'fit' or stage is None:
+                self.train_dataset = self.cv_dataset
+                self.val_dataset = self.holdout_dataset
+            if stage == 'test' or stage is None:
+                self.test_dataset = self.holdout_dataset
+        else:
+            if stage == 'fit' or stage is None:
+                kfold = KFold(n_splits=self.num_folds or 5, shuffle=True, random_state=self.split_seed)
+                all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))] # type: ignore
+                train_idx, val_idx = all_splits[self.fold_idx]
+                train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
+                
+                self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
+                self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
 
-
-        if stage == 'fit' or stage is None:
-            assert self.fold_idx is not None and self.num_folds is not None, "fold_idx and num_folds must be provided for cross-validation."
-            kfold = KFold(n_splits=self.num_folds or 5, shuffle=True, random_state=self.split_seed)
-            all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))] # type: ignore
-            train_idx, val_idx = all_splits[self.fold_idx]
-            train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
-            
-            self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
-            self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
-
-        if stage == 'test' or stage is None:
-            self.test_dataset = self.holdout_dataset
+            if stage == 'test' or stage is None:
+                self.test_dataset = self.holdout_dataset
 
 
     def train_dataloader(self):
