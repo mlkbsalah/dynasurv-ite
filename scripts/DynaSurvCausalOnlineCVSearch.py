@@ -2,12 +2,11 @@ import argparse
 import json
 import os
 import random
-from datetime import datetime
 
 import lightning as L
 import numpy as np
 import wandb
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import LearningRateMonitor, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.CV_online_data_utils import ESMEOnlineDataModuleCV
@@ -163,6 +162,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_id", type=int, required=False)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
+    
     parser.add_argument("--project_name", type=str, default=None)
 
     args = parser.parse_args()
