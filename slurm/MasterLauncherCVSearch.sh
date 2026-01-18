@@ -45,3 +45,10 @@ AGG_JOB_ID=$(sbatch --parsable \
     --dependency=afterok:$ARRAY_JOB_ID \
     --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME" \
     AggregateTrials.sh)
+
+
+#Train final model on full data and validate on hold out test set
+TRAIN_FINAL_JOB_ID=$(sbatch --parsable \
+    --dependency=afterok:$AGG_JOB_ID \
+    --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME" \
+    TrainFinalModel.sh)
