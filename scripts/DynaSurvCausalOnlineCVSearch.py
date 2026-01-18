@@ -110,7 +110,7 @@ def main(model_config, train_config, split_seed, trial_id, n_folds, project_name
         trainer.fit(model, datamodule=DataModuleCV)
         val_res = trainer.validate(model, datamodule=DataModuleCV)[0]
 
-        loss_folds.append(val_res["val/loss"])
+        loss_folds.append(val_res["val_loss"])
         average_ci_folds.append(val_res["average_ci"])
         average_ibs_folds.append(val_res["average_ibs"])
 	
@@ -118,6 +118,7 @@ def main(model_config, train_config, split_seed, trial_id, n_folds, project_name
 
     return {
         "mean_loss": float(np.mean(loss_folds)),
+	"std_loss":float(np.std(loss_folds)),
         "mean_ci": float(np.mean(average_ci_folds)),
         "std_ci": float(np.std(average_ci_folds)),
         "mean_ibs": float(np.mean(average_ibs_folds)),
