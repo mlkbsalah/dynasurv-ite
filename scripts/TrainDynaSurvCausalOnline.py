@@ -69,12 +69,26 @@ def main(model_config, train_config, split_seed):
             verbose=True
             ),
         ModelCheckpoint(
-            monitor=train_config['early_stopping']['monitor'],
-            mode=train_config['early_stopping']['mode'],
+            monitor="val_loss",
+            mode="min",
             save_top_k=1,
             dirpath=f"../models/HR+HER2-/4lines/seed_{split_seed}/checkpoints/",
-            filename=f"dynaSurvCausalOnline-{{epoch:02d}}-{{{train_config['early_stopping']['monitor']}: .4f}}",
+            filename=f"dynaSurvCausalOnline-{{epoch:02d}}-{{val_loss: .4f}}",
             ),
+        ModelCheckpoint(
+            monitor="average_ci",
+            mode="max",
+            save_top_k=1,
+            dirpath=f"../models/HR+HER2-/4lines/seed_{split_seed}/checkpoints/",
+            filename=f"dynaSurvCausalOnline-bestCI-{{epoch:02d}}-{{average_ci: .4f}}",
+        )
+        ModelCheckpoint(
+            monitor="average_ibs",
+            mode="min",
+            save_top_k=1,
+            dirpath=f"../models/HR+HER2-/4lines/seed_{split_seed}/checkpoints/",
+            filename=f"dynaSurvCausalOnline-bestIBS-{{epoch:02d}}-{{average_ibs: .4f}}",
+        )
     ]
     
     logger = WandbLogger(
