@@ -204,7 +204,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
         
         loss, surv_loss, prop_loss = self._compute_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
-        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/survival_loss", surv_loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/propensity_loss", prop_loss, prog_bar=True, on_step=False, on_epoch=True)
 
