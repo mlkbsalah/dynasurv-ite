@@ -71,15 +71,7 @@ def main(config, split_seed, trial_id, n_folds, project_name):
         )
 
         callbacks = [
-            EarlyStopping(monitor="average_ci", mode="max", patience=30, verbose=True),
-            # LearningRateMonitor(logging_interval="step"),
-            # ModelCheckpoint(
-            #     monitor="average_ci",
-            #     mode="max",
-            #     save_top_k=1,
-            #     dirpath=f"../models/HR+HER2-/4lines/CV_sweep/seed_{split_seed}/trial_{trial_id}",
-            #     filename=f"fold{k+1}" + "_{epoch:02d}_{average_ci:.4f}",
-            # ),
+            EarlyStopping(monitor="val/loss", mode="min", patience=50, verbose=True),
         ]
         
         if not project_name:
