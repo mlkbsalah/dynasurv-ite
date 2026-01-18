@@ -27,4 +27,4 @@ if [[ -z "$SPLIT_SEED" ]]; then
 	exit 1
 fi
 
-sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED AggregateTrials.sh
+sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED TrainDynaSurvCausalOnline.sh

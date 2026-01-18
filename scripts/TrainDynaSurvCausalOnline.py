@@ -13,8 +13,8 @@ from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 
 def main(config, split_seed):
     data_module = ESMEOnlineDataModuleCV(
-        data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
-        # data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+        # data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+        data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
         n_lines=4,
         n_intervals=config['n_intervals'],
         batch_size=config['train_batch_size'],
@@ -62,13 +62,13 @@ def main(config, split_seed):
             monitor="average_ci",
             mode="max",
             save_top_k=1,
-            dirpath="../models/HR+HER2-/4lines/seed_{split_seed}/final_model",
+            dirpath=f"../models/HR+HER2-/4lines/seed_{split_seed}/checkpoints/",
             filename="dynaSurvCausalOnline-{epoch:02d}-{average_ci:.4f}",
         ),
     ]
     
     logger = WandbLogger(
-        project="DynaSurvCausalOnline_final_model",
+        project="DynaSurvCausalOnline_HR+HER2-_4lines_final_model",
         name=f"seed_{split_seed}",
         save_dir="../wandb_logs/",
     )
