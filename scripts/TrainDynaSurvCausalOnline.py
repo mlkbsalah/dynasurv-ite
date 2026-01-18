@@ -81,7 +81,7 @@ def main(model_config, train_config, split_seed):
             save_top_k=1,
             dirpath=f"../models/HR+HER2-/4lines/seed_{split_seed}/checkpoints/",
             filename=f"dynaSurvCausalOnline-bestCI-{{epoch:02d}}-{{average_ci: .4f}}",
-        )
+        ),
         ModelCheckpoint(
             monitor="average_ibs",
             mode="min",
