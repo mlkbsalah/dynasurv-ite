@@ -1,4 +1,0 @@
-[splits]
-batch_size = 256
-val_split = 0.2
-test_split = 0.1
