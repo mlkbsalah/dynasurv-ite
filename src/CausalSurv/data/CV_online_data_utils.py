@@ -15,7 +15,7 @@ def stack_by_lines(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
     return [group.to_numpy() for _, group in grouped]
 
 class ESMEOnlineDataset(TorchData.Dataset):
-    def __init__(self, X_list, X_static, P_list, P_static, d_list, time_list, event_list, n_lines: int, interval_bounds: torch.Tensor):
+    def __init__(self, X_list, X_static, P_list, P_static, d_list, time_list, event_list, patient_ids, n_lines: int, interval_bounds: torch.Tensor):
         """Class constructor for ESME dataset
 
         Args:
@@ -28,7 +28,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
             n_lines (int):             maximum number of lines to pad to
         
         Remarks:
-            Each patient sample contains all their lines, padded to n_lines.  # ← CHANGED
+            Each patient sample contains all their lines, padded to n_lines.
         """
         self.X_list = X_list
         self.X_static = X_static
@@ -37,6 +37,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
         self.d_list = d_list
         self.time_list = time_list
         self.event_list = event_list
+        self.patient_ids = patient_ids
 
         self.interval_bounds = interval_bounds
         self.n_lines = n_lines
@@ -72,6 +73,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
         d = self.d_list[idx]  # (n_lines_i, 1)
         time = self.time_list[idx]  # (n_lines_i, 1)
         event = self.event_list[idx]  # (n_lines_i, 1)
+        patient_id = self.patient_ids[idx] # patient identifier 
         
         x_padded, mask = self._pad_sequence(x, self.n_lines)
         p_padded = self._pad_sequence(p, self.n_lines)[0]
@@ -85,7 +87,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
         
         XPd = torch.cat([x_padded, p_padded, d_padded], dim=-1)
 
-        return XPd, (x_static, p_static), interval_idx, treatment_indices, time_padded.squeeze(), event_padded.squeeze(), mask.squeeze()
+        return XPd, (x_static, p_static), interval_idx, treatment_indices, time_padded.squeeze(), event_padded.squeeze(), mask.squeeze(), patient_id
 
 
     
@@ -145,8 +147,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         X_static_cols = [col for col in self.static_data.columns if col.startswith('X_')]
         P_static_cols = [col for col in self.static_data.columns if col.startswith('T_')]
 
-        P_encoded = pd.get_dummies(self.data[P_cols + ['usubjid']].astype(str), columns=P_cols, prefix="T") 
-        self.treatment_dict = {i: col for i, col in enumerate(P_encoded.columns)}
+        P_encoded = pd.get_dummies(self.data[P_cols + ['usubjid']], columns=P_cols, prefix="", prefix_sep="") 
+        self.treatment_dict = {i: col for i, col in enumerate(P_encoded.columns.drop('usubjid').tolist())}
 
 
         X_list = stack_by_lines(self.data, X_cols)
@@ -158,10 +160,17 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         X_static = torch.tensor(self.static_data[X_static_cols].values, dtype=torch.float32)
         P_static = torch.tensor(self.static_data[P_static_cols].values, dtype=torch.float32)
 
+        patient_ids = self.data['usubjid'].unique()
+
         self.interval_bounds = torch.linspace(0, self.data['Y_onset_to_death'].max(), self.n_intervals + 1)
 
 
-        self.ESMEDataset = ESMEOnlineDataset(X_list, X_static, P_list, P_static, d_list, time_list, event_list, self.n_lines, self.interval_bounds)
+        self.ESMEDataset = ESMEOnlineDataset(X_list=X_list,X_static=X_static, 
+                                             P_list=P_list, P_static=P_static, 
+                                             d_list=d_list, 
+                                             time_list=time_list, event_list=event_list, 
+                                             patient_ids=patient_ids, 
+                                             n_lines=self.n_lines, interval_bounds=self.interval_bounds)
 
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
@@ -262,7 +271,7 @@ if __name__ == "__main__":
     batch = next(iter(train_loader))
     print(f"First batch retrieved in {time.time() - start:.2f} seconds.")
     print("Batch contents:")
-    XPd, (x_static, p_static), interval_idx, treatment_indices, time, event, mask = batch
+    XPd, (x_static, p_static), interval_idx, treatment_indices, time, event, mask, patient_id = batch
     print("Batch XPd shape:", XPd.shape, "dtype:", XPd.dtype)
     print("Batch x_static shape:", x_static.shape, "dtype:", x_static.dtype)
     print("Batch p_static shape:", p_static.shape, "dtype:", p_static.dtype)
@@ -271,3 +280,4 @@ if __name__ == "__main__":
     print("Batch time shape:", time.shape, "dtype:", time.dtype)
     print("Batch event shape:", event.shape, "dtype:", event.dtype)
     print("Batch mask shape:", mask.shape, "dtype:", mask.dtype)
+    print("Batch patient_id shape:", patient_id.shape, "dtype:", patient_id.dtype)

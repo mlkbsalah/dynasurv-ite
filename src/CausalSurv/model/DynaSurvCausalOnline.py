@@ -185,7 +185,7 @@ class DynaSurvCausalOnline(L.LightningModule):
     def training_step(self, batch, batch_idx):
         """perform a training step"""
 
-        XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch  
+        XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = batch  
         
         if self.current_epoch == 0 and not self.km_ready:
             self._accumulate_data(time, event, mask)
@@ -201,7 +201,7 @@ class DynaSurvCausalOnline(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         """perform a validation step"""
         self._compute_censoring_km()
-        XPd, X_static, interval_idx, treatment_idx, time, event, mask = batch
+        XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = batch
         
         loss, surv_loss, prop_loss = self._compute_loss(XPd, X_static, treatment_idx, interval_idx, event, mask)
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
