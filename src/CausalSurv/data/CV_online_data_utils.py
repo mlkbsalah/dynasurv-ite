@@ -1,5 +1,5 @@
 from typing import Tuple
-
+from pathlib import Path
 import torch
 import lightning as L
 import torch.utils.data as TorchData
@@ -93,7 +93,8 @@ class ESMEOnlineDataset(TorchData.Dataset):
     
 class ESMEOnlineDataModuleCV(L.LightningDataModule):
     def __init__(self, 
-                 data_dir: str, 
+                 data_dir: str,
+                 subtype: str,
                  n_lines: int, 
                  n_intervals: int,
                  batch_size: int,
@@ -105,7 +106,10 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                  num_workers: int = 4
                  ):
         super().__init__()
-        self.data_dir = data_dir
+        self.data_dir = Path(data_dir)
+        self.subtype = subtype
+        assert self.subtype in ["HR+HER2-", "HER2+", "TN"], "subtype must be one of ['HR+HER2-', 'HER2+', 'TN']"
+
 
         self.n_lines = n_lines
         self.n_intervals = n_intervals
@@ -125,9 +129,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.interval_bounds = None
 
     def prepare_data(self):
-        esme_data = pd.read_parquet(self.data_dir)
-        # static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
-        static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")  # --- IGNORE ---
+        esme_data = pd.read_parquet(str(self.data_dir / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"))
+        static_data = pd.read_parquet(str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"))
 
         merged = esme_data.merge(
             static_data,
@@ -215,9 +218,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         return TorchData.DataLoader(self.test_dataset, batch_size=len(self.test_dataset), shuffle=False, num_workers=1, persistent_workers=False)
 
     def get_data_dimensions(self):
-        esme_data = pd.read_parquet(self.data_dir)
-        # static_data = pd.read_parquet("/workdir/bensalama/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")
-        static_data = pd.read_parquet("/Users/malek/TheLAB/DynaSurv/data/model_entry_imputes_data_STATIC_no_staging.parquet")  # --- IGNORE ---
+        esme_data = pd.read_parquet(str(self.data_dir / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"))
+        static_data = pd.read_parquet(str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"))
         static_data = static_data.loc[static_data['usubjid'].isin(esme_data['usubjid'].unique())].reset_index(drop=True)
         
         x_dim = len([col for col in esme_data.columns if col.startswith('X_') and not col.startswith('X_buffer_time')])
@@ -236,16 +238,17 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
 if __name__ == "__main__":
     import time 
-    data_module = ESMEOnlineDataModuleCV(data_dir="../../../data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
-                                       n_lines=2,
-                                       n_intervals=10,
-                                       batch_size=32,
-                                       fold_idx = 3,
-                                       num_folds=10,
-                                       split_seed=12345,
-                                       holdout_size=0.1,
-                                       num_workers=4
-                                       )
+    data_module = ESMEOnlineDataModuleCV(data_dir="../../../data",
+                                         subtype="HR+HER2-",
+                                         n_lines=2,
+                                         n_intervals=10,
+                                         batch_size=32,
+                                         fold_idx = 3,
+                                         num_folds=10,
+                                         split_seed=12345,
+                                         holdout_size=0.1,
+                                         num_workers=4
+                                         )
     print("DataModule initialized.")
     start = time.time()
     data_module.prepare_data()
