@@ -1,6 +1,8 @@
 #!/bin/bash
 
 N_TRIALS=1
+N_FOLDS=2
+SPLIT_SEED=0
 PROJECT_NAME=""
 DEV_MODE=0
 
@@ -31,8 +33,8 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: ./launch [options]"
       echo "Options:"
       echo "  -t, --n_trials      Number of trials (default: 1)"
-      echo "  -f, --n_folds       Number of folds (required)"
-      echo "  -s, --split_seed    Split seed (required)"
+      echo "  -f, --n_folds       Number of folds (required if not in dev mode)"
+      echo "  -s, --split_seed    Split seed (required if not in dev mode)"
       echo "  -p, --project_name  Project name"
       echo "  -dev, --dev_mode    Enable fast development run mode"
       exit 0
@@ -45,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 #Arguments parsing
-if [[ -z "$N_FOLDS" || -z "$SPLIT_SEED" ]]; then
+if [[ "$DEV_MODE" -eq 0 ]] && { [[ -z "$N_FOLDS" ]] || [[ -z "$SPLIT_SEED" ]]; }; then
 	echo "Usage: sbatch script.sh [n_trials] [n_folds] [split_seed] [project_name]"
 	echo "Error: Both n_folds and split_seed are required arguments"
 	exit 1
