@@ -63,6 +63,6 @@ log_message "Aggregation job submitted with job ID: $AGG_JOB_ID"
 TRAIN_FINAL_JOB_ID=$(sbatch --parsable \
     --dependency=afterok:$AGG_JOB_ID \
     --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME" \
-    TrainFinalModel.sh)
+    TrainDynaSurvCausalOnline.sh)
 
 log_message "Final model training submitted with job ID: $TRAIN_FINAL_JOB_ID"

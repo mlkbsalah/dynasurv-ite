@@ -1,5 +1,5 @@
 [trainer]
-max_epochs = 2
+max_epochs = 300
 
 [early_stopping]
 monitor = "val_loss"
