@@ -18,16 +18,15 @@ cd "$PROJECT_DIR/scripts"
 
 export PYTHONPATH="$PROJECT_DIR/src"
 
-echo "Running DynaSurvCausalOnlineCVSearch with the following parameters:"
-echo "Trial ID: ${SLURM_ARRAY_TASK_ID}"
-echo "Split Seed: $SPLIT_SEED"
-echo "Number of Folds: $N_FOLDS"
-echo "Development Mode: $DEV_MODE"
+FAST_DEV_FLAG=""
+if [[ "$DEV_MODE" -eq 1 ]]; then
+    FAST_DEV_FLAG="--fast_dev_run"
+fi
 
 # Script
 python3 DynaSurvCausalOnlineCVSearch.py \
         --trial_id ${SLURM_ARRAY_TASK_ID} \
         --split_seed $SPLIT_SEED \
         --n_folds $N_FOLDS \
-        --fast_dev_run $DEV_MODE \
+        $FAST_DEV_FLAG \
         ${PROJECT_NAME:+--project_name "$PROJECT_NAME"}
