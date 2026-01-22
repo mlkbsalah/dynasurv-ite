@@ -23,10 +23,6 @@ echo "Trial ID: ${SLURM_ARRAY_TASK_ID}"
 echo "Split Seed: $SPLIT_SEED"
 echo "Number of Folds: $N_FOLDS"
 echo "Development Mode: $DEV_MODE"
-if [[ -n "$PROJECT_NAME" ]]; then
-    echo "Project Name: $PROJECT_NAME"
-else
-    echo "Project Name: Not specified"
 
 # Script
 python3 DynaSurvCausalOnlineCVSearch.py \
@@ -34,4 +30,4 @@ python3 DynaSurvCausalOnlineCVSearch.py \
         --split_seed $SPLIT_SEED \
         --n_folds $N_FOLDS \
         --fast_dev_run $DEV_MODE \
-	${PROJECT_NAME:+--project_name "$PROJECT_NAME"}
+        ${PROJECT_NAME:+--project_name "$PROJECT_NAME"}
