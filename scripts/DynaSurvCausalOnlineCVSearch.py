@@ -164,7 +164,7 @@ def sample_config():
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--trial_id", type=int, required=False)
+    parser.add_argument("--trial_id", type=int, required=False, default=0)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--fast_dev_run", action="store_true")
