@@ -23,4 +23,5 @@ python3 DynaSurvCausalOnlineCVSearch.py \
         --trial_id ${SLURM_ARRAY_TASK_ID} \
         --split_seed $SPLIT_SEED \
         --n_folds $N_FOLDS \
+        --fast_dev_run $DEV_MODE \
 	${PROJECT_NAME:+--project_name "$PROJECT_NAME"}

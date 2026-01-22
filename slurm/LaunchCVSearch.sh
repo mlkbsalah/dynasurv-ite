@@ -2,6 +2,7 @@
 
 N_TRIALS=1
 PROJECT_NAME=""
+DEV_MODE=0
 
 # Parse flags
 while [[ $# -gt 0 ]]; do
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
       PROJECT_NAME="$2"
       shift 2
       ;;
+    -dev|--dev_mode)
+      DEV_MODE=1
+      shift 1
+      ;;
     -h|--help)
       echo "Usage: ./launch [options]"
       echo "Options:"
@@ -29,6 +34,7 @@ while [[ $# -gt 0 ]]; do
       echo "  -f, --n_folds       Number of folds (required)"
       echo "  -s, --split_seed    Split seed (required)"
       echo "  -p, --project_name  Project name"
+      echo "  -dev, --dev_mode    Enable fast development run mode"
       exit 0
       ;;
     *)
@@ -49,4 +55,10 @@ if [[ -z "$PROJECT_NAME" ]]; then
 	echo "Warning: unspecified project name, logging disabled" >&2
 fi
 
-sbatch --parsable --export=ALL,N_FOLDS=$N_FOLDS,SPLIT_SEED=$SPLIT_SEED,PROJECT_NAME=$PROJECT_NAME --array=0-$((N_TRIALS-1)) DynaSurvCausalOnlineCVSearch.sh
+if [[ "$DEV_MODE" -eq 1 ]]; then
+    echo "Development mode enabled: overriding n_trials to 2, n_folds to 2, and training epochs to 5"
+    N_TRIALS=2
+    N_FOLDS=2
+fi
+
+sbatch --parsable --export=ALL,N_FOLDS=$N_FOLDS,SPLIT_SEED=$SPLIT_SEED,PROJECT_NAME=$PROJECT_NAME,DEV_MODE=$DEV_MODE --array=0-$((N_TRIALS-1)) DynaSurvCausalOnlineCVSearch.sh

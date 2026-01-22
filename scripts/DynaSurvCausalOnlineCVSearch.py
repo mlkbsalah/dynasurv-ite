@@ -23,7 +23,11 @@ def load_config(config_path):
 # ==============================================================================
 # MAIN CV FUNCTION
 # ==============================================================================
-def main(model_config, train_config,  split_seed, trial_id, n_folds, project_name):
+def main(model_config, train_config,  split_seed, trial_id, n_folds, project_name, fast_dev_run=False):
+    if fast_dev_run:
+        n_folds = 2
+        train_config["trainer"]["max_epochs"] = 5
+
 
     loss_folds = []
     average_ci_folds = []
@@ -163,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_id", type=int, required=False)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
+    parser.add_argument("--fast_dev_run", action="store_true")
 
     parser.add_argument("--project_name", type=str, default=None)
 
@@ -182,6 +187,7 @@ if __name__ == "__main__":
         args.trial_id,
         args.n_folds,
         args.project_name,
+        args.fast_dev_run,
     )
 
     out_dir = f"../models/HR+HER2-/4lines/seed_{args.split_seed}"
