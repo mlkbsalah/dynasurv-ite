@@ -1,0 +1,270 @@
+\documentclass[a4paper,10pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{longtable}
+\usepackage{authblk}
+\usepackage{xcolor}
+
+% Page setup
+\geometry{margin=1in}
+
+% Title and Author info
+\title{Title}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section*{Abstract}
+Being able to accurately predict an individual advanced cancer patient's survival could be decisive in better guiding personal treatment decisions and developing new treatment strategies. For this purpose, one needs to model individual patients' trajectories, including personal and disease characteristics, and the type, chronology, and effectiveness of treatments already administered.
+In this setting, leveraging large real-world databases opens promising perspectives owing to the rich information they provide on the diversity of medical situations. Therefore, we developed a counterfactual attention-based recurrent neural network (RNN) model, DynaSurv, designed to predict the overall survival of patients with metastatic breast cancer (MBC) across treatment lines (TLs) and breast cancer subtypes. The counterfactual regression part enables us to have the trajectories that are not observed and see what the survival would if we give another treatment to the patient. The model's inputs were patients' clinical and epidemiological data, primary and metastatic disease characteristics, and detailed successive treatment history.
+We used long short-term memory (LSTM) cells or derivatives to capture the temporal dynamics and the long-term dependencies in the patient's disease trajectory and to model data sequences Then different treatment heads to model the application of the treatment to the patient. We incorporated an attention mechanism, allowing the model to assign weights to different features based on their relevance for predicting survival and the interpretability of the predictions. 
+We trained and evaluated the model on ==> N <== female patients with the most frequent subtype of MBC (hormone receptor-positive and human epithelial growth factor 2-negative, HR+HER2-) of the Epidemiological Strategy and Medical Economics (ESME) MBC cohort, a large national database of patients with MBC diagnosed between 2008 and 2021. 
+DynaSurv had a good discrimination capacity with mean areas under the receiver operating characteristic curve (AUCs) derived from multiple cross-permutations between ==> resutls here <== for six and 12-month overall survival from the onset of the first to fourth TLs, and a global time-dependent concordance index from 0.696 to 0.703. 
+Its integrated Brier scores range between ==> resutls here <==, and the calibration curves show good agreement with the data. Extensive analyses confirmed the robustness of the model across different subpopulations and its competitiveness compared to the SOTA models in terms of usual survival model metrics.
+
+
+\section{Introduction}
+In the context of advanced cancer, treatment decision-making is a patient-doctor shared process through which the choice of a therapeutic strategy is made, according to some general medical guidelines. Treatment goals are to improve the patient's survival while best preserving her or his quality of life ([1], [2], [3]). The choice can become, at some point, hard to make for long-lasting diseases, which are evolving and treated over a lengthy period. Indeed, each patient has a personal trajectory based on tumor biology, personal characteristics, and previous treatment pressure. Consequently, each patient and each disease will have a specific response to treatments. Being able to predict the overall survival and the expected treatment effectiveness for a given patient and treatment strategy at specific time points and under different hypothetical treatment options could be used to refine treatment choices, especially when the international recommendations are no longer sufficient because the patient already had several treatment lines (TLs) and can no longer be classified in a specific subgroup. [cite: 16-22]
+
+Female breast cancer (BC) is the most commonly diagnosed and deadliest cancer among women worldwide, causing 4.4 million deaths in 2020 ([1]). Metastatic breast cancer (MBC) causes the vast majority of these deaths. Three BC subtypes are now commonly admitted, including the so-called "triple-negative" subtype, the HER2-positive and the hormone receptor-positive and HER2-negative subtype (HR+/HER2-), associated with different behaviors, outcomes, and treatments. Patients who develop the most frequent BC subtype (HR+/HER2-), characterized by an expression of the hormones estrogen and/or progesterone receptors and the absence of human epithelial growth factor 2 (HER2) overexpression or gene amplification, face a long-term risk of metastatic relapse of around 20\%, and upon such event, a current median overall survival around 40 to 45 months ([5]). However, each patient's disease trajectory differs in the metastatic setting, with heterogeneous outcomes. Several situations require critical treatment choices during an HR+/HER2- MBC. Key decisional time points for each patient are the starting times of her TLs following disease progression. Many treatment options exist, all associated with expected benefits but also with sometimes bothersome toxicities. Being able to make more informed choices would be critical at these decisional steps to inform shared decision processes. [cite: 23-33]
+
+In survival analyses, the Cox proportional-hazards model (Cox-PH) is a reference model ([6]). It is mostly a regression model to which penalization can be added to produce "Cox Elastic" models ([7]). However, these models are based on strong assumptions, such as that the hazard rate is constant over time or that its logarithm is a linear function of the covariates. Recent works introduced survival models based on neural networks (NNs) that can learn non-linear and complex survival functions. The first extension of Cox-PH with NNs was proposed in [8], where a multilayer perceptron (MLP) replaced the linear function of the covariates. The superiority of this latest model and similar ones compared to Cox-PH seemed somewhat questionable ([9]). More recently, with the spectacular progress in training NNs and the subsequent development of artificial intelligence, some extensions outperformed the classical Cox-PH model ([10], [11]). However, the restraining hypothesis of proportional hazards is still present in these models. Longitudinal measurements are expected to help the model learn survival better and be more accurate. Consequently, models that could handle time-dependent covariates should have better results. This approach was used in [12] (DeepHit) and [13] (Cox-Time). The DeepHit model directly learns the estimated joint distribution of time events, making no assumptions on the relationship between covariates and the hazard rate, allowing it to be time-dependent. As for Cox-Time, it relies on a particular loss function built on the method of the nested case controls. Both models have been shown to outperform Cox-PH on several data sets. With a different objective, DeepCare ([14]) predicts the next disease progression and future medical outcomes for diabetes and mental health diseases. It models disease progression, recommends interventions at specified time steps, and predicts future risk. Its inputs are healthcare observations from electronic health records (EHR) that have been measured irregularly, depending on the progression of the patient's disease, comparable to the data we will use in our study. [cite: 34-50]
+
+To build a reliable prediction of survival outcomes at key time points of patients disease trajectory with MBC, we aimed to develop an attention-based recurrent neural network (RNN) based on clinicopathological and treatment data. At each time step, the model reads an input, updates the patient's medical history, and returns an output as a survival curve. The model is built on a long short-term memory (LSTM) cell, designed to capture the disease temporal dynamics and the long-term dependencies between the observed variables and the overall survival. Some simple attention layers ([15]) can be added to the model to allow interpretation of the results and underline the importance of the input variables to predict survival. The resulting method, DynaSurv, models a discrete survival curve for all patients and their associated dates, has the flexibility of NNs, and can provide an overview of the preponderance of input variables to predict survival. [cite: 51-55]
+
+In this article, we describe DynaSurv's development and its performances, and compare them to survival models in the most frequent (HR+/HER2-) subset of patients of the Epidemiological Strategy and Medical Economics (ESME) MBC cohort, a large real-world ongoing longitudinal French database of patients with MBC diagnosed between 2008 and 2021. Real-world data are certainly irregular by their very essence. Still, they allow the constitution of cohorts of substantial sizes and with a wide representation of pathology care practice ([16]). As such, they are essential to demonstrate the effectiveness of therapeutic strategies. [cite: 56-58]
+
+\section{Results}
+
+\subsection{DynaSurv: a recurrent neural network model for survival among MBC patients}
+We developed a new strategy to build dynamic hybrid NNs that can be decomposed into three groups of layers (see Figure 1). The first group comprises embedding layers (MLP-1 and MLP-2). The embedding layers help the model deal with one-hot encoded high-dimensional and sparse vectors. The second group is the most significant component of the model. It is built with an LSTM cell adapted to handle long-term dependencies in sequences. Besides the classical LSTM cell, an extension that allows different roles to diagnostic and treatment variables for survival prediction, adapted to the healthcare process, and designed to handle irregular timings between the progression dates, is also proposed (modified LSTM, M-LSTM). The last group (MLP-3) transitions between the output of the (M-)LSTM cell, also known as the hidden state of the cell, and the model output: the survival curve from the current time step for the studied patient. More precisely, at each time step $t_j$ corresponding to the onset of the j-th TL, the output is a vector $s_j$, each component being a conditional hazard probability. Based on the two versions of the LSTM cell, we thus propose two models, called DynaSurv (LSTM) and DynaSurv (M-LSTM). In the first variation of our model, we used only one embedding layer encoding all input variables and an LSTM cell. In the second version, we used two embedding layers to encode the two categories of covariates, diagnostic and treatment variables, that played distinct roles as input of the M-LSTM cell. [cite: 60-72]
+
+\subsection{Integration of attention to improve interpretability}
+We added two attention layers ([15]) to the DynaSurv (M-LSTM) model, designed to assign a score to all the input variables, allowing the model to consider each variable differently. See the Methods section for more details. If these new layers are inside the recurrent cell, the model is named DynaSurv (Recurrent attention), and if they are outside, the model is called DynaSurv (Attention). The second possibility allows the attention to differ for the same input variable, regardless of the time step. Finally, we used the trained DynaSurv (M-LSTM) model, to which we added the attention layers and trained the whole model. This last model is named DynaSurv (Recurrent attention fine-tuned). [cite: 100-106]
+
+\subsection{Models comparative performances}
+Our models were trained and cross-validated for the prediction of patients' overall survival from the onset of their TLs on 17,971 female patients of the ESME MBC cohort with HR+/HER2- MBC, diagnosed and initiating their first treatment between 2008 and 2021 in 18 French Comprehensive Cancer Centers (FCCCs). The input data are clinical and epidemiological data, patients' primary and metastatic tumors' clinical and pathological characteristics, and treatment administration data. The performance results of our 5 LSTM and M-LSTM models, including attention or not, are presented in Table \ref{tab:results1} and compared to Cox Elastic and Cox-Time models for the four first TLs. All the models are trained and evaluated on their ability to predict the survival of the patients from the onset of successive TLs. The models predict overall survival curves until 60 months. We only present the prediction results until the fourth date to have at least 1000 patients in each test set. [cite: 107-115]
+
+The areas under the receiver operating characteristic curves (AUCs) for the prediction of 6-month and 12-month survival for the first three dates were comparable or better with the DynaSurv (M-LSTM) model than the other models (between 0.770 and 0.814 across TLs). For the last date, the simplified LSTM model DynaSurv (LSTM) shared the best results (AUCs of 0.766 and 0.769) with the DynaSurv (Recurrent attention fine-tuned) model (0.766 and 0.770), not only in terms of AUCs but also for the time-dependent concordance index $(C^{td})$ and the integrated Brier score (IBS) (0.701 and 0.122). Regarding these two last metrics, we observed that, except for Cox-Time, the results are close between the different models. Cox Elastic, DynaSurv (LSTM), DynaSurv (M-LSTM), and DynaSurv (Recurrent attention fine-tuned) shared the best results. At the same time, the other attention-based methods had comparable results, and Cox-Time was under, especially in terms of $C^{td}$. Of note, for both the Cox Elastic and the Cox-Time models, one needs to fit a new model for each date of progression. On the contrary, our RNNs models can handle the data of all successive progression dates, and then one training phase is enough to predict survival from any progression date of the disease. [cite: 116-122]
+
+\subsection{Calibration}
+In addition to the IBS, we evaluated the calibration of the different models by plotting calibration curves ([17]). Figure 2 shows the calibration curves of the Cox Elastic, the DynaSurv (M-LSTM) model, and the DynaSurv (Recurrent attention fine-tuned) model. The calibration curves plot the proportion of deceased patients at T months as a function of the mean of the predicted probabilities to die before T months (for T equal to 6 or 12 months). Then, if the calibration curve is under the reference line (in the dashed line), the model is pessimistic. On the opposite, if the calibration curve is above the reference line, the model is optimistic. [cite: 123-128]
+
+To predict survival at six months, across different TLs from $t_1$ to $t_4$, the two DynaSurv models appeared well calibrated. To predict survival at 12 months, the results are more nuanced, with a pessimistic bias toward high-risk patient groups. Regarding Cox Elastic for the task of predicting survival at six months, the results appeared consistent overall: the model is pessimistic for groups at low risk and optimistic for those at high risk. For the prediction of the 1-year mortality, the above observation is still accurate, although a little attenuated, especially for $t_3$ and $t_4$. Then, we can conclude that our two models appeared generally better calibrated than Cox Elastic. [cite: 131-134]
+
+\section{Discussion}
+This study demonstrated that a long short-term memory (LSTM) cell-based NN could provide meaningful prognostication of MBC patients with standard daily available clinicopathological and treatment data. The sensitivity of our M-LSTM model (DynaSurv) to predict the risk of death within 6 and 12 months is 48\% and 44\% at a 90\% specificity in the first line. This sensitivity at 90\% specificity decreases to 38\% and 38\% for the fourth line. In internal validations, DynaSurv equals or outperforms the best available parametric models. [cite: 135-139]
+
+We developed five versions of our model, LSTM, M-LSTM, and three with attention layers. In the initial versions lacking attention, at least on the two first dates of patients' disease trajectory, the M-LSTM version of DynaSurv seems to work slightly better than the LSTM version. Later in the disease, the trend reverses from the third date, although the two models' performances remain close. The first explanation is that the specificity of the M-LSTM is useful for early dates, but its usefulness decreases as the disease progresses. A second explanation could be that, due to patients' attrition upon disease progression, the M-LSTM version is more difficult to train, given that it has more parameters than the LSTM version. We then developed three models that included attention layers to allow for explicability. Indeed, models with attention (recurrent or not) can explain which variables are important for the output. However, in our study, these models only sometimes obtain better results than the same model without attention. Thus, it might be necessary to accept having slightly less efficient models in NNs-based models to obtain more explicable ones. [cite: 140-149, 283]
+
+The difference between the results of the first two attention models was limited but always in the same direction: recurrent attention, although more constrained than non-recurrent attention, achieves better results. Having the same attention for each input variable, regardless of the time step concerned, gives better results on this dataset. Finally, the model with attention developed with previously-trained parameters for the other layers (DynaSurv-Recurrent attention fine-tuned) has promising results. [cite: 283-286]
+
+We compared the performances of our models with those of two state-of-the-art methods, Cox Elastic and Cox-Time. Unlike a recent model developed in patients with early BC ([18]), our NN models performed globally as good or better than the state-of-the-art available models. Cox Elastic's results appeared constantly better than its extension, Cox-Time. This should not be due to replacing a linear function with a NN, which is a generalization of the linear function. Thus, this could be due to using the case-control strategy or no longer imposing the proportionality of the survival curves. Another possibility to explain the differences in the results is that the function implemented for the Cox-Time method does not include any penalty in the loss function to be minimized. Overall, regarding $C^{td}$, 6-months and 12-months AUCs, and IBSs, our models generally performed as well or better than Cox Elastic, although they were often close. Regarding calibration, when comparing the DynaSurv (M-LSTM) model and the DynaSurv (Recurrent attention fine-tuned) model to Cox Elastic, our models had comparable or better calibration results than Cox Elastic across the first four dates. Thus, this encourages the use of the DynaSurv (M-LSTM) model, especially since it is easy to modify according to the dataset and saves power and computation time by requiring only one learning phase to be able to predict survival on all key time points of the disease, unlike for Cox Elastic. [cite: 287-296]
+
+As we have already noticed in the global calibration curves, for the prediction of survival at six months, DynaSurv models are better calibrated than Cox Elastic, whether for times $t_1$ to $t_4$. Indeed, the results are consistent: Cox Elastic is pessimistic for groups at low risk and optimistic for groups at high risk, while DynaSurv (M-LSTM) is quite well calibrated for all groups, except for the high-risk groups where it is slightly more pessimistic, and DynaSurv (Recurrent attention fine-tuned) is less smooth but well calibrated for all groups. The above observation is still accurate for predicting 1-year mortality, although attenuated for $t_4$. For the prediction at $t_4$, both methods have quite similar results in terms of calibration. [cite: 297-299]
+
+While well-validated overall survival models are available to guide treatment decisions for early BC, including the broadly used PREDICT model ([19]), no such validated model is currently available for patients with MBC. In this setting, a few models ([18]) have been developed that generally predict specific outcomes in specific subpopulations, such as patients with brain metastases. We have designed our model to guide treatment choices at times during patients trajectories, where important treatment choices are to be made based on the advent of the disease progression. Such a model could indeed have essential daily utility. The currently so-called "luminal" MBC (HR+/HER2-) is associated with very diverse biological characteristics and disease trajectories ([20]). The disease may be initially relatively indolent and become much more aggressive at later stages with rapid tumor progression and resistance to specific treatments. Genomic studies have recently highlighted this behavior, showing the evolutionary selection of aggressive subclones, sometimes under treatment pressure ([21], [22]). [cite: 300-305]
+
+Identifying women with aggressive HR+/HER2- MBC and especially a theoretical life expectancy of less than one year could modify treatment decisions, as previously suggested, by using other means, such as circulating tumor cells ([23]). More aggressive treatments may be proposed in second or later lines instead of endocrine therapies, such as, for instance, earlier access to antibody-drug conjugates that have been demonstrated to improve overall survival ([24], [25]). Conversely, predicting an overall survival of less than six months with good specificity could allow discussions on patients' priorities regarding aggressive treatments versus quality of life while entering a period that must be considered as their end of life ([26]). These developments, of course, shall require external validation of our model and a prospective assessment of its utility. Although some models have been developed recently to assess cancer patients' prognosis, they were disease-agnostic and mostly palliative care-oriented ([27]). A disease-specific assessment may be more reliable, more explainable, and potentially actionable regarding treatment decisions outside palliative care decisions. [cite: 306-311]
+
+The strengths of this study from the real-world data's point of view ([28]) are its development on a huge, nationwide real-world cohort of MBC patients, their full access of the patients to contemporary treatments based on universal national insurance coverage, and the quality and control of the source data. From a methodological point of view, they include the originality and novelty of the dedicated NN developed, the explicability of the model, and the systematic comparison, for all aspects of the work, between our artificial intelligence models and the best available parametric and semi-parametric methods. The robustness of our models' performances throughout TLs, internal validations, and through sensitivity analyses is a major point. Finally, our model has important potential clinical applications, as discussed previously. [cite: 312-317]
+
+Our study has limitations. The main issue is the lack of external validation of our models. This requires access to an equivalent cohort of patients with MBC. Smaller cohorts are available and will be used for this validation and utility testing in the next development steps. Other limitations are linked to the nature of the data source (EHR-based), with an absence of access to reimbursement data, an absence of biological and detailed tumor genomic data, and the delay between patients' real-world events and availability of related data in the database (around 18 months). [cite: 318-321]
+
+In summary, we presented an attention-based RNN model designed to recurrently predict the overall survival of patients during a long disease at several critical key time points. Our approach was meant to predict a patient's survival according to her medical history and the previous treatments received, with the possibility of highlighting the importance of the variables on the output. We have applied and compared our models on a real-world dataset containing 17,971 female patients with HR+/HER2- MBC. The results of our experiments demonstrated that our approach is competent and competitive with the best available methods. Based on a balance of its performances, calibration, and explicability that is necessary for the clinical use of such an approach, we chose the DynaSurv (Recurrent attention fine-tuned) model for subsequent clinical development. Future work includes extending this model to the two other BC subtypes and externally validating it before prospective testing to assess its clinical utility. [cite: 322-327]
+
+\section{Methods}
+
+\subsection{Database}
+\textbf{Description:} The ESME MBC patient database (Data registration: clinicaltrials.gov identifier NCT03275311) compiles patient EHR data and reports of multidisciplinary team meetings in an FCCC. It is an ongoing national cohort that centralizes all MBC patients first treated for metastatic disease in 18 FCCCs after January 1st, 2008. Data are updated every year, including new data for patients already in the database and adding new patients MBC-diagnosed during the year. By design, the dataset is ambispective. The collected information integrates patient data from medical records, multidisciplinary team meeting reports, hospitalization reports, and hospitals' pharmacy records. Data contains patient characteristics, primary tumor and relapse(s) information, details on the metastatic disease, and treatment strategies (for the primary tumor and the metastatic disease). Each data has a precise associated date. [cite: 331-335]
+
+\textbf{Ethics approval and data protection:} The ESME research program is managed by Unicancer in accordance with current best practice guidelines and rules. It is supervised by an independent steering committee. The ESME MBC database was authorized by the French data protection authority (initial authorization no. DE-2013-117 and subsequent amendment in accordance with the General Data Protection Regulation (GDPR)). An independent ethics committee (Comité De Protection Des Personnes Sud-Est II-2015-79) and an independent scientific committee specifically approved the present work. [cite: 336-339]
+
+\textbf{Quality of source data:} The methodology of case screening, data collection, including long-term follow-up, and data management in the ESME MBC cohort, has been extensively described previously ([20]). Briefly, the data collection and management organization follows the standards of clinical trials methodology, including quality controls and resolution of identified queries. [cite: 341-343]
+
+\textbf{Study design and patient selection:} For the present study, data were collected until the cut-off date for extraction $T_{co}$, i.e., February 3rd, 2022. Thus, as is common in survival datasets, right-censoring appeared: for all patients still alive at the cut-off date $T_{co}$, there was no information on their date of death except that it occurred after $T_{co}$. Our work considered all the censored and non-censored patients and used some adapted metrics to evaluate the different models. Moreover, we selected only female patients (as male cases are very rare and with less documented outcomes and treatment efficacy ([30])) who had at least one TL, MBC diagnosed after January 1st, 2008, with HR+/HER2- subtype. We selected patients with the HR+/HER2- subtype corresponding to above 70\% of BCs and with essential decision-making needs. [cite: 347-352]
+
+\textbf{Data description:} BC subtypes were defined according to immunohistochemical (IHC) analyses carried out using metastatic samples or, if not available, the last sample obtained from early disease. Tumors are considered HR-positive if the estrogen receptor (ER) and/or progesterone receptor (PR) expression was observed in 10\% of tumor cells. A negative fluorescence or chromogenic in situ hybridization (FISH/CISH) test, with 0-2 HER2 IHC score or without HER2 IHC information, leads to a HER2-negative status ([31], [32]). A HER2 IHC 2+ score without an available FISH/CISH test was considered indeterminate HER2 status, and patients were excluded from the present analyses. The HR+/HER2- subtype was defined by an HR+ status (either ER or PR positive) and a HER2- status. De novo metastatic disease is defined as the presence of metastases diagnosed within six months from the diagnosis of the primary tumor. "Relapsed" MBC is defined as non-de novo. [cite: 362-368]
+
+Progression dates and the beginning of TL dates are key time points in each patient's disease. That is why we built our input data to be consistent with these dates. A progression date is a time point when the progression of the disease is observed. It is a crucial date to select the next TL and when it will start. Then, assuming that the patient is still alive at the beginning of the TL, the model is trained to predict overall survival from the first day of the TL. In terms of data, we built an input database with, for each patient and each TL, a set of variables summarizing all her medical history up to the corresponding progression date and incorporating the next TL to come. Thus, the models can use past information and predict future survival based on upcoming treatments. [cite: 382-388]
+
+\subsection{Preprocessing}
+To build the input of the tested models, we structured the data by summarizing the observed variables and treatments to come for each patient and at each progression date of the disease. Then, one couple of patient-progression corresponds to one element of the structured data, which needs more preprocess. Our next preprocessing step was imputation. We imputed by 0 for specific covariates, assuming that if the event had happened, it could not have been forgotten in the patient's data. For instance, we expected this to be true for treatment prescriptions, the presence of other cancers, or observed gene mutations. For some variables, such as the tumor size, we used the last value to impute it if data was missing. For others, such as TNM staging or menopausal status, we inferred it in a simple way using other known highly correlated covariates. If missing data remained, we used the MICE method ([33]) to impute it. When the imputation step was done, depending on the tested method, we used a specific part of the dataset in our experiments by, for instance, selecting patients according to the number of TLs received. Then, in each of these specific parts, we removed the variables whose variance was zero when looking at the training and validation sets only. Finally, we standardized all non-binary variables and used a min-max normalization, using the training and validation sets values only again, except for the Cox Elastic model, which does not need any normalization. [cite: 390-400]
+
+\subsection{Development of LSTM and M-LSTM models}
+In clinical practice, it is crucial to predict the effect of a treatment or treatment strategy on survival based on a patient's characteristics. Therefore, a tool from the NN framework can be used: RNNs. They are designed to model sequential data. Their architecture is built such that results at each time step are fed back into the same network (with shared parameters) for the next time step. LSTM is a particular type of RNN ([34]). It was designed to forget or selectively memorize information from the previous timesteps in a dynamic memory. An LSTM cell has a memory cell state, $c_j \in \mathbb{R}^L$, that contains some valuable information to remember for the next step. In the cell, the information flows through four gates to enter and exit the cell: the input gate $i_j$, the regulation gate $k_j$, the forget gate $f_j$, and the output gate $o_j$. If we denote by $x_j$ the input at time step $j$ (diagnostic and treatment variables), the explicit formulas for the memory cell state, the output state, and the gates are:
+
+\begin{align}
+i_j &= \sigma(W_{xi}x_j + W_{gi}g_{j-1} + b_i) \\
+f_j &= \sigma(W_{xf}x_j + W_{gf}g_{j-1} + b_f) \\
+k_j &= \tanh(W_{xk}x_j + W_{gk}g_{j-1} + b_k) \\
+o_j &= \sigma(W_{xo}x_j + W_{go}g_{j-1} + b_o) \\
+c_j &= f_j * c_{j-1} + i_j * k_j \\
+g_j &= o_j * \tanh(c_j)
+\end{align}
+
+where $\sigma$ is the sigmoid function, all matrices $W_{**}$ and all vectors $b_*$ are model parameters, and $*$ is the term-by-term multiplication. [cite: 402-423]
+
+We denote $(t_j)_{j\ge1}$ the time of onsets of the TLs of the patients. In our database, we can split the covariates into three categories: diagnostic variables $X(t_j)$, a duration variable $d(t_j)$ and treatment variables $P(t_j)$. After the embeddings, we got three vectors $x_j$; $d_j = d(t_j)$ and $p_j$. As diagnostic and treatment variables play fundamentally different roles for the disease, we used them differently by modifying some parts of the LSTM for our second version model, upon inspiration from DeepCare ([14]). We used an extension of LSTM cells (modified LSTM or M-LSTM), adapted to the healthcare processes, to handle irregular timing between visits at the hospital, the beginning of TLs, and the particular role played by treatments compared to the other features. First, to highlight the long-term effect of drugs, the last prescribed treatments are an input of the forget gate. On the other hand, as prescribed treatments at date $t_j$ are not an observation of the disease of the patient until $t_j$, the treatments are not inputs for the input and the regulation gates but for the output gate. Also, we added the duration between TL onsets, i.e., time steps between inputs for the same patient $d_j$ as input with a particular role. This duration is irregular; the more time between two time steps, the more forgets. Then, we can translate it into formulas that will replace equations (3) and (5):
+
+\begin{align}
+f_j &= \phi(d_j) \times \sigma(W_{xf}x_j + W_{gf}g_{j-1} + W_{pf}p_{j-1} + W_{df}d_j + b_f) \\
+o_j &= \sigma(W_{xo}x_j + W_{go}g_{j-1} + W_{po}p_j + b_o)
+\end{align}
+
+where $\phi$ is a decreasing function that models how to forget when time passes. We took $\phi(d) = [\log(e^1 + d)]^{-1}$ for our experiments. [cite: 445-462]
+
+\textbf{Adding attention:} Besides potentially improving their performances, the attention mechanism ([35]) can help to interpret NN predictions. Indeed, NNs are often considered black boxes, and their lack of interpretability can hinder their use, especially in medicine. Attention layers allow the model to focus on specific parts of the input data, assigning different importance weights to the input covariates. In our model, we implemented a simpler version of attention; we added a linear layer and a softmax layer as the first steps to process the input data. The outputs of these layers represent the importance weights of each input feature. By multiplying these weights term-by-term with the original input, we got the "new" input of the former model: weighted features. We tried different combinations of architecture for these layers: inside or outside the RNN, joint or separate for diagnostic variables and treatment variables. [cite: 467-477]
+
+\subsection{Discrete-time survival model}
+Let us present the chosen model to describe patients' survival based on an idea of [36]. Let $T_K$ ($K \in \mathbb{N}^\star$) denote the maximum time until we want to predict the survival at each time step. We divide the time interval $[0, T_K[$ in $K$ intervals which are left-closed and right-open: $([T_{k-1}, T_k[)_{1\le k\le K}$. In survival analysis, we define the conditional hazard probability $h_k$ as the probability of death in the interval $[T_{k-1}, T_k[$, given that the individual has survived at least to $T_{k-1}$. Then, the probability of an individual surviving at least to the end of the interval $k$ is:
+\begin{equation}
+S_k = \prod_{j=1}^{k} (1 - h_j).
+\end{equation}
+
+The associated likelihood for an uncensored patient that dies in the interval $k$ is:
+\[ L = P(\text{dying during interval } k) \times P(\text{surviving until interval } k-1) = h_k S_{k-1} = h_k \prod_{j=1}^{k-1} (1 - h_j) \]
+and for a censored patient whose censorship time $T^\star_c$ is in the second half of the interval $k-1$ or the first half of the interval $k$, i.e., $\frac{1}{2}(T_{k-2} + T_{k-1}) \le T^\star_c < \frac{1}{2}(T_{k-1} + T_k)$,
+\[ L = P(\text{surviving until interval } k-1) = S_{k-1} = \prod_{j=1}^{k-1} (1 - h_j). \]
+
+\textbf{Model training:} In the model, we wish to maximize the likelihood, i.e., minimize the negative log-likelihood (NLL) by updating the model parameters. If we denote:
+for uncensored patients with death time $T^\star_d$:
+\begin{align}
+\text{surv}_s(k) &= \begin{cases} 1 & \text{if } T^\star_d \le T_k \\ 0 & \text{otherwise} \end{cases} \\
+\text{surv}_f(k) &= \begin{cases} 1 & \text{if } T_{k-1} \le T^\star_d < T_k \\ 0 & \text{otherwise} \end{cases}
+\end{align}
+and for censored patients with censorship time $T^\star_c$:
+\begin{align}
+\text{surv}_s(k) &= \begin{cases} 1 & \text{if } T^\star_c \ge \frac{1}{2}(T_{k-1} + T_k) \\ 0 & \text{otherwise} \end{cases} \\
+\text{surv}_f(k) &= 0,
+\end{align}
+then, the NLL corresponding to time $T_j$ for a patient, which is the loss function that we use, can be defined by:
+\begin{equation}
+\text{Loss} = \sum_{k=1}^{K} \left[ \ln(1 + \text{surv}_s(k) \cdot (s_{kj} - 1)) + \ln(1 - \text{surv}_f(k) \cdot s_{kj}) \right],
+\end{equation}
+where $s_{kj}$ is the $k$-th coordinate of the output $s_j$ that infers $(h_1, \dots, h_K)$. In this study, we take $K = 120$ and one interval $[T_j, T_{j+1}[$ corresponds to one month. To finally get a discrete survival curve at each time step, we used conditional probabilities, i.e., equation (9). We minimized the loss function to train our models and updated the network weights using a gradient descent method. More precisely, we used the backpropagation through time (BPTT) training algorithm ([38]). [cite: 491-497]
+
+\subsection{Training details and experiment settings}
+\textbf{Training and validation sets:} We used a classic separation of the dataset into training/validation (80\%) and test (20\%) sets to train and test models. Then, we reserved 80\% of the training/validation set as the training set and kept 20\% as the validation set to optimize the model hyperparameters, notably for early stopping ([39]).
+
+\textbf{Conduct of the comparative models:} As for baseline reference models, we used the scikit-survival (v0.17.2, 2022) package ([40]) for the Cox Elastic model. We used the pycox (v0.2.3, Kvamme, 2022) package for the Cox-Time model. We implemented our models using the PyTorch (v1.12.0, 2019) package ([41]). A five-fold cross-validation (5CV) was done on the cohort. Then, we got average metrics for each model. Moreover, a sub-5CV was used to optimize hyperparameters for each of these folds.
+
+\textbf{Evaluation metrics:} The model predicts survival curves from different time points of the disease; it makes no sense to compare all the predicted survival curves because they do not start at the same time of the disease. So, for each $j$ between 1 and 4, we compared only the survival curves starting from the time step $t_j$ to compute the metrics.
+
+\textbf{Area under the receiver operating characteristic curve (AUC):} First, we used the AUC, a well-known metric for evaluating classification models. For its computation here, we first chose a date of interest $T_{int}$, a threshold $s$ and defined as positive a patient who is deceased at $T_{int}$ and negative a patient who is still alive at $T_{int}$. All the patients censored before $T_{int}$ were set aside. A patient whose survival predicted by the model is below (respectively above) the threshold at time $T_{int}$ will be predicted positive (resp. negative). Here, the AUC measures how well survival predictions at $T_{int}$ are ranked, irrespective of the threshold to predict the patient state. In this study, we present the AUCs with six months and one year as dates of interest (annotated resp. AUC6 and AUC12).
+
+\textbf{Time-dependent concordance index and integrated Brier score:} Then, we used two complementary metrics: a time-dependent version of Harrell's concordance index ($C^{td}$) and the IBS, two widely used metrics in survival analysis. The concordance index is a generalization of the AUC that can account for censored data. To define $C^{td}$, we used an adjusted version of the Antolini definition ([42]). It represents the model's ability to provide a reliable ranking of the survival curves. We used the time-dependent Brier score for the right censored data for the IBS, presented in [43]. It may be interpreted as a mean square error of prediction when the estimated probabilities $h_j$ are viewed as predictions of the death status. It evaluates the calibration of the survival estimates. [cite: 498-521]
+
+\section{Data and Code Availability}
+The data that support the findings of this study are available from Unicancer, but restrictions apply to the availability of these data, which were used under license for the current study and so are not publicly available. Data are, however, available from the authors upon reasonable request and with permission of Unicancer. The underlying code for this study is not publicly available for proprietary reasons but may be made available to qualified researchers on reasonable request from the corresponding author. [cite: 522-524]
+
+\section{Acknowledgements}
+This study was supported by Unicancer. The ESME MBC database receives financial support from industrial partners. The funders played no role in the study design, data collection, analysis, interpretation of data, or the writing of this manuscript. Unicancer manages independently ESME databases and is the sole data controller for data processing. We thank all patients who allowed Unicancer to build the present ESME real-life cohort. We thank the 18 FCCCs for providing the data and each ESME local coordinator for managing the project at the local level. Moreover, we thank the members of the ESME Platform SG and CSE, the Central Coordination Team, and ESME platform partners for their support. [cite: 576-581]
+
+\section{Author Contributions}
+LV, PHC, and SD designed the models. MR and LV preprocessed the data. LV implemented the models, analyzed the data, and conducted the numerical experiments. SD and PHC designed and supervised the study. DP and TG advised the study. LV, SD, and PHC wrote the manuscript. All authors read and approved the manuscript. [cite: 582-584]
+
+\section{Competing Interests}
+DP reports personal fees and consulting from AstraZeneca, Bayer, Boehringher-Ingelheim, Bristol-Myers Squibb, Daiichi-Sankyo, Eli-Lilly, Ipsen, Novartis, Merck Sharp and Dohme, Pfizer and Takeda. DP reports travel funding from Novartis, Roche. TG reports personal fees from AstraZeneca, Gilead, and Pfizer. TG reports a consulting/advisor role for AstraZeneca, research funding from Amgen, and a personal Grant from the Philippe Foundation. MR, Unicancer, declares that this study was supported by Unicancer. Unicancer independently manages ESME databases and is the sole data controller for data processing. The ESME MBC database received financial support from the following industrial partners: AstraZeneca, Daiichi Sankyo, Pfizer, Roche, Merck Sharp and Dohme, Pierre Fabre, Eisai, Gilead, Seagen and Lilly. MR reports personal fees and non-financial support from Roche and Pfizer. SD reports grants and non-financial support from Pfizer, Novartis, AstraZeneca, Roche Genentech, Lilly, Puma, Amgen, Sanofi, Merck Sharp and Dohme, Bristol-Myers Squibb, Seagen, Exact Sciences, Rappta, European Commission, French National Cancer Institute, Banque des Territoires France 2023, Besins, Gilead, all to her institution and outside the submitted work. All remaining authors report no competing interests. [cite: 585-593]
+
+
+
+\section{Supplementary Material}
+
+\begin{table}[H]
+\centering
+\caption{Average metrics computed on the five folds of the 5CV, with a whole dataset of 17,971 patients with HR+/HER2- MBC.}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Initial date} & \textbf{Method} & \textbf{AUC6} & \textbf{AUC12} & \textbf{Ctd} & \textbf{IBS} \\
+\midrule
+TL1 onset & Cox Elastic & 0.800 & 0.783 & 0.705 & 0.160 \\
+ & Cox-Time & 0.804 & 0.785 & 0.690 & 0.160 \\
+ & DynaSurv (LSTM) & 0.809 & 0.785 & 0.704 & 0.160 \\
+ & DynaSurv (M-LSTM) & 0.814 & 0.790 & 0.704 & 0.159 \\
+ & DynaSurv (Attention) & 0.801 & 0.783 & 0.700 & 0.161 \\
+ & DynaSurv (Recurrent attention) & 0.803 & 0.782 & 0.699 & 0.161 \\
+ & DynaSurv (Recurrent attention fine-tuned) & 0.806 & 0.781 & 0.700 & 0.161 \\
+\midrule
+TL2 onset & Cox Elastic & 0.784 & 0.771 & 0.699 & 0.159 \\
+ & Cox-Time & 0.783 & 0.768 & 0.681 & 0.160 \\
+ & DynaSurv (LSTM) & 0.785 & 0.767 & 0.696 & 0.160 \\
+ & DynaSurv (M-LSTM) & 0.790 & 0.770 & 0.696 & 0.159 \\
+ & DynaSurv (Attention) & 0.782 & 0.762 & 0.690 & 0.162 \\
+ & DynaSurv (Recurrent attention) & 0.785 & 0.765 & 0.691 & 0.162 \\
+ & DynaSurv (Recurrent attention fine-tuned) & 0.789 & 0.771 & 0.696 & 0.160 \\
+\midrule
+TL3 onset & Cox Elastic & 0.780 & 0.771 & 0.705 & 0.141 \\
+ & Cox-Time & 0.769 & 0.762 & 0.676 & 0.144 \\
+ & DynaSurv (LSTM) & 0.782 & 0.772 & 0.706 & 0.140 \\
+ & DynaSurv (M-LSTM) & 0.786 & 0.774 & 0.704 & 0.141 \\
+ & DynaSurv (Attention) & 0.774 & 0.763 & 0.696 & 0.144 \\
+ & DynaSurv (Recurrent attention) & 0.775 & 0.764 & 0.697 & 0.143 \\
+ & DynaSurv (Recurrent attention fine-tuned) & 0.781 & 0.770 & 0.703 & 0.141 \\
+\midrule
+TL4 onset & Cox Elastic & 0.759 & 0.764 & 0.697 & 0.124 \\
+ & Cox-Time & 0.742 & 0.751 & 0.666 & 0.127 \\
+ & DynaSurv (LSTM) & 0.766 & 0.769 & 0.701 & 0.122 \\
+ & DynaSurv (M-LSTM) & 0.763 & 0.765 & 0.697 & 0.123 \\
+ & DynaSurv (Attention) & 0.755 & 0.755 & 0.689 & 0.126 \\
+ & DynaSurv (Recurrent attention) & 0.758 & 0.757 & 0.692 & 0.125 \\
+ & DynaSurv (Recurrent attention fine-tuned) & 0.766 & 0.770 & 0.701 & 0.122 \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:results1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Patient survival characteristics in the studied population, according to the TL number.}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{TL number} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} \\
+\midrule
+Number of patients (\%) & N=17,971 (100) & N=12,499 (69.6) & N=9,016 (50.2) & N=6,249 (34.8) \\
+\textbf{Final status} & & & & \\
+Deceased (\%) & 11,505 (64.0) & 8,905 (71.2) & 6,696 (74.3) & 4,703 (75.3) \\
+Censored (\%) & 6,466 (36.0) & 3,594 (28.8) & 2,320 (25.7) & 1,546 (24.7) \\
+Time from onset of TL & 38.3 & 25.3 & 19.4 & 15.6 \\
+to the final event & (17.2-52.4) & (9.3-35.1) & (6.6-27.4) & (5.2-22.0) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Supplementary section 4: Evaluation metrics definitions}
+\textbf{Concordance index:} The time-dependent concordance index used in our work differs slightly from the one proposed by [42]. Let $S^{(i)}_j$ denote the $i$th patient's predicted survival curve from the $j$th TL initiation date. Our model's survival curves are piecewise linear as the survival model is in discrete time. These curves are built up to a time $T_{max}$ (equal to 60 months). If a patient survives until after $T_{max}$, it will be artificially censored. Then, if $n_j$ is the number of patients that have at least $j$ TLs, $T^\star_i$ the event (death or censoring) date of patient $i$, and $\delta_i$ the indicator function that patient $i$ is deceased, we set
+\begin{equation}
+C^{td}_j = \sum_{i=1}^{n_j} \sum_{k=1; k\ne i}^{n_j} \mathbb{1}(S^{(i)}_j(T^\star_i) < S^{(k)}_j(T^\star_k)) p_{i,k},
+\end{equation}
+where
+\begin{equation}
+p_{i,k} = \frac{\mathbb{1}(T^\star_i < T_{max}, \delta_i = 1) \mathbb{1}(T^\star_i < T^\star_k) + \mathbb{1}(T^\star_i = T^\star_k, \delta_k = 0)}{D},
+\end{equation}
+with
+\begin{equation}
+D = \sum_{l=1}^{n_j} \sum_{m=1; m\ne l}^{n_j} \mathbb{1}(T^\star_l < T_{max}, \delta_l = 1) \mathbb{1}(T^\star_l < T^\star_m) + \mathbb{1}(T^\star_l = T^\star_m, \delta_m = 0).
+\end{equation}
+
+\textbf{Integrated Brier score:} The time-dependent Brier score (BSc) used in our work is proposed by [43]. To get the IBS, we integrate numerically the BSc between 1 and $T_{max}$. For each time $t$ in the interval $[1, T_{max}]$, if we use the same notations as in the previous paragraph, $BSc(t)$ is defined by:
+\begin{equation}
+BSc(t) = \frac{1}{n_j} \sum_{i=1}^{n_j} \left( (0 - S^{(i)}_j(T^\star_i))^2 \frac{\mathbb{1}(T^\star_i \le t, \delta_i = 1)}{\hat{G}(T^\star_i)} + (0 - S^{(i)}_j(T^\star_i))^2 \frac{\mathbb{1}(T^\star_i > t)}{\hat{G}(t)} \right),
+\end{equation}
+where $\hat{G}$ denotes the Kaplan-Meier estimate of the censoring distribution on the training and validation sets. [cite: 604-616]
+
+\section*{Supplementary section 5: Details on the models' structures and optimization procedures}
+To optimize the models, we used Optuna, a hyperparameter optimization framework designed to automate hyperparameter search ([44]). For the embedding layers, we optimized the number of layers between 1 and 2 and the number of nodes on each layer between 4 and 64. The dimensions of their outputs were selected between 4 and 64. For the last layer (MLP-3), we optimized the number of layers between 1 and 2 and the number of nodes on each layer between 4 and 64. We did two training steps, one with a more significant learning rate and the other with a smaller learning rate, to refine the model's parameters. We used the default PyTorch initialization method for the weights of the layers, used the Adam optimizer ([45]), and chose an early stopping of 30 epochs with a threshold of $10^{-12}$. For the Cox Elastic method, we optimized the loss coefficients of the Elastic net penalization. Regarding the CoxTime method, an MLP is used to replace the linear function of the covariates in the Cox-PH model. [cite: 636-650]
+
+\end{document}

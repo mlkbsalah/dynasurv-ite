@@ -1,18 +1,46 @@
+# Data (too large)
 /data/
-*.out
-# *.sh
-.toml
-.pyc
-.vscode/
-# Makefile
-# Dockerfile
-__pycache__/
+!data/README.md
+!data/.gitkeep
+
+# Model checkpoints (too large)
+/models/
+!models/README.md
+!models/.gitkeep
+
+# Experiment outputs
+/training_logs/
+/wandb_logs/
 wandb/
-training_logs/
-notebooks/
+
+# Notebook outputs (but track the .ipynb files themselves)
+.ipynb_checkpoints/
+notebooks/lightning_logs/
+notebooks/**/*.png
+notebooks/**/*.jpg
+
+# Python build artifacts
+__pycache__/
+*.pyc
 *.egg-info/
+
+# Editor
+.vscode/
 .DS_Store
-!*/data/
-latex/
-scripts/lightning_logs/
+
+# SLURM logs
 slurm/logs/
+*.out
+
+# LaTeX build artifacts
+latex/Log/
+latex/*.synctex.gz
+*.aux
+*.log
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+
+# Optionally ignore PDFs (or track at milestones)
+latex/*.pdf

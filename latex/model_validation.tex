@@ -1,0 +1,484 @@
+\documentclass{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{default}
+
+\title{Counterfactual Validation and Exploitation of Longitudinal Treatment Data}
+\author{Malek Ben Salah}
+\institute{Institut Gustave Roussy / CentraleSupélec}
+\date{\today}
+
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{booktabs}
+
+% Placeholder figure command
+\newcommand{\placeholderfig}[2]{
+\begin{figure}
+\centering
+\fbox{
+\begin{minipage}[c][0.25\textheight][c]{0.8\textwidth}
+\centering
+\textbf{#1} \\[0.5em]
+\textit{#2}
+\end{minipage}}
+\end{figure}
+}
+
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Motivation and Experimental Goals}
+\begin{itemize}
+    \item Electronic health records aggregated at treatment-line level
+    \item Objective: estimate \textbf{counterfactual survival} under alternative treatment sequences
+    \item Key challenge: validating counterfactual predictions without ground-truth outcomes
+\end{itemize}
+
+\vspace{0.5em}
+\textbf{Experimental objectives:}
+\begin{enumerate}
+    \item Validate counterfactual survival predictions
+    \item Assess robustness to confounding and temporal structure
+    \item Prepare foundations for a treatment recommendation policy
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Modeling Setup (Reminder)}
+\begin{itemize}
+    \item Sequential model of treatment lines using LSTM
+    \item Patient representation updated at each treatment start
+    \item Treatment-specific MLP heads predicting survival distributions
+    \item Adversarial loss to enforce balance w.r.t. propensity scores
+\end{itemize}
+
+\placeholderfig
+{Model architecture overview}
+{LSTM over treatment lines with treatment-specific survival heads}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Experimental Roadmap}
+\begin{enumerate}
+    \item Factual consistency and internal counterfactual checks
+    \item Representation balance and deconfounding diagnostics
+    \item Counterfactual ordering and temporal coherence
+    \item Off-policy evaluation of induced recommendation rules
+    \item Robustness and sensitivity analyses
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Factual Consistency Check}
+\textbf{Question:}  
+Does the model recover observed outcomes when intervening on the factual treatment?
+
+\begin{itemize}
+    \item Compare predicted vs observed survival under factual treatment
+    \item Stratify by treatment line and propensity score quintiles
+\end{itemize}
+
+\placeholderfig
+{Calibration of factual survival predictions}
+{Observed vs predicted survival curves, stratified by treatment}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Counterfactual Placebo Test}
+\textbf{Question:}  
+Does the model hallucinate treatment effects under randomized interventions?
+
+\begin{itemize}
+    \item Shuffle treatment assignments within propensity strata
+    \item Re-train counterfactual model
+    \item Expect collapse of estimated treatment effects
+\end{itemize}
+
+\placeholderfig
+{Placebo counterfactual effects}
+{Distribution of estimated treatment effects after label shuffling}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Representation Balance Diagnostics}
+\textbf{Question:}  
+Is treatment assignment predictable from learned patient representations?
+
+\begin{itemize}
+    \item Train post-hoc classifier to predict treatment from latent state
+    \item Compare with and without adversarial deconfounding
+\end{itemize}
+
+\placeholderfig
+{Treatment predictability from latent representations}
+{AUROC of treatment classifier across treatment lines}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Pairwise Counterfactual Stability}
+\textbf{Question:}  
+Are pairwise treatment comparisons stable for similar patients?
+
+\begin{itemize}
+    \item Compute pairwise survival differences
+    \[
+    \Delta_{a,b}(x_t) = \hat{S}(a|x_t) - \hat{S}(b|x_t)
+    \]
+    \item Evaluate variance within propensity-matched groups
+\end{itemize}
+
+\placeholderfig
+{Pairwise treatment effect stability}
+{Variance of pairwise effects across matched patient strata}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Clinical Plausibility Checks}
+\textbf{Question:}  
+Do estimated effects align with known clinical patterns?
+
+\begin{itemize}
+    \item Stratification by biomarkers (HR, HER2, etc.)
+    \item Check monotonicity and sign consistency
+\end{itemize}
+
+\placeholderfig
+{Counterfactual survival by biomarker subgroup}
+{Predicted survival curves under different treatments}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Temporal Coherence Across Lines}
+\textbf{Question:}  
+Are counterfactual effects coherent across successive treatment lines?
+
+\begin{itemize}
+    \item Compare predicted treatment effects at line $t$ vs $t+1$
+    \item Expect smooth degradation, not abrupt reversals
+\end{itemize}
+
+\placeholderfig
+{Temporal evolution of counterfactual effects}
+{Treatment effect magnitude as a function of line number}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{History Ablation Study}
+\textbf{Question:}  
+How sensitive are predictions to treatment history?
+
+\begin{itemize}
+    \item Mask parts of prior treatment history
+    \item Measure deviation in counterfactual survival estimates
+\end{itemize}
+
+\placeholderfig
+{History sensitivity analysis}
+{Change in predicted survival vs length of ablated history}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{From Counterfactuals to Policy Evaluation}
+\textbf{Policy definition:}
+\[
+\pi(x_t) = \arg\max_a \hat{S}(a|x_t)
+\]
+
+\begin{itemize}
+    \item Evaluate induced policy using off-policy estimators
+    \item Compare with observed clinical policy
+\end{itemize}
+
+\placeholderfig
+{Estimated policy value}
+{Overall survival under learned vs observed policy}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Retrospective Regret Analysis}
+\textbf{Question:}  
+Where does the model disagree with observed clinical choices?
+
+\begin{itemize}
+    \item Compute regret per treatment line
+    \[
+    r_t = \max_a \hat{S}(a|x_t) - \hat{S}(a_{\text{obs}}|x_t)
+    \]
+    \item Stratify by risk and line number
+\end{itemize}
+
+\placeholderfig
+{Regret distribution}
+{Estimated regret across treatment lines}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Sensitivity to Unmeasured Confounding}
+\textbf{Question:}  
+How strong must hidden confounding be to change conclusions?
+
+\begin{itemize}
+    \item Inject synthetic confounders
+    \item Measure tipping points for treatment ranking changes
+\end{itemize}
+
+\placeholderfig
+{Sensitivity analysis}
+{Treatment ranking stability vs confounder strength}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Summary and Next Steps}
+\begin{itemize}
+    \item Extensive counterfactual validation without ground truth
+    \item Evidence for stability, plausibility, and robustness
+    \item Natural extension toward dynamic treatment recommendation
+\end{itemize}
+
+\vspace{0.5em}
+\textbf{Next steps:}
+\begin{itemize}
+    \item Look-ahead planning over treatment sequences
+    \item Constraint-aware recommendation rules
+    \item Prospective validation design
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}{Longitudinal Survival Modeling: The Challenge}
+\begin{itemize}
+    \item Goal: Predict survival at multiple time points during patient follow-up
+    \item Available data:
+    \begin{itemize}
+        \item Intermediate time points with evolving features
+        \item Final outcome (event or censored)
+    \end{itemize}
+    \item \textbf{Key Question}: How should we label intermediate time points?
+\end{itemize}
+
+\vspace{0.3cm}
+\begin{block}{Two Competing Approaches}
+\begin{enumerate}
+    \item \textbf{Ultimate Outcome}: Label all time points with final outcome
+    \item \textbf{Censored}: Label only with event status at that specific time
+\end{enumerate}
+\end{block}
+\end{frame}
+
+\begin{frame}{Approach Comparison}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\begin{block}{Ultimate Outcome Approach}
+\small
+\textbf{Advantages:}
+\begin{itemize}
+    \item Captures early warning signals
+    \item Predicts "who will die eventually"
+    \item Stable predictions over time
+    \item Simpler interpretation
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Risks:}
+\begin{itemize}
+    \item Information leakage from future
+    \item Ignores time-varying risk
+    \item Overly optimistic performance
+\end{itemize}
+\end{block}
+
+\column{0.48\textwidth}
+\begin{block}{Censored Approach}
+\small
+\textbf{Advantages:}
+\begin{itemize}
+    \item Proper survival modeling
+    \item No future information leakage
+    \item Learns time-varying risk
+    \item Realistic performance estimates
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Limitations:}
+\begin{itemize}
+    \item May miss subtle early signals
+    \item More complex interpretation
+    \item Requires more data
+\end{itemize}
+\end{block}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Data Structure Example}
+\textbf{Patient who dies at time step 5:}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Time} & \textbf{Features} & \textbf{Ultimate} & \textbf{Censored} \\
+\hline
+1 & $X_1$ & Death (1) & Alive (0) \\
+2 & $X_2$ & Death (1) & Alive (0) \\
+3 & $X_3$ & Death (1) & Alive (0) \\
+4 & $X_4$ & Death (1) & Alive (0) \\
+5 & $X_5$ & Death (1) & Death (1) \\
+\hline
+\end{tabular}
+\end{table}
+
+\vspace{0.3cm}
+\begin{alertblock}{Key Insight}
+The censored approach reflects \emph{actual information available} at each time point, while the ultimate outcome approach uses future knowledge.
+\end{alertblock}
+\end{frame}
+
+\begin{frame}{Proposed Solution: Multi-Task Learning}
+\textbf{Key Idea}: Combine both approaches using a residual-inspired architecture
+
+\vspace{0.3cm}
+\begin{itemize}
+    \item \textbf{Main pathway}: Learn immediate time-specific risk (censored)
+    \item \textbf{Skip connection}: Learn ultimate outcome trajectory
+    \item \textbf{Shared encoder}: Both tasks learn from same representations
+\end{itemize}
+
+\vspace{0.3cm}
+\begin{block}{Mathematical Formulation}
+\begin{equation*}
+\mathcal{L}_{\text{total}} = \alpha \cdot \mathcal{L}_{\text{immediate}} + \beta \cdot \mathcal{L}_{\text{ultimate}}
+\end{equation*}
+where:
+\begin{itemize}
+    \item $\mathcal{L}_{\text{immediate}}$: Binary cross-entropy for time-specific events
+    \item $\mathcal{L}_{\text{ultimate}}$: Binary cross-entropy for final outcome
+    \item $\alpha, \beta$: Task weights (e.g., $\alpha = 0.7, \beta = 0.3$)
+\end{itemize}
+\end{block}
+\end{frame}
+
+% \begin{frame}{Multi-Task Architecture}
+% \begin{center}
+% \includegraphics[width=0.95\textwidth]{multi_task_survival_diagram.pdf}
+% \end{center}
+
+% \vspace{0.2cm}
+% \footnotesize
+% \textbf{Note}: Branch 1 (green) is primary for clinical decisions; Branch 2 (red) serves as auxiliary task to improve feature learning
+% \end{frame}
+
+\begin{frame}{Benefits of Multi-Task Approach}
+\begin{enumerate}
+    \item \textbf{Richer Feature Learning}
+    \begin{itemize}
+        \item Model learns representations that satisfy both objectives
+        \item Early biomarkers weighted appropriately for long-term prognosis
+    \end{itemize}
+    
+    \item \textbf{Regularization Effect}
+    \begin{itemize}
+        \item Ultimate outcome task prevents overfitting to short-term noise
+        \item Improved generalization
+    \end{itemize}
+    
+    \item \textbf{Complementary Information}
+    \begin{itemize}
+        \item Immediate risk: "What's the danger now?"
+        \item Ultimate outcome: "What's the overall trajectory?"
+    \end{itemize}
+    
+    \item \textbf{Clinical Flexibility}
+    \begin{itemize}
+        \item Use Branch 1 for time-specific decisions
+        \item Use Branch 2 for long-term prognosis discussions
+    \end{itemize}
+\end{enumerate}
+\end{frame}
+
+% \begin{frame}{Implementation Considerations}
+% \begin{block}{Hyperparameter Tuning}
+% \begin{itemize}
+%     \item Task weights: Start with $\alpha > \beta$ (e.g., 0.7:0.3)
+%     \item Monitor both losses during training
+%     \item Adjust if one task dominates
+% \end{itemize}
+% \end{block}
+
+% \begin{block}{Evaluation Strategy}
+% \begin{itemize}
+%     \item \textbf{Branch 1}: Time-dependent C-index, Brier score at each time point
+%     \item \textbf{Branch 2}: Overall AUC for ultimate outcome prediction
+%     \item \textbf{Both}: Calibration curves at different time horizons
+% \end{itemize}
+% \end{block}
+
+% \begin{alertblock}{Key Consideration}
+% Ensure sufficient dataset size to support the added model complexity without overfitting
+% \end{alertblock}
+% \end{frame}
+
+% \begin{frame}{Expected Outcomes}
+% \begin{columns}[T]
+% \column{0.48\textwidth}
+% \textbf{What the Model Learns:}
+% \begin{itemize}
+%     \item Acute risk factors (infections, vital sign changes)
+%     \item Chronic progression markers (organ failure)
+%     \item Subtle early indicators of poor prognosis
+% \end{itemize}
+
+% \column{0.48\textwidth}
+% \textbf{Clinical Applications:}
+% \begin{itemize}
+%     \item Real-time risk monitoring
+%     \item Early intervention triggers
+%     \item Prognostic counseling
+%     \item Resource allocation
+% \end{itemize}
+% \end{columns}
+
+% \vspace{0.5cm}
+% \begin{block}{Hypothesis}
+% The multi-task approach will outperform either single-task approach by:
+% \begin{itemize}
+%     \item Better capturing time-varying dynamics (vs. ultimate-only)
+%     \item Identifying early risk signals (vs. censored-only)
+% \end{itemize}
+% \end{block}
+% \end{frame}
+
+% \begin{frame}{Next Steps}
+% \begin{enumerate}
+%     \item \textbf{Implementation}
+%     \begin{itemize}
+%         \item Build shared encoder (LSTM/Transformer for temporal features)
+%         \item Implement dual output heads
+%         \item Define combined loss function
+%     \end{itemize}
+    
+%     \item \textbf{Validation}
+%     \begin{itemize}
+%         \item Compare against single-task baselines
+%         \item Perform ablation studies on task weights
+%         \item Test on held-out temporal validation set
+%     \end{itemize}
+    
+%     \item \textbf{Clinical Validation}
+%     \begin{itemize}
+%         \item Assess calibration at multiple time horizons
+%         \item Evaluate clinical utility (decision curve analysis)
+%         \item Get clinician feedback on predictions
+%     \end{itemize}
+% \end{enumerate}
+% \end{frame}
+
+
+\end{document}

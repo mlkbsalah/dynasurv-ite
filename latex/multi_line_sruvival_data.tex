@@ -1,0 +1,304 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{geometry}
+ \geometry{
+ a4paper,
+ total={170mm,257mm},
+ left=20mm,
+ top=20mm,
+ }
+
+\title{Multi-Line Survival Data Generation Process}
+\author{}
+\date{}
+
+\begin{document}
+This document describes the data generation process for a multi-line survival model that simulates sequential treatment episodes for patients, incorporating autoregressive feature dynamics, disease progression, cumulative toxicity effects, and time-varying censoring.
+Let's denote by: 
+\begin{itemize}
+    \item $X_{i,\ell} = (X^{j}_{i,\ell})_{j \leq J}$ the feature vector of patient $i$ at treatment line l 
+    \item $T_{i,\ell}$ the treatment assigned at line $l$
+    \item $Y_{i,\ell}$ the observed time (either event or censoring) at line $l$
+    \item $E_{i,\ell}$ the event indicator. 
+\end{itemize}
+Features evolve across treatment lines following an AR($p$)
+\begin{align*}
+    &X_{i,0} \sim \mathcal{N}(\mu, 1), \quad j \in \{1, \ldots, J\}\\
+    &X_{i,\ell} = \sum_{k=1}^{p} \alpha_k X_{i,\ell-k} + \epsilon_\ell, \quad \epsilon_\ell \sim \mathcal{N}(0, \sigma I_p)
+\end{align*}
+At each line $l$, treatment is randomly assigned among $r$ options with probabilities $\{p_1, \ldots, p_{r}\}$:
+\begin{equation*}
+    T_{i,\ell} \sim \mathcal{M}(1, \{p_1, p_2, \ldots, p_r\})
+\end{equation*}
+For each treatment, we attribute specific survival and toxicity parameters:
+\begin{itemize}
+    \item Survival parameters: $(k_T, \lambda_T)$ (Weibull shape and scale)
+    \item Toxicity weight: $w_T \in [0, 1]$
+\end{itemize}
+Toxicity accumulates across previous treatment lines:
+\begin{equation*}
+    \text{Tox}_{i,\ell} \mid \{Y_{i,j}, T_{i,j}\}_{j < \ell} = \sum_{j=1}^{\ell-1} w_{T_{i,j}} \cdot Y_{i,j}
+\end{equation*}
+We can therefore define the hazard function at line $l$ for patient $i$ as:
+\begin{equation}
+    \eta_{i,\ell} = X_{i,\ell}^\top \beta + \beta_{\text{line}} \cdot \ell + \beta_{\text{tox}} \cdot \text{Tox}_{i,\ell}
+\end{equation}
+where:
+\begin{itemize}
+    \item $\beta \in \mathbb{R}^p$: feature coefficients
+    \item $\beta_{\text{line}}$: disease progression coefficient
+    \item $\beta_{\text{tox}}$: cumulative toxicity coefficient
+\end{itemize}
+In order to model treatment burden and disease progression, we define a baseline hazard that increases with line number:
+$$
+    h_{\text{base}}(\ell) = \exp(\rho \cdot \ell)
+$$
+where $\rho$ is the progression rate (increased hazard per line).
+\paragraph{Event time generation:}
+The event time follows a Weibull distribution with treatment-specific parameters and covariate adjustments:
+$$ 
+    Y_{i,\ell} \mid (T_{i,\ell}, X_{i,\ell}, Y_{i,\ell})_{i<l} = \frac{\exp(-\eta_{i,\ell})}{h_{\text{base}}(\ell)} \cdot W_{i,\ell}
+$$
+where $W_\ell \sim \text{Weibull}(k_{T_{i,\ell}}, \lambda_{T_{i,\ell}})$
+\paragraph{Censoring time generation:}
+Censoring time increases with line number:
+\begin{align*}
+    &\lambda_{\text{cens}}(\ell) = \lambda_0 (1 + \gamma \cdot \ell) \\
+    &T_{i,\ell}^{\text{cens}} \sim \text{Exponential}(\lambda_{\text{cens}}(\ell))
+\end{align*}    
+where $\lambda_0$ is the base censoring rate and $\gamma$ is the per-line increase rate.
+\paragraph{Observed data:}
+The observed time and event indicator are:
+\begin{align*}
+    Y_{i,\ell} &= \min(T_{i,\ell}^{\text{event}}, T_{i,\ell}^{\text{cens}}) \\
+    E_{i,\ell} &= \mathbb{I}(T_{i,\ell}^{\text{event}} \leq T_{i,\ell}^{\text{cens}})
+\end{align*}
+\begin{algorithm}
+\caption{Multi-Line Survival Data Generation}
+\begin{algorithmic}[1]
+\For{each patient $i = 1, \ldots, n$}
+    \State Sample $L_i \sim \text{Uniform}\{1, \ldots, L_{\max}\}$
+    \State Initialize $X_{i,0}, \ldots, X_{i,p-1} \sim \mathcal{N}(0, I_p)$
+    \State Generate AR($p$) process for $B + L_i$ steps
+    \State Discard first $B$ burn-in steps
+    \State Initialize: $\text{Tox}_{i,1} = 0$, previous treatments = []
+    \For{each line $\ell = 1, \ldots, L_i$}
+        \State Sample treatment $T_{i,\ell} \sim \text{Categorical}(\{A, B, C\})$
+        \State Compute $\eta_{i,\ell}$ using Eq. (6)
+        \State Compute $h_{\text{base}}(\ell)$ using Eq. (7)
+        \State Generate $T_{i,\ell}^{\text{event}}$ using Eq. (8)
+        \State Generate $T_{i,\ell}^{\text{cens}}$ using Eq. (10)
+        \State Set $Y_{i,\ell} = \min(T_{i,\ell}^{\text{event}}, T_{i,\ell}^{\text{cens}})$
+        \State Set $E_{i,\ell} = \mathbb{I}(T_{i,\ell}^{\text{event}} \leq T_{i,\ell}^{\text{cens}})$
+        \State Update cumulative toxicity: $\text{Tox}_{i,\ell+1} = \text{Tox}_{i,\ell} + w_{T_{i,\ell}} \cdot Y_{i,\ell}$
+    \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+
+
+
+
+
+\section{Bias and Convergence Properties of the CoxTime Gradient Estimator}
+
+\subsection{Setup}
+
+Consider the Cox partial log-likelihood
+\[
+\ell(\theta)
+= 
+\sum_{i: D_i = 1}
+\left[
+g_\theta(x_i)
+-
+\log \Big( \sum_{j \in R_i} \exp(g_\theta(x_j)) \Big)
+\right],
+\]
+where $R_i$ is the risk set for individual $i$.
+
+The gradient of the negative log-likelihood is
+\[
+\nabla L(\theta)
+=
+\sum_{i : D_i = 1}
+\left(
+\nabla g_\theta(x_i)
+-
+\frac{\sum_{j \in R_i} \exp(g_\theta(x_j)) \nabla g_\theta(x_j)}
+{\sum_{j \in R_i} \exp(g_\theta(x_j))}
+\right).
+\]
+
+This denominator requires summing over the \textit{full risk set}, which prevents minibatching.
+
+CoxTime replaces $R_i$ with a random subset $\widetilde{R}_i$ of fixed size $m$, typically $m = |\text{batch}|$:
+\[
+\widetilde{R}_i \subseteq R_i,\quad |\widetilde{R}_i| = m,\quad i\in \widetilde{R}_i.
+\]
+
+The approximate loss is
+\[
+\widetilde{L}(\theta)
+=
+\sum_{i : D_i = 1}
+\log \left(
+\sum_{j \in \widetilde{R}_i}
+\exp(g_\theta(x_j) - g_\theta(x_i))
+\right).
+\]
+
+\subsection{Bias in the CoxTime Gradient}
+
+The true gradient term for event $i$ is
+\[
+G_i(\theta)
+=
+\mathbb{E}_{J \sim p_i}
+\big[
+\nabla g_\theta(x_J)
+\big],
+\qquad
+p_i(j) = \frac{\exp(g_\theta(x_j))}{\sum_{k \in R_i} \exp(g_\theta(x_k))}.
+\]
+
+The CoxTime estimator replaces $R_i$ by a subsample $\widetilde{R}_i$ with uniform sampling.  
+Thus, the estimator uses
+\[
+\widetilde{G}_i(\theta)
+=
+\frac{\sum_{j \in \widetilde{R}_i}
+\exp(g_\theta(x_j))\,\nabla g_\theta(x_j)}
+{\sum_{j \in \widetilde{R}_i}
+\exp(g_\theta(x_j))}.
+\]
+
+Since the sampling distribution is uniform rather than proportional to $\exp(g)$, we have:
+
+\[
+\mathbb{E}[\widetilde{G}_i(\theta)]
+\neq
+G_i(\theta)
+\quad\text{(in general)}.
+\]
+
+The bias is:
+\[
+\mathrm{Bias}(\widetilde{G}_i) 
+=
+\mathbb{E}[\widetilde{G}_i] - G_i.
+\]
+
+\subsection{Magnitude of the Bias}
+
+Let $Z_{i} = \sum_{j \in R_i} \exp(g_\theta(x_j))$ and  
+$Z_{i,m} = \sum_{j \in \widetilde{R}_i} \exp(g_\theta(x_j))$.
+
+If the subsampling is uniform without replacement:
+\[
+\mathbb{E}[Z_{i,m}] 
+= \frac{m}{|R_i|} Z_i.
+\]
+
+Using Taylor approximations of the ratio of random variables:
+\[
+\frac{A}{B} = 
+\frac{\mathbb{E}[A]}{\mathbb{E}[B]}
+\left(
+1 + O\!\left(\frac{\mathrm{Var}(A)}{A^2}\right)
++
+O\!\left(\frac{\mathrm{Var}(B)}{B^2}\right)
+\right).
+\]
+
+Thus the bias is of order
+\[
+\|\mathrm{Bias}(\widetilde{G}_i)\|
+=
+O\left(
+\frac{1}{m}
+\right),
+\]
+assuming $\exp(g_\theta(x_j))$ has bounded variance.
+
+Therefore:
+- Small batches $\Rightarrow$ significant bias  
+- Large batches $\Rightarrow$ bias shrinks as $1/m$  
+- Full batch $\Rightarrow$ zero bias  
+
+\subsection{Unbiased or Less Biased Alternatives}
+
+\paragraph{1. Weighted subsampling (Horvitz–Thompson).}
+
+If every sampled $j$ is reweighted by the inverse selection probability:
+\[
+w_j = \frac{1}{p(j)} = \frac{|R_i|}{m},
+\]
+then the estimator
+\[
+\widehat{Z}_i = \sum_{j \in \widetilde{R}_i} w_j \exp(g_\theta(x_j))
+\]
+is unbiased:
+\[
+\mathbb{E}[\widehat{Z}_i] = Z_i.
+\]
+
+Same for the numerator.  
+Therefore the ratio has bias only of order
+\[
+O\!\left(\frac{1}{m}\right)
+\quad\text{instead of the naive } O(1).
+\]
+
+\paragraph{2. Importance sampling.}
+
+Alternatively, sample $j$ with probability proportional to $\exp(g(x_j))$.
+
+Then the gradient estimator is *exactly unbiased*:
+\[
+\mathbb{E}[\widetilde{G}_i]=G_i.
+\]
+
+The difficulty is that this sampling requires knowing all $\exp(g(x_j))$, which again breaks minibatching.
+
+\subsection{Convergence of SGD with Biased Gradients}
+
+Standard theory (Bottou, 2018) guarantees convergence if:
+
+\begin{itemize}
+\item The bias is bounded:
+\[
+\|\mathbb{E}[\widetilde{G}(\theta)] - \nabla L(\theta)\|
+\le B.
+\]
+\item The learning rate decays: 
+\[
+\sum_t \eta_t = \infty,\qquad \sum_t \eta_t^2 < \infty.
+\]
+\item The objective is smooth.
+\end{itemize}
+
+The SGD iterates converge to a neighborhood of the optimum of size:
+\[
+O(B).
+\]
+
+Thus:
+- DeepSurv (full risk set $B=0$) converges to the true optimum.  
+- CoxTime (subset $B>0$) converges near the optimum, and the error shrinks as $O(1/m)$.
+
+\subsection{Summary}
+
+\begin{itemize}
+\item CoxTime uses minibatch subsampling of the risk set, making the gradient estimator biased.
+\item The bias is of order $1/m$ and vanishes as the sampled risk set grows.
+\item Weighted sampling (Horvitz--Thompson) reduces the bias.
+\item Importance sampling can make the estimator unbiased but is computationally infeasible.
+\item SGD with small bias converges to a neighborhood of the optimum.
+\end{itemize}
+
+\end{document}
