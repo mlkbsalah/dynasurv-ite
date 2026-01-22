@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=DynaSurvCausalOnlineCV
 #SBATCH --output=logs/%x.o%j
-#SBATCH --time=5:00:00
+#SBATCH --time=12:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1

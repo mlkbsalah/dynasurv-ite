@@ -7,6 +7,15 @@ PROJECT_NAME=""
 # Generate a default random seed if none is provided
 SPLIT_SEED=$(( $(date +%s) % 2147483647 ))
 
+# Create log file with timestamp
+LOG_DIR="./logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/cv_search_${SPLIT_SEED}_$(date +%Y%m%d_%H%M%S).log"
+
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
 usage() {
     echo "Usage: $0 [options]"
     echo ""
@@ -31,7 +40,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "Launching CV run"
+log_message "Starting CV run with seed: $SPLIT_SEED, trials: $N_TRIALS, folds: $N_FOLDS"
 
 #Submit trials
 ARRAY_JOB_ID=$(./LaunchCVSearch.sh \
@@ -40,15 +49,20 @@ ARRAY_JOB_ID=$(./LaunchCVSearch.sh \
     --split_seed "$SPLIT_SEED" \
     ${PROJECT_NAME:+--project_name "$PROJECT_NAME"})
 
+log_message "CV Search submitted with job ID: $ARRAY_JOB_ID"
+
 #Aggregate results
 AGG_JOB_ID=$(sbatch --parsable \
     --dependency=afterok:$ARRAY_JOB_ID \
     --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME" \
     AggregateTrials.sh)
 
+log_message "Aggregation job submitted with job ID: $AGG_JOB_ID"
 
 #Train final model on full data and validate on hold out test set
 TRAIN_FINAL_JOB_ID=$(sbatch --parsable \
     --dependency=afterok:$AGG_JOB_ID \
     --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME" \
-    TrainFinalModel.sh)
+    TrainDynaSurvCausalOnline.sh)
+
+log_message "Final model training submitted with job ID: $TRAIN_FINAL_JOB_ID"
