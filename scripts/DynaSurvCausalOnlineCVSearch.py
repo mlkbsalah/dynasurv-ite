@@ -13,6 +13,7 @@ from lightning.pytorch.loggers import WandbLogger
 from CausalSurv.data.CV_online_data_utils import ESMEOnlineDataModuleCV
 from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 
+
 def load_config(config_path):
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
@@ -22,7 +23,7 @@ def load_config(config_path):
 # ==============================================================================
 # MAIN CV FUNCTION
 # ==============================================================================
-def main(model_config, train_config, split_seed, trial_id, n_folds, project_name):
+def main(model_config, train_config,  split_seed, trial_id, n_folds, project_name):
 
     loss_folds = []
     average_ci_folds = []
@@ -32,8 +33,8 @@ def main(model_config, train_config, split_seed, trial_id, n_folds, project_name
         print(f"[Trial {trial_id}] Starting fold {k+1}/{n_folds}")
 
         DataModuleCV = ESMEOnlineDataModuleCV(
-            data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
-            # data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+            data_dir="../data",
+            subtype="HR+HER2-",
             n_lines=4,
             n_intervals=model_config["n_intervals"],
             batch_size=model_config["train_batch_size"],
@@ -77,31 +78,33 @@ def main(model_config, train_config, split_seed, trial_id, n_folds, project_name
         )
 
         callbacks = [
-            EarlyStopping(monitor=train_config['early_stopping']['monitor'], 
-                          mode=train_config['early_stopping']['mode'], 
-                          patience=train_config['early_stopping']['patience'], 
-                          verbose=True),
+            EarlyStopping(
+                monitor=train_config["early_stopping"]["monitor"],
+                mode=train_config["early_stopping"]["mode"],
+                patience=train_config["early_stopping"]["patience"],
+                verbose=True,
+            ),
         ]
-        
+
         if not project_name:
             logger = False
 
         else:
             logger = WandbLogger(
-				project=project_name,
-           		name=f"trial_{trial_id}_fold_{k}",
-            	group=f"trial_{trial_id}_CV",
-            	reinit=True,
-            	save_dir="../training_logs",
-				)	
-            callbacks.append(LearningRateMonitor(logging_interval="epoch")) #type: ignore
+                project=project_name,
+                name=f"trial_{trial_id}_fold_{k}",
+                group=f"trial_{trial_id}_CV",
+                reinit=True,
+                save_dir=f"../models/HR+HER2-/4lines/seed_{split_seed}",
+            )
+            callbacks.append(LearningRateMonitor(logging_interval="epoch"))  # type: ignore
 
         trainer = L.Trainer(
             max_epochs=train_config["trainer"]["max_epochs"],
             accelerator="gpu",
             devices=1,
             logger=logger,
-            callbacks=callbacks, #type: ignore
+            callbacks=callbacks,  # type: ignore
             enable_checkpointing=False,
             enable_progress_bar=False,
             check_val_every_n_epoch=2,
@@ -113,12 +116,12 @@ def main(model_config, train_config, split_seed, trial_id, n_folds, project_name
         loss_folds.append(val_res["val_loss"])
         average_ci_folds.append(val_res["average_ci"])
         average_ibs_folds.append(val_res["average_ibs"])
-	
+
         wandb.finish()
 
     return {
         "mean_loss": float(np.mean(loss_folds)),
-        "std_loss":float(np.std(loss_folds)),
+        "std_loss": float(np.std(loss_folds)),
         "mean_ci": float(np.mean(average_ci_folds)),
         "std_ci": float(np.std(average_ci_folds)),
         "mean_ibs": float(np.mean(average_ibs_folds)),
@@ -126,9 +129,6 @@ def main(model_config, train_config, split_seed, trial_id, n_folds, project_name
     }
 
 
-# ==============================================================================
-# RANDOM CONFIG SAMPLER
-# ==============================================================================
 def sample_config():
     return {
         "n_intervals": random.choice([5, 10, 15, 20]),
@@ -163,17 +163,26 @@ if __name__ == "__main__":
     parser.add_argument("--trial_id", type=int, required=False)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
-    
+
     parser.add_argument("--project_name", type=str, default=None)
 
     args = parser.parse_args()
 
-    print(f"Running trial {args.trial_id} with split seed {args.split_seed} and {args.n_folds} folds")
+    print(
+        f"Running trial {args.trial_id} with split seed {args.split_seed} and {args.n_folds} folds"
+    )
 
     model_config = sample_config()
     train_config = load_config("../configs/train_config.toml")
 
-    results = main(model_config, train_config, args.split_seed, args.trial_id, args.n_folds, args.project_name)
+    results = main(
+        model_config,
+        train_config,
+        args.split_seed,
+        args.trial_id,
+        args.n_folds,
+        args.project_name,
+    )
 
     out_dir = f"../models/HR+HER2-/4lines/seed_{args.split_seed}"
     os.makedirs(out_dir, exist_ok=True)
