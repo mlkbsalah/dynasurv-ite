@@ -58,9 +58,9 @@ if [[ -z "$PROJECT_NAME" ]]; then
 fi
 
 if [[ "$DEV_MODE" -eq 1 ]]; then
-    echo "Development mode enabled: overriding n_trials to 2, n_folds to 2, and training epochs to 5"
     N_TRIALS=2
     N_FOLDS=2
+    echo "Development mode enabled: overriding n_trials to $N_TRIALS, n_folds to $N_FOLDS, and training epochs to 5"
 fi
 
 sbatch --parsable --export=ALL,N_FOLDS=$N_FOLDS,SPLIT_SEED=$SPLIT_SEED,PROJECT_NAME=$PROJECT_NAME,DEV_MODE=$DEV_MODE --array=0-$((N_TRIALS-1)) DynaSurvCausalOnlineCVSearch.sh
