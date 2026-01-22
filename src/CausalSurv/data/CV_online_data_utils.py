@@ -166,6 +166,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         patient_ids = self.data['usubjid'].unique()
 
         self.interval_bounds = torch.linspace(0, self.data['Y_onset_to_death'].max(), self.n_intervals + 1)
+        # self.interval_bounds = torch.quantile(torch.tensor(self.data['Y_onset_to_death'].values, dtype=torch.float32), torch.linspace(0, 1, steps=self.n_intervals + 1))
 
 
         self.ESMEDataset = ESMEOnlineDataset(X_list=X_list,X_static=X_static, 

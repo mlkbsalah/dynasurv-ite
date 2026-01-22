@@ -2,8 +2,8 @@
   "trial_id": 91,
   "split_seed": 1768340925,
   "config": {
-    "n_intervals": 5,
-    "train_batch_size": 512,
+    "n_intervals": 10,
+    "train_batch_size": 124,
     "lstm_hidden_length": 64,
     "x_embed_dim": 32,
     "p_embed_dim": 32,

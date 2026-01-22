@@ -13,8 +13,8 @@ from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 
 def main(config, split_seed):
     data_module = ESMEOnlineDataModuleCV(
-        # data_dir="/workdir/bensalama/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
-        data_dir="/Users/malek/TheLAB/DynaSurv/data/model_entry_imputed_data_HR+HER2-_stable_types_categorized.parquet",
+        data_dir="../data",
+        subtype="HR+HER2-",
         n_lines=4,
         n_intervals=config['n_intervals'],
         batch_size=config['train_batch_size'],
