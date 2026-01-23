@@ -19,11 +19,12 @@ def load_config(config_path):
         config = tomllib.load(f)
     return config
 
+def load_model_config(model_config_dir):
+    with open(os.path.join(model_config_dir, "best_config.json"), "r") as f:
+        best_model_config = json.load(f)
+    return best_model_config["config"]
 
-# ==============================================================================
-# MAIN CV FUNCTION
-# ==============================================================================
-def main(model_config, train_config,  split_seed, trial_id, n_folds, project_name, fast_dev_run=False):
+def main(model_config, train_config, data_config, split_seed, trial_id, n_folds, project_name, fast_dev_run=False):
     if fast_dev_run:
         n_folds = 2
         train_config["trainer"]["max_epochs"] = 5
@@ -37,9 +38,9 @@ def main(model_config, train_config,  split_seed, trial_id, n_folds, project_nam
         print(f"[Trial {trial_id}] Starting fold {k+1}/{n_folds}")
 
         DataModuleCV = ESMEOnlineDataModuleCV(
-            data_dir="../data",
-            subtype="HR+HER2-",
-            n_lines=4,
+            data_dir=data_config['data_dir'],
+            subtype=data_config['subtype'],
+            n_lines=data_config['n_lines'],
             n_intervals=model_config["n_intervals"],
             batch_size=model_config["train_batch_size"],
             fold_idx=k,
@@ -99,7 +100,7 @@ def main(model_config, train_config,  split_seed, trial_id, n_folds, project_nam
                 name=f"trial_{trial_id}_fold_{k}",
                 group=f"trial_{trial_id}_CV",
                 reinit=True,
-                save_dir=f"../models/HR+HER2-/4lines/seed_{split_seed}",
+                save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}",
             )
             callbacks.append(LearningRateMonitor(logging_interval="epoch"))  # type: ignore
 
@@ -168,9 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--fast_dev_run", action="store_true")
-
     parser.add_argument("--project_name", type=str, default=None)
-
     args = parser.parse_args()
 
     print(
@@ -178,11 +177,14 @@ if __name__ == "__main__":
     )
 
     model_config = sample_config()
-    train_config = load_config("../configs/train_config.toml")
+    config = load_config("../configs/config.toml")
+    train_config = config['train']
+    data_config = config['data']
 
     results = main(
         model_config,
         train_config,
+        data_config,
         args.split_seed,
         args.trial_id,
         args.n_folds,
@@ -190,7 +192,7 @@ if __name__ == "__main__":
         args.fast_dev_run,
     )
 
-    out_dir = f"../models/HR+HER2-/4lines/seed_{args.split_seed}"
+    out_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{args.split_seed}"
     os.makedirs(out_dir, exist_ok=True)
 
     with open(f"{out_dir}/trial_{args.trial_id}.json", "w") as f:

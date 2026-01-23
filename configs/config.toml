@@ -1,0 +1,16 @@
+[train]
+[train.trainer]
+max_epochs = 300
+
+[train.early_stopping]
+monitor = "val_loss"
+mode = "min"
+patience = 50
+
+[data]
+data_dir = "../data"
+subtype = "HR+HER2-"
+n_lines = 4
+batch_size = 128
+
+

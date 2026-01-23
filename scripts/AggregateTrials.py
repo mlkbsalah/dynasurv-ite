@@ -3,9 +3,12 @@ import glob
 import json
 import os
 
+SUBTYPE = "HR+HER2-"
+N_LINES = 4
+
 def aggregate_results(seed):
     # read all trial result files
-    result_dir = f"../models/HR+HER2-/4lines/seed_{seed}"
+    result_dir = f"../models/{SUBTYPE}/{N_LINES}lines/seed_{seed}"
     files = glob.glob(f"{result_dir}/trial_*.json")
     all_results = [json.load(open(f)) for f in files]
     
