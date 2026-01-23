@@ -6,12 +6,13 @@ import os
 SUBTYPE = "HR+HER2-"
 N_LINES = 4
 
+
 def aggregate_results(seed):
     # read all trial result files
     result_dir = f"../models/{SUBTYPE}/{N_LINES}lines/seed_{seed}"
     files = glob.glob(f"{result_dir}/trial_*.json")
     all_results = [json.load(open(f)) for f in files]
-    
+
     # find the best trial based on mean_ci
     best_trial = max(all_results, key=lambda x: x["mean_ci"])
     with open(f"{result_dir}/best_config.json", "w") as f:
@@ -24,9 +25,6 @@ def aggregate_results(seed):
     # clean up individual trial files
     for f in files:
         os.remove(f)
-
-    
-
 
 
 if __name__ == "__main__":

@@ -1,14 +1,13 @@
-import torch 
+import torch
 import torch.nn as nn
-from CausalSurv.tools import load_config
+
 
 class MLP(nn.Module):
     """A simple Multi-Layer Perceptron (MLP) with ReLU activations."""
 
-    def __init__(self, input_dim: int, 
-                 output_dim: int, 
-                 n_units: list[int],
-                 dropout: float) -> None:
+    def __init__(
+        self, input_dim: int, output_dim: int, n_units: list[int], dropout: float
+    ) -> None:
         """Class constructor
         Args:
             input_dim (int): Dimension of the input features
@@ -31,7 +30,7 @@ class MLP(nn.Module):
             layers.append(nn.ReLU())
             layers.append(nn.BatchNorm1d(n_units[i]))
             prev_layer = n_units[i]
-        
+
         layers.append(nn.Linear(prev_layer, output_dim))
         self.mlp = nn.Sequential(*layers)
 
@@ -43,4 +42,3 @@ class MLP(nn.Module):
             torch.Tensor: Output tensor
         """
         return self.mlp(x)
-

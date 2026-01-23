@@ -1,6 +1,7 @@
 import tomllib
 from pathlib import Path
 
+
 def load_config(config):
     if isinstance(config, dict):
         return config

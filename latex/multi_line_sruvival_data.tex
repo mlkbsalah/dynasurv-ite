@@ -17,12 +17,12 @@
 
 \begin{document}
 This document describes the data generation process for a multi-line survival model that simulates sequential treatment episodes for patients, incorporating autoregressive feature dynamics, disease progression, cumulative toxicity effects, and time-varying censoring.
-Let's denote by: 
+Let's denote by:
 \begin{itemize}
-    \item $X_{i,\ell} = (X^{j}_{i,\ell})_{j \leq J}$ the feature vector of patient $i$ at treatment line l 
+    \item $X_{i,\ell} = (X^{j}_{i,\ell})_{j \leq J}$ the feature vector of patient $i$ at treatment line l
     \item $T_{i,\ell}$ the treatment assigned at line $l$
     \item $Y_{i,\ell}$ the observed time (either event or censoring) at line $l$
-    \item $E_{i,\ell}$ the event indicator. 
+    \item $E_{i,\ell}$ the event indicator.
 \end{itemize}
 Features evolve across treatment lines following an AR($p$)
 \begin{align*}
@@ -59,7 +59,7 @@ $$
 where $\rho$ is the progression rate (increased hazard per line).
 \paragraph{Event time generation:}
 The event time follows a Weibull distribution with treatment-specific parameters and covariate adjustments:
-$$ 
+$$
     Y_{i,\ell} \mid (T_{i,\ell}, X_{i,\ell}, Y_{i,\ell})_{i<l} = \frac{\exp(-\eta_{i,\ell})}{h_{\text{base}}(\ell)} \cdot W_{i,\ell}
 $$
 where $W_\ell \sim \text{Weibull}(k_{T_{i,\ell}}, \lambda_{T_{i,\ell}})$
@@ -68,7 +68,7 @@ Censoring time increases with line number:
 \begin{align*}
     &\lambda_{\text{cens}}(\ell) = \lambda_0 (1 + \gamma \cdot \ell) \\
     &T_{i,\ell}^{\text{cens}} \sim \text{Exponential}(\lambda_{\text{cens}}(\ell))
-\end{align*}    
+\end{align*}
 where $\lambda_0$ is the base censoring rate and $\gamma$ is the per-line increase rate.
 \paragraph{Observed data:}
 The observed time and event indicator are:
@@ -111,7 +111,7 @@ The observed time and event indicator are:
 Consider the Cox partial log-likelihood
 \[
 \ell(\theta)
-= 
+=
 \sum_{i: D_i = 1}
 \left[
 g_\theta(x_i)
@@ -166,7 +166,7 @@ G_i(\theta)
 p_i(j) = \frac{\exp(g_\theta(x_j))}{\sum_{k \in R_i} \exp(g_\theta(x_k))}.
 \]
 
-The CoxTime estimator replaces $R_i$ by a subsample $\widetilde{R}_i$ with uniform sampling.  
+The CoxTime estimator replaces $R_i$ by a subsample $\widetilde{R}_i$ with uniform sampling.
 Thus, the estimator uses
 \[
 \widetilde{G}_i(\theta)
@@ -188,25 +188,25 @@ G_i(\theta)
 
 The bias is:
 \[
-\mathrm{Bias}(\widetilde{G}_i) 
+\mathrm{Bias}(\widetilde{G}_i)
 =
 \mathbb{E}[\widetilde{G}_i] - G_i.
 \]
 
 \subsection{Magnitude of the Bias}
 
-Let $Z_{i} = \sum_{j \in R_i} \exp(g_\theta(x_j))$ and  
+Let $Z_{i} = \sum_{j \in R_i} \exp(g_\theta(x_j))$ and
 $Z_{i,m} = \sum_{j \in \widetilde{R}_i} \exp(g_\theta(x_j))$.
 
 If the subsampling is uniform without replacement:
 \[
-\mathbb{E}[Z_{i,m}] 
+\mathbb{E}[Z_{i,m}]
 = \frac{m}{|R_i|} Z_i.
 \]
 
 Using Taylor approximations of the ratio of random variables:
 \[
-\frac{A}{B} = 
+\frac{A}{B} =
 \frac{\mathbb{E}[A]}{\mathbb{E}[B]}
 \left(
 1 + O\!\left(\frac{\mathrm{Var}(A)}{A^2}\right)
@@ -226,9 +226,9 @@ O\left(
 assuming $\exp(g_\theta(x_j))$ has bounded variance.
 
 Therefore:
-- Small batches $\Rightarrow$ significant bias  
-- Large batches $\Rightarrow$ bias shrinks as $1/m$  
-- Full batch $\Rightarrow$ zero bias  
+- Small batches $\Rightarrow$ significant bias
+- Large batches $\Rightarrow$ bias shrinks as $1/m$
+- Full batch $\Rightarrow$ zero bias
 
 \subsection{Unbiased or Less Biased Alternatives}
 
@@ -247,7 +247,7 @@ is unbiased:
 \mathbb{E}[\widehat{Z}_i] = Z_i.
 \]
 
-Same for the numerator.  
+Same for the numerator.
 Therefore the ratio has bias only of order
 \[
 O\!\left(\frac{1}{m}\right)
@@ -275,7 +275,7 @@ Standard theory (Bottou, 2018) guarantees convergence if:
 \|\mathbb{E}[\widetilde{G}(\theta)] - \nabla L(\theta)\|
 \le B.
 \]
-\item The learning rate decays: 
+\item The learning rate decays:
 \[
 \sum_t \eta_t = \infty,\qquad \sum_t \eta_t^2 < \infty.
 \]
@@ -288,7 +288,7 @@ O(B).
 \]
 
 Thus:
-- DeepSurv (full risk set $B=0$) converges to the true optimum.  
+- DeepSurv (full risk set $B=0$) converges to the true optimum.
 - CoxTime (subset $B>0$) converges near the optimum, and the error shrinks as $O(1/m)$.
 
 \subsection{Summary}

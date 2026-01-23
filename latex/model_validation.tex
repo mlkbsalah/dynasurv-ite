@@ -76,7 +76,7 @@
 
 %------------------------------------------------
 \begin{frame}{Factual Consistency Check}
-\textbf{Question:}  
+\textbf{Question:}
 Does the model recover observed outcomes when intervening on the factual treatment?
 
 \begin{itemize}
@@ -91,7 +91,7 @@ Does the model recover observed outcomes when intervening on the factual treatme
 
 %------------------------------------------------
 \begin{frame}{Counterfactual Placebo Test}
-\textbf{Question:}  
+\textbf{Question:}
 Does the model hallucinate treatment effects under randomized interventions?
 
 \begin{itemize}
@@ -107,7 +107,7 @@ Does the model hallucinate treatment effects under randomized interventions?
 
 %------------------------------------------------
 \begin{frame}{Representation Balance Diagnostics}
-\textbf{Question:}  
+\textbf{Question:}
 Is treatment assignment predictable from learned patient representations?
 
 \begin{itemize}
@@ -122,7 +122,7 @@ Is treatment assignment predictable from learned patient representations?
 
 %------------------------------------------------
 \begin{frame}{Pairwise Counterfactual Stability}
-\textbf{Question:}  
+\textbf{Question:}
 Are pairwise treatment comparisons stable for similar patients?
 
 \begin{itemize}
@@ -140,7 +140,7 @@ Are pairwise treatment comparisons stable for similar patients?
 
 %------------------------------------------------
 \begin{frame}{Clinical Plausibility Checks}
-\textbf{Question:}  
+\textbf{Question:}
 Do estimated effects align with known clinical patterns?
 
 \begin{itemize}
@@ -155,7 +155,7 @@ Do estimated effects align with known clinical patterns?
 
 %------------------------------------------------
 \begin{frame}{Temporal Coherence Across Lines}
-\textbf{Question:}  
+\textbf{Question:}
 Are counterfactual effects coherent across successive treatment lines?
 
 \begin{itemize}
@@ -170,7 +170,7 @@ Are counterfactual effects coherent across successive treatment lines?
 
 %------------------------------------------------
 \begin{frame}{History Ablation Study}
-\textbf{Question:}  
+\textbf{Question:}
 How sensitive are predictions to treatment history?
 
 \begin{itemize}
@@ -202,7 +202,7 @@ How sensitive are predictions to treatment history?
 
 %------------------------------------------------
 \begin{frame}{Retrospective Regret Analysis}
-\textbf{Question:}  
+\textbf{Question:}
 Where does the model disagree with observed clinical choices?
 
 \begin{itemize}
@@ -220,7 +220,7 @@ Where does the model disagree with observed clinical choices?
 
 %------------------------------------------------
 \begin{frame}{Sensitivity to Unmeasured Confounding}
-\textbf{Question:}  
+\textbf{Question:}
 How strong must hidden confounding be to change conclusions?
 
 \begin{itemize}
@@ -382,19 +382,19 @@ where:
         \item Model learns representations that satisfy both objectives
         \item Early biomarkers weighted appropriately for long-term prognosis
     \end{itemize}
-    
+
     \item \textbf{Regularization Effect}
     \begin{itemize}
         \item Ultimate outcome task prevents overfitting to short-term noise
         \item Improved generalization
     \end{itemize}
-    
+
     \item \textbf{Complementary Information}
     \begin{itemize}
         \item Immediate risk: "What's the danger now?"
         \item Ultimate outcome: "What's the overall trajectory?"
     \end{itemize}
-    
+
     \item \textbf{Clinical Flexibility}
     \begin{itemize}
         \item Use Branch 1 for time-specific decisions
@@ -463,14 +463,14 @@ where:
 %         \item Implement dual output heads
 %         \item Define combined loss function
 %     \end{itemize}
-    
+
 %     \item \textbf{Validation}
 %     \begin{itemize}
 %         \item Compare against single-task baselines
 %         \item Perform ablation studies on task weights
 %         \item Test on held-out temporal validation set
 %     \end{itemize}
-    
+
 %     \item \textbf{Clinical Validation}
 %     \begin{itemize}
 %         \item Assess calibration at multiple time horizons

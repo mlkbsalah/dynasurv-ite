@@ -12,5 +12,3 @@ data_dir = "../data"
 subtype = "HR+HER2-"
 n_lines = 4
 batch_size = 128
-
-

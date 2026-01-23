@@ -1,6 +1,9 @@
-import torch 
+import torch
 
-def move_to_device(list_of_tensors: list[torch.Tensor], device: torch.device) -> list[torch.Tensor]:
+
+def move_to_device(
+    list_of_tensors: list[torch.Tensor], device: torch.device
+) -> list[torch.Tensor]:
     """Move a list of tensors to the specified device.
 
     Args:

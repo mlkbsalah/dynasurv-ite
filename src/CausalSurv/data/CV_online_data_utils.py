@@ -6,16 +6,29 @@ import torch.utils.data as TorchData
 
 import pandas as pd
 import numpy as np
-from CausalSurv.tools import load_config
 from sklearn.model_selection import KFold
+
 
 def stack_by_lines(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
     """Stack variables patient-wise, variable number of lines per patient.   list[np.ndarray(patient_i_lines, len(cols))]"""
-    grouped = df.groupby('usubjid')[cols]
+    grouped = df.groupby("usubjid")[cols]
     return [group.to_numpy() for _, group in grouped]
 
+
 class ESMEOnlineDataset(TorchData.Dataset):
-    def __init__(self, X_list, X_static, P_list, P_static, d_list, time_list, event_list, patient_ids, n_lines: int, interval_bounds: torch.Tensor):
+    def __init__(
+        self,
+        X_list,
+        X_static,
+        P_list,
+        P_static,
+        d_list,
+        time_list,
+        event_list,
+        patient_ids,
+        n_lines: int,
+        interval_bounds: torch.Tensor,
+    ):
         """Class constructor for ESME dataset
 
         Args:
@@ -26,7 +39,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
             event_list (list[np.ndarray]): one per patient (each of shape [n_lines_i, 1]) event indicators
             time_bins (torch.Tensor):    tensor of shape [n_intervals + 1] defining the time intervals
             n_lines (int):             maximum number of lines to pad to
-        
+
         Remarks:
             Each patient sample contains all their lines, padded to n_lines.
         """
@@ -46,23 +59,27 @@ class ESMEOnlineDataset(TorchData.Dataset):
 
     def __len__(self) -> int:
         return len(self.X_list)
-    
+
     def transform_target_time(self, time: torch.Tensor) -> torch.Tensor:
         interval_idx = torch.bucketize(time, self.interval_bounds) - 1  # (n_lines,)
         interval_idx = torch.clamp(interval_idx, 0, self.n_intervals - 1)
         if interval_idx < 0 or interval_idx >= self.n_intervals:
-            raise ValueError(f"Time value out of bounds of interval_bounds: time={time}, bounds={self.interval_bounds}")
+            raise ValueError(
+                f"Time value out of bounds of interval_bounds: time={time}, bounds={self.interval_bounds}"
+            )
         return interval_idx
-    
-    def _pad_sequence(self, seq: np.ndarray, target_length: int) -> Tuple[torch.Tensor, torch.Tensor]:
+
+    def _pad_sequence(
+        self, seq: np.ndarray, target_length: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         seq_lentgh, seq_dim = seq.shape
-        
+
         padded_seq = torch.zeros((target_length, seq_dim), dtype=torch.float32)
         mask = torch.zeros((target_length,), dtype=torch.long)
 
         padded_seq[:seq_lentgh] = torch.tensor(seq, dtype=torch.float32)
         mask[:seq_lentgh] = 1
-        
+
         return padded_seq, mask
 
     def __getitem__(self, idx):
@@ -73,47 +90,59 @@ class ESMEOnlineDataset(TorchData.Dataset):
         d = self.d_list[idx]  # (n_lines_i, 1)
         time = self.time_list[idx]  # (n_lines_i, 1)
         event = self.event_list[idx]  # (n_lines_i, 1)
-        patient_id = self.patient_ids[idx] # patient identifier 
-        
+        patient_id = self.patient_ids[idx]  # patient identifier
+
         x_padded, mask = self._pad_sequence(x, self.n_lines)
         p_padded = self._pad_sequence(p, self.n_lines)[0]
         d_padded = self._pad_sequence(d, self.n_lines)[0]
         time_padded = self._pad_sequence(time, self.n_lines)[0]
         event_padded = self._pad_sequence(event, self.n_lines)[0]
-        
+
         treatment_indices = torch.argmax(p_padded, dim=-1)  # (n_lines,)
-        
-        interval_idx = torch.tensor([self.transform_target_time(t) for t in time_padded])  # (n_lines,)
-        
+
+        interval_idx = torch.tensor(
+            [self.transform_target_time(t) for t in time_padded]
+        )  # (n_lines,)
+
         XPd = torch.cat([x_padded, p_padded, d_padded], dim=-1)
 
-        return XPd, (x_static, p_static), interval_idx, treatment_indices, time_padded.squeeze(), event_padded.squeeze(), mask.squeeze(), patient_id
+        return (
+            XPd,
+            (x_static, p_static),
+            interval_idx,
+            treatment_indices,
+            time_padded.squeeze(),
+            event_padded.squeeze(),
+            mask.squeeze(),
+            patient_id,
+        )
 
 
-    
 class ESMEOnlineDataModuleCV(L.LightningDataModule):
-    def __init__(self, 
-                 data_dir: str,
-                 subtype: str,
-                 n_lines: int, 
-                 n_intervals: int,
-                 batch_size: int,
-                 final_training: bool = False,
-                 fold_idx: int | None = None,
-                 num_folds: int | None = None,
-                 split_seed: int | None = None,
-                 holdout_size: float = 0.1,
-                 num_workers: int = 4
-                 ):
+    def __init__(
+        self,
+        data_dir: str,
+        subtype: str,
+        n_lines: int,
+        n_intervals: int,
+        batch_size: int,
+        final_training: bool = False,
+        fold_idx: int | None = None,
+        num_folds: int | None = None,
+        split_seed: int | None = None,
+        holdout_size: float = 0.1,
+        num_workers: int = 4,
+    ):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.subtype = subtype
-        assert self.subtype in ["HR+HER2-", "HER2+", "TN"], "subtype must be one of ['HR+HER2-', 'HER2+', 'TN']"
-
+        assert self.subtype in ["HR+HER2-", "HER2+", "TN"], (
+            "subtype must be one of ['HR+HER2-', 'HER2+', 'TN']"
+        )
 
         self.n_lines = n_lines
         self.n_intervals = n_intervals
-        self.treatment_dict = {} 
+        self.treatment_dict = {}
 
         self.batch_size = batch_size
         self.fold_idx = fold_idx
@@ -129,136 +158,221 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.interval_bounds = None
 
     def prepare_data(self):
-        esme_data = pd.read_parquet(str(self.data_dir / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"))
-        static_data = pd.read_parquet(str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"))
+        esme_data = pd.read_parquet(
+            str(
+                self.data_dir
+                / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"
+            )
+        )
+        static_data = pd.read_parquet(
+            str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet")
+        )
 
         merged = esme_data.merge(
-            static_data,
-            on='usubjid',
-            how='inner',
-            suffixes=('', '_static')
+            static_data, on="usubjid", how="inner", suffixes=("", "_static")
         )
         self.data = merged[esme_data.columns]
-        self.data = self.data.loc[self.data['lineid'] <= self.n_lines].sort_values(by=['usubjid', 'lineid']).reset_index(drop=True).copy()
-        self.static_data = merged[static_data.columns].drop_duplicates("usubjid").reset_index(drop=True).copy()
-        
-        X_cols = [col for col in self.data.columns if col.startswith('X_') and not col.startswith('X_buffer_time')]
+        self.data = (
+            self.data.loc[self.data["lineid"] <= self.n_lines]
+            .sort_values(by=["usubjid", "lineid"])
+            .reset_index(drop=True)
+            .copy()
+        )
+        self.static_data = (
+            merged[static_data.columns]
+            .drop_duplicates("usubjid")
+            .reset_index(drop=True)
+            .copy()
+        )
+
+        X_cols = [
+            col
+            for col in self.data.columns
+            if col.startswith("X_") and not col.startswith("X_buffer_time")
+        ]
         P_cols = ["T_treatment_category"]
-        d_cols = ['X_buffer_time']
-        time_cols = ['Y_onset_to_death']
-        event_cols = ['Y_death']
-        X_static_cols = [col for col in self.static_data.columns if col.startswith('X_')]
-        P_static_cols = [col for col in self.static_data.columns if col.startswith('T_')]
+        d_cols = ["X_buffer_time"]
+        time_cols = ["Y_onset_to_death"]
+        event_cols = ["Y_death"]
+        X_static_cols = [
+            col for col in self.static_data.columns if col.startswith("X_")
+        ]
+        P_static_cols = [
+            col for col in self.static_data.columns if col.startswith("T_")
+        ]
 
-        P_encoded = pd.get_dummies(self.data[P_cols + ['usubjid']], columns=P_cols, prefix="", prefix_sep="") 
-        self.treatment_dict = {i: col for i, col in enumerate(P_encoded.columns.drop('usubjid').tolist())}
-
+        P_encoded = pd.get_dummies(
+            self.data[P_cols + ["usubjid"]], columns=P_cols, prefix="", prefix_sep=""
+        )
+        self.treatment_dict = {
+            i: col for i, col in enumerate(P_encoded.columns.drop("usubjid").tolist())
+        }
 
         X_list = stack_by_lines(self.data, X_cols)
-        P_list = stack_by_lines(P_encoded, P_encoded.columns.drop('usubjid').tolist())
+        P_list = stack_by_lines(P_encoded, P_encoded.columns.drop("usubjid").tolist())
         d_list = stack_by_lines(self.data, d_cols)
         time_list = stack_by_lines(self.data, time_cols)
         event_list = stack_by_lines(self.data, event_cols)
 
-        X_static = torch.tensor(self.static_data[X_static_cols].values, dtype=torch.float32)
-        P_static = torch.tensor(self.static_data[P_static_cols].values, dtype=torch.float32)
+        X_static = torch.tensor(
+            self.static_data[X_static_cols].values, dtype=torch.float32
+        )
+        P_static = torch.tensor(
+            self.static_data[P_static_cols].values, dtype=torch.float32
+        )
 
-        patient_ids = self.data['usubjid'].unique()
+        patient_ids = self.data["usubjid"].unique()
 
-        self.interval_bounds = torch.linspace(0, self.data['Y_onset_to_death'].max(), self.n_intervals + 1)
+        self.interval_bounds = torch.linspace(
+            0, self.data["Y_onset_to_death"].max(), self.n_intervals + 1
+        )
         # self.interval_bounds = torch.quantile(torch.tensor(self.data['Y_onset_to_death'].values, dtype=torch.float32), torch.linspace(0, 1, steps=self.n_intervals + 1))
 
-
-        self.ESMEDataset = ESMEOnlineDataset(X_list=X_list,X_static=X_static, 
-                                             P_list=P_list, P_static=P_static, 
-                                             d_list=d_list, 
-                                             time_list=time_list, event_list=event_list, 
-                                             patient_ids=patient_ids, 
-                                             n_lines=self.n_lines, interval_bounds=self.interval_bounds)
+        self.ESMEDataset = ESMEOnlineDataset(
+            X_list=X_list,
+            X_static=X_static,
+            P_list=P_list,
+            P_static=P_static,
+            d_list=d_list,
+            time_list=time_list,
+            event_list=event_list,
+            patient_ids=patient_ids,
+            n_lines=self.n_lines,
+            interval_bounds=self.interval_bounds,
+        )
 
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
             self.prepare_data()
-        assert self.ESMEDataset is not None, "ESMEDataset must be initialized before setup."
+        assert self.ESMEDataset is not None, (
+            "ESMEDataset must be initialized before setup."
+        )
 
-
-        assert self.split_seed is not None, "split_seed must be provided for reproducible splits."
+        assert self.split_seed is not None, (
+            "split_seed must be provided for reproducible splits."
+        )
         total_size = len(self.ESMEDataset)
         holdout_size = int(self.holdout_size * total_size)
         cv_size = total_size - holdout_size
         generator = torch.Generator().manual_seed(self.split_seed)
-        self.cv_dataset, self.holdout_dataset = TorchData.random_split(self.ESMEDataset, [cv_size, holdout_size], generator=generator)
-        
+        self.cv_dataset, self.holdout_dataset = TorchData.random_split(
+            self.ESMEDataset, [cv_size, holdout_size], generator=generator
+        )
+
         if self.final_training:
-            if stage == 'fit' or stage is None:
+            if stage == "fit" or stage is None:
                 self.train_dataset = self.cv_dataset
                 self.val_dataset = self.holdout_dataset
-            if stage == 'test' or stage is None:
+            if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
         else:
-            if stage == 'fit' or stage is None:
-                kfold = KFold(n_splits=self.num_folds or 5, shuffle=True, random_state=self.split_seed)
-                all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))] # type: ignore
+            if stage == "fit" or stage is None:
+                kfold = KFold(
+                    n_splits=self.num_folds or 5,
+                    shuffle=True,
+                    random_state=self.split_seed,
+                )
+                all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
                 train_idx, val_idx = all_splits[self.fold_idx]
                 train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
-                
+
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
                 self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
 
-            if stage == 'test' or stage is None:
+            if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
 
-
     def train_dataloader(self):
-        return TorchData.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, persistent_workers=True)
+        return TorchData.DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+        )
 
     def val_dataloader(self):
-        return TorchData.DataLoader(self.val_dataset, batch_size=len(self.val_dataset), shuffle=False, num_workers=1, persistent_workers=True)
+        return TorchData.DataLoader(
+            self.val_dataset,
+            batch_size=len(self.val_dataset),
+            shuffle=False,
+            num_workers=1,
+            persistent_workers=True,
+        )
 
     def test_dataloader(self):
-        return TorchData.DataLoader(self.test_dataset, batch_size=len(self.test_dataset), shuffle=False, num_workers=1, persistent_workers=False)
+        return TorchData.DataLoader(
+            self.test_dataset,
+            batch_size=len(self.test_dataset),
+            shuffle=False,
+            num_workers=1,
+            persistent_workers=False,
+        )
 
     def get_data_dimensions(self):
-        esme_data = pd.read_parquet(str(self.data_dir / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"))
-        static_data = pd.read_parquet(str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"))
-        static_data = static_data.loc[static_data['usubjid'].isin(esme_data['usubjid'].unique())].reset_index(drop=True)
-        
-        x_dim = len([col for col in esme_data.columns if col.startswith('X_') and not col.startswith('X_buffer_time')])
-        p_dim = len(pd.get_dummies(esme_data["T_treatment_category"].astype(str)).columns)
-        p_static_dim = len([col for col in static_data.columns if col.startswith('T_')])
-        x_static_dim = len([col for col in static_data.columns if col.startswith('X_')])
-        interval_bounds = torch.linspace(0, esme_data['Y_onset_to_death'].max(), self.n_intervals + 1)
+        esme_data = pd.read_parquet(
+            str(
+                self.data_dir
+                / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"
+            )
+        )
+        static_data = pd.read_parquet(
+            str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet")
+        )
+        static_data = static_data.loc[
+            static_data["usubjid"].isin(esme_data["usubjid"].unique())
+        ].reset_index(drop=True)
 
+        x_dim = len(
+            [
+                col
+                for col in esme_data.columns
+                if col.startswith("X_") and not col.startswith("X_buffer_time")
+            ]
+        )
+        p_dim = len(
+            pd.get_dummies(esme_data["T_treatment_category"].astype(str)).columns
+        )
+        p_static_dim = len([col for col in static_data.columns if col.startswith("T_")])
+        x_static_dim = len([col for col in static_data.columns if col.startswith("X_")])
+        interval_bounds = torch.linspace(
+            0, esme_data["Y_onset_to_death"].max(), self.n_intervals + 1
+        )
 
-        return {'x_input_dim': x_dim,
-                'p_input_dim': p_dim,
-                'p_static_dim': p_static_dim,
-                'x_static_dim': x_static_dim,
-                'output_dim': self.n_intervals,
-                'time_bins': interval_bounds}
+        return {
+            "x_input_dim": x_dim,
+            "p_input_dim": p_dim,
+            "p_static_dim": p_static_dim,
+            "x_static_dim": x_static_dim,
+            "output_dim": self.n_intervals,
+            "time_bins": interval_bounds,
+        }
+
 
 if __name__ == "__main__":
-    import time 
-    data_module = ESMEOnlineDataModuleCV(data_dir="../../../data",
-                                         subtype="HR+HER2-",
-                                         n_lines=2,
-                                         n_intervals=10,
-                                         batch_size=32,
-                                         fold_idx = 3,
-                                         num_folds=10,
-                                         split_seed=12345,
-                                         holdout_size=0.1,
-                                         num_workers=4
-                                         )
+    import time
+
+    data_module = ESMEOnlineDataModuleCV(
+        data_dir="../../../data",
+        subtype="HR+HER2-",
+        n_lines=2,
+        n_intervals=10,
+        batch_size=32,
+        fold_idx=3,
+        num_folds=10,
+        split_seed=12345,
+        holdout_size=0.1,
+        num_workers=4,
+    )
     print("DataModule initialized.")
     start = time.time()
     data_module.prepare_data()
     print(f"Data prepared in {time.time() - start:.2f} seconds.")
-    
+
     start = time.time()
     data_module.setup()
     print(f"DataModule setup complete in {time.time() - start:.2f} seconds.")
-    
+
     start = time.time()
     train_loader = data_module.train_dataloader()
     print(f"Train DataLoader created in {time.time() - start:.2f} seconds.")
@@ -270,17 +384,31 @@ if __name__ == "__main__":
     start = time.time()
     test_loader = data_module.test_dataloader()
     print(f"Test DataLoader created in {time.time() - start:.2f} seconds.")
-    
+
     start = time.time()
     batch = next(iter(train_loader))
     print(f"First batch retrieved in {time.time() - start:.2f} seconds.")
     print("Batch contents:")
-    XPd, (x_static, p_static), interval_idx, treatment_indices, time, event, mask, patient_id = batch
+    (
+        XPd,
+        (x_static, p_static),
+        interval_idx,
+        treatment_indices,
+        time,
+        event,
+        mask,
+        patient_id,
+    ) = batch
     print("Batch XPd shape:", XPd.shape, "dtype:", XPd.dtype)
     print("Batch x_static shape:", x_static.shape, "dtype:", x_static.dtype)
     print("Batch p_static shape:", p_static.shape, "dtype:", p_static.dtype)
     print("Batch interval_idx shape:", interval_idx.shape, "dtype:", interval_idx.dtype)
-    print("Batch treatment_indices shape:", treatment_indices.shape, "dtype:", treatment_indices.dtype)
+    print(
+        "Batch treatment_indices shape:",
+        treatment_indices.shape,
+        "dtype:",
+        treatment_indices.dtype,
+    )
     print("Batch time shape:", time.shape, "dtype:", time.dtype)
     print("Batch event shape:", event.shape, "dtype:", event.dtype)
     print("Batch mask shape:", mask.shape, "dtype:", mask.dtype)

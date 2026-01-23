@@ -4,39 +4,46 @@ import os
 import tomllib
 
 import lightning as L
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    EarlyStopping,
+)
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.CV_online_data_utils import ESMEOnlineDataModuleCV
 from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
+
 
 def load_config(config_path):
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
     return config
 
+
 def load_model_config(model_config_dir):
     with open(os.path.join(model_config_dir, "best_config.json"), "r") as f:
         best_model_config = json.load(f)
     return best_model_config["config"]
 
+
 def main(model_config, train_config, data_config, split_seed, fast_dev_run=False):
     if fast_dev_run:
-        train_config['trainer']['max_epochs'] = 5
+        train_config["trainer"]["max_epochs"] = 5
 
     data_module = ESMEOnlineDataModuleCV(
-        data_dir=data_config['data_dir'],
-        subtype=data_config['subtype'],
-        n_lines=data_config['n_lines'],
-        n_intervals=model_config['n_intervals'],
-        batch_size=data_config['batch_size'],
+        data_dir=data_config["data_dir"],
+        subtype=data_config["subtype"],
+        n_lines=data_config["n_lines"],
+        n_intervals=model_config["n_intervals"],
+        batch_size=data_config["batch_size"],
         split_seed=split_seed,
         num_workers=4,
         final_training=True,
     )
 
     data_dims = data_module.get_data_dimensions()
-    
+
     model = DynaSurvCausalOnline(
         x_input_dim=data_dims["x_input_dim"],
         x_static_dim=data_dims["x_static_dim"],
@@ -67,38 +74,38 @@ def main(model_config, train_config, data_config, split_seed, fast_dev_run=False
         lr_scheduler_gamma=model_config["lr_scheduler_gamma"],
         attention=model_config["attention"],
     )
-    
+
     callbacks = [
         LearningRateMonitor(logging_interval="step"),
         EarlyStopping(
-            monitor=train_config['early_stopping']['monitor'],
-            mode=train_config['early_stopping']['mode'], 
-            patience=train_config['early_stopping']['patience'], 
-            verbose=True
-            ),
+            monitor=train_config["early_stopping"]["monitor"],
+            mode=train_config["early_stopping"]["mode"],
+            patience=train_config["early_stopping"]["patience"],
+            verbose=True,
+        ),
         ModelCheckpoint(
             monitor="val_loss",
             mode="min",
             save_top_k=1,
             dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}/checkpoints/",
-            filename=f"dynaSurvCausalOnline-{{epoch:02d}}-{{val_loss: .4f}}",
-            ),
+            filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
+        ),
         ModelCheckpoint(
             monitor="average_ci",
             mode="max",
             save_top_k=1,
             dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}/checkpoints/",
-            filename=f"dynaSurvCausalOnline-bestCI-{{epoch:02d}}-{{average_ci: .4f}}",
+            filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
         ),
         ModelCheckpoint(
             monitor="average_ibs",
             mode="min",
             save_top_k=1,
             dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}/checkpoints/",
-            filename=f"dynaSurvCausalOnline-bestIBS-{{epoch:02d}}-{{average_ibs: .4f}}",
-        )
+            filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
+        ),
     ]
-    
+
     logger = WandbLogger(
         project=f"DynaSurvCausalOnline_{data_config['subtype']}_{data_config['n_lines']}lines_final_model",
         name=f"seed_{split_seed}",
@@ -117,21 +124,29 @@ def main(model_config, train_config, data_config, split_seed, fast_dev_run=False
     )
     trainer.fit(model, datamodule=data_module)
     trainer.test(model, datamodule=data_module)
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--split_seed", type=int, required=True)
-    parser.add_argument("--fast_dev_run", action="store_true", help="Enable fast development run mode")
+    parser.add_argument(
+        "--fast_dev_run", action="store_true", help="Enable fast development run mode"
+    )
     args = parser.parse_args()
     split_seed = args.split_seed
     fast_dev_run = args.fast_dev_run
 
     config = load_config("../configs/config.toml")
-    data_config = config['data']
-    train_config = config['train']
+    data_config = config["data"]
+    train_config = config["train"]
 
     model_config_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}"
     best_model_config = load_model_config(model_config_dir)
 
-    main(model_config=best_model_config, train_config=train_config, data_config=data_config, split_seed=split_seed, fast_dev_run=fast_dev_run)
+    main(
+        model_config=best_model_config,
+        train_config=train_config,
+        data_config=data_config,
+        split_seed=split_seed,
+        fast_dev_run=fast_dev_run,
+    )

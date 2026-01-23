@@ -19,28 +19,38 @@ def load_config(config_path):
         config = tomllib.load(f)
     return config
 
+
 def load_model_config(model_config_dir):
     with open(os.path.join(model_config_dir, "best_config.json"), "r") as f:
         best_model_config = json.load(f)
     return best_model_config["config"]
 
-def main(model_config, train_config, data_config, split_seed, trial_id, n_folds, project_name, fast_dev_run=False):
+
+def main(
+    model_config,
+    train_config,
+    data_config,
+    split_seed,
+    trial_id,
+    n_folds,
+    project_name,
+    fast_dev_run=False,
+):
     if fast_dev_run:
         n_folds = 2
         train_config["trainer"]["max_epochs"] = 5
-
 
     loss_folds = []
     average_ci_folds = []
     average_ibs_folds = []
 
     for k in range(n_folds):
-        print(f"[Trial {trial_id}] Starting fold {k+1}/{n_folds}")
+        print(f"[Trial {trial_id}] Starting fold {k + 1}/{n_folds}")
 
         DataModuleCV = ESMEOnlineDataModuleCV(
-            data_dir=data_config['data_dir'],
-            subtype=data_config['subtype'],
-            n_lines=data_config['n_lines'],
+            data_dir=data_config["data_dir"],
+            subtype=data_config["subtype"],
+            n_lines=data_config["n_lines"],
             n_intervals=model_config["n_intervals"],
             batch_size=model_config["train_batch_size"],
             fold_idx=k,
@@ -163,7 +173,6 @@ def sample_config():
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--trial_id", type=int, required=False, default=0)
     parser.add_argument("--split_seed", type=int, required=True)
@@ -178,8 +187,8 @@ if __name__ == "__main__":
 
     model_config = sample_config()
     config = load_config("../configs/config.toml")
-    train_config = config['train']
-    data_config = config['data']
+    train_config = config["train"]
+    data_config = config["data"]
 
     results = main(
         model_config,

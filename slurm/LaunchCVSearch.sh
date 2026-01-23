@@ -52,7 +52,7 @@ if [[ "$DEV_MODE" -eq 0 ]] && { [[ -z "$N_FOLDS" ]] || [[ -z "$SPLIT_SEED" ]]; }
 	exit 1
 fi
 
-if [[ -z "$PROJECT_NAME" ]]; then 
+if [[ -z "$PROJECT_NAME" ]]; then
 	echo "Warning: unspecified project name, logging disabled" >&2
 fi
 
