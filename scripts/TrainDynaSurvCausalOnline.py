@@ -15,7 +15,10 @@ def load_config(config_path):
         config = tomllib.load(f)
     return config
 
-def main(model_config, train_config, split_seed):
+def main(model_config, train_config, split_seed, dev_mode=False):
+    if dev_mode:
+        train_config['trainer']['max_epochs'] = 5
+
     data_module = ESMEOnlineDataModuleCV(
         data_dir="../data",
         subtype="HR+HER2-",
@@ -114,9 +117,11 @@ def main(model_config, train_config, split_seed):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--split_seed", type=int, required=True)
+    parser.add_argument("--dev_mode", action="store_true", help="Enable fast development run mode")
 
     args = parser.parse_args()
     split_seed = args.split_seed
+    dev_mode = args.dev_mode
 
     model_config_dir = f"../models/HR+HER2-/4lines/seed_{split_seed}"
     with open(os.path.join(model_config_dir, "best_config.json"), "r") as f:
@@ -125,4 +130,4 @@ if __name__ == "__main__":
 
     train_config = load_config("../configs/train_config.toml")
 
-    main(model_config=best_model_config, train_config=train_config, split_seed=split_seed)
+    main(model_config=best_model_config, train_config=train_config, split_seed=split_seed, dev_mode=dev_mode)
