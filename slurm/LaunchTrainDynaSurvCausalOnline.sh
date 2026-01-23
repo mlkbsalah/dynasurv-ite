@@ -7,10 +7,15 @@ while [[ $# -gt 0 ]]; do
       SPLIT_SEED="$2"
       shift 2
       ;;
+    -dev|--dev_mode)
+      DEV_MODE=1
+      shift 1
+      ;;
     -h|--help)
       echo "Usage: ./launch [options]"
       echo "Options:"
       echo "  -s, --split_seed      Split seed (required)"
+      echo "  -dev, --dev_mode      Enable fast development run mode"
       exit 0
       ;;
     *)
@@ -27,4 +32,4 @@ if [[ -z "$SPLIT_SEED" ]]; then
 	exit 1
 fi
 
-sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED TrainDynaSurvCausalOnline.sh
+sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED,DEV_MODE=$DEV_MODE TrainDynaSurvCausalOnline.sh

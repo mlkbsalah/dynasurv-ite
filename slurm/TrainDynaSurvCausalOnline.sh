@@ -18,6 +18,13 @@ cd "$PROJECT_DIR/scripts"
 
 export PYTHONPATH="$PROJECT_DIR/src"
 
+FAST_DEV_FLAG=""
+if [[ "$DEV_MODE" -eq 1 ]]; then
+    FAST_DEV_FLAG="--fast_dev_run"
+fi
+
 # Script
 python3 TrainDynaSurvCausalOnline.py \
-        --split_seed $SPLIT_SEED
+        --split_seed $SPLIT_SEED \
+        $FAST_DEV_FLAG
+
