@@ -1,13 +1,13 @@
 import argparse
 import json
 import os
-import tomllib
 
 import lightning as L
+import tomllib
 from lightning.pytorch.callbacks import (
+    EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
-    EarlyStopping,
 )
 from lightning.pytorch.loggers import WandbLogger
 

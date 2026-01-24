@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
-from CausalSurv.model.mlp import MLP
+
 from CausalSurv.model.attention import FeatureAttention
+from CausalSurv.model.mlp import MLP
 
 
 class embed_LSTM_ITE(nn.Module):

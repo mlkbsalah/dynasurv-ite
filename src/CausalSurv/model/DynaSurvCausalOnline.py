@@ -1,19 +1,16 @@
 from typing import Tuple
 
-import torch
 import lightning as L
-
-from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
-from CausalSurv.model.mlp import MLP
-from CausalSurv.metrics.loss import NLLogisticHazard
-
+import numpy as np
+import torch
 from sksurv.metrics import concordance_index_censored
 from sksurv.nonparametric import CensoringDistributionEstimator
 from sksurv.util import Surv
-
 from torchsurv.metrics.brier_score import BrierScore
 
-import numpy as np
+from CausalSurv.metrics.loss import NLLogisticHazard
+from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
+from CausalSurv.model.mlp import MLP
 
 
 class DynaSurvCausalOnline(L.LightningModule):

@@ -1,5 +1,6 @@
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 
 def load_config(config):

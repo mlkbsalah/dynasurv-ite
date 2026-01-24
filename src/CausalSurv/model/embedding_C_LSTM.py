@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+
 from CausalSurv.model.mlp import MLP
 
 

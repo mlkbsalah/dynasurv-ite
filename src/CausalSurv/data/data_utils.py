@@ -1,7 +1,7 @@
-import torch
 import lightning as L
-import torch.utils.data as TorchData
 import pandas as pd
+import torch
+import torch.utils.data as TorchData
 
 
 def stack_by_lines(df: pd.DataFrame, cols: list[str], n_lines: int) -> torch.Tensor:
