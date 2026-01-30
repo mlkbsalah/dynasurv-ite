@@ -161,6 +161,7 @@ class DynaSurvCausalOnline(L.LightningModule):
     def _init_lstm_states(
         self, X_static, device: torch.device
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Initialize LSTM hidden, cell, and treatment embedding states."""
         x_static_general, x_static_treatment = X_static
         batch_size = x_static_general.shape[0]
         h0 = self.init_h_mlp(x_static_general)
@@ -173,6 +174,7 @@ class DynaSurvCausalOnline(L.LightningModule):
     ) -> Tuple[
         torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ]:
+        """Forward pass for one time step."""
         _, h, c, p = self.lstm(XPd_t, tuple_in)
         propensity_t = torch.softmax(
             self.propensityhead(h), dim=-1
@@ -242,7 +244,13 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         """perform a validation step"""
-        self._compute_censoring_km()
+        if (
+            self.train_times is not None
+            and self.train_events is not None
+            and not self.km_ready
+        ):
+            self._compute_censoring_km()
+
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
@@ -392,18 +400,16 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def _compute_censoring_km(self) -> None:
         """Compute the Kaplan-Meier estimator for censoring distribution."""
-        if (
-            self.train_times is not None
-            and self.train_events is not None
-            and not self.km_ready
-        ):
-            for line in range(len(self.train_times)):
-                y_surv = Surv.from_arrays(
-                    np.array(self.train_events[line]), np.array(self.train_times[line])
-                )
-                kmf = CensoringDistributionEstimator().fit(y_surv)
-                self.kmf_list.append(kmf)
-            self.km_ready = True
+        assert self.train_times is not None
+        assert self.train_events is not None
+
+        for line in range(len(self.train_times)):
+            y_surv = Surv.from_arrays(
+                np.array(self.train_events[line]), np.array(self.train_times[line])
+            )
+            kmf = CensoringDistributionEstimator().fit(y_surv)
+            self.kmf_list.append(kmf)
+        self.km_ready = True
 
     # ====================== Inference methods ============================
     def predict(self) -> Tuple[torch.Tensor, torch.Tensor]:
