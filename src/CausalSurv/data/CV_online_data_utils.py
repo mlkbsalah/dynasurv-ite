@@ -125,13 +125,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         subtype: str,
         n_lines: int,
         n_intervals: int,
-        batch_size: int,
-        final_training: bool = False,
         fold_idx: int | None = None,
         num_folds: int | None = None,
         split_seed: int | None = None,
         holdout_size: float = 0.1,
+        batch_size: int = 128,
         num_workers: int = 4,
+        final_training: bool = False,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
