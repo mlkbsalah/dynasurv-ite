@@ -27,7 +27,9 @@ def load_model_config(model_config_dir):
     return best_model_config["config"]
 
 
-def main(model_config, train_config, data_config, split_seed, fast_dev_run=False):
+def main(
+    model_config, train_config, eval_config, data_config, split_seed, fast_dev_run=False
+):
     if fast_dev_run:
         train_config["trainer"]["max_epochs"] = 5
 
@@ -73,6 +75,8 @@ def main(model_config, train_config, data_config, split_seed, fast_dev_run=False
         lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
         lr_scheduler_gamma=model_config["lr_scheduler_gamma"],
         attention=model_config["attention"],
+        evaluation_horizon_times=eval_config["horizon_times"],
+        brier_integration_step=eval_config["brier_integration_step"],
     )
 
     callbacks = [
@@ -139,6 +143,7 @@ if __name__ == "__main__":
     config = load_config("../configs/config.toml")
     data_config = config["data"]
     train_config = config["train"]
+    eval_config = config["eval"]
 
     model_config_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}"
     best_model_config = load_model_config(model_config_dir)
@@ -146,6 +151,7 @@ if __name__ == "__main__":
     main(
         model_config=best_model_config,
         train_config=train_config,
+        eval_config=eval_config,
         data_config=data_config,
         split_seed=split_seed,
         fast_dev_run=fast_dev_run,

@@ -12,3 +12,7 @@ data_dir = "../data"
 subtype = "HR+HER2-"
 n_lines = 4
 batch_size = 128
+
+[eval]
+horizon_times = [100, 75, 50, 30] # in months
+integration_step = 6 # the dx in the trapezoidal rule for integrating Brier score over time

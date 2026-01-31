@@ -28,8 +28,9 @@ def load_model_config(model_config_dir):
 
 def main(
     model_config,
-    train_config,
     data_config,
+    train_config,
+    eval_config,
     split_seed,
     trial_id,
     n_folds,
@@ -90,6 +91,8 @@ def main(
             lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
             lr_scheduler_gamma=model_config["lr_scheduler_gamma"],
             attention=model_config["attention"],
+            evaluation_horizon_times=eval_config["horizon_times"],
+            brier_integration_step=eval_config["integration_step"],
         )
 
         callbacks = [
@@ -188,17 +191,19 @@ if __name__ == "__main__":
     model_config = sample_config()
     config = load_config("../configs/config.toml")
     train_config = config["train"]
+    eval_config = config["eval"]
     data_config = config["data"]
 
     results = main(
-        model_config,
-        train_config,
-        data_config,
-        args.split_seed,
-        args.trial_id,
-        args.n_folds,
-        args.project_name,
-        args.fast_dev_run,
+        model_config=model_config,
+        train_config=train_config,
+        data_config=data_config,
+        eval_config=eval_config,
+        split_seed=args.split_seed,
+        trial_id=args.trial_id,
+        n_folds=args.n_folds,
+        project_name=args.project_name,
+        fast_dev_run=args.fast_dev_run,
     )
 
     out_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{args.split_seed}"
