@@ -39,6 +39,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
             event_list (list[np.ndarray]): one per patient (each of shape [n_lines_i, 1]) event indicators
             time_bins (torch.Tensor):    tensor of shape [n_intervals + 1] defining the time intervals
             n_lines (int):             maximum number of lines to pad to
+            interval_bounds (torch.Tensor): tensor of shape (n_lines, n_intervals + 1) defining the time intervals per line
 
         Remarks:
             Each patient sample contains all their lines, padded to n_lines.
@@ -55,7 +56,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
         self.interval_bounds = interval_bounds
         self.n_lines = n_lines
 
-        self.n_intervals = len(interval_bounds) - 1
+        self.n_intervals = interval_bounds.shape[1] - 1
 
     def __len__(self) -> int:
         return len(self.X_list)
@@ -74,8 +75,18 @@ class ESMEOnlineDataset(TorchData.Dataset):
             event (torch.Tensor): tensor of shape (n_lines,) with event indicators adjusted for interval indexing
         """
         interval_idx = (
-            torch.bucketize(time, self.interval_bounds) - 1
-        )  # (n_lines,) # range [0, n_intervals-1]
+            torch.stack(
+                [
+                    torch.bucketize(
+                        time[i],
+                        self.interval_bounds[i],
+                        right=False,
+                    )
+                    for i in range(time.shape[0])
+                ]
+            )
+            - 1
+        )  # Convert to 0-based index # (n_linea,)
 
         event = torch.where(interval_idx > self.n_intervals - 1, 0, 1)
         interval_idx = torch.clamp(
@@ -85,7 +96,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
         return interval_idx, event
 
     def _pad_sequence(
-        self, seq: np.ndarray | torch.Tensor, target_length: int
+        self, seq: np.ndarray, target_length: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         seq_lentgh, seq_dim = seq.shape
 
@@ -118,8 +129,8 @@ class ESMEOnlineDataset(TorchData.Dataset):
         p_padded = self._pad_sequence(p, self.n_lines)[0]
         d_padded = self._pad_sequence(d, self.n_lines)[0]
         time_padded = self._pad_sequence(time, self.n_lines)[0]
-        event_padded = self._pad_sequence(event, self.n_lines)[0]
-        interval_idx_padded = self._pad_sequence(interval_idx, self.n_lines)[0]
+        event_padded = self._pad_sequence(event, self.n_lines)[0]  # type: ignore
+        interval_idx_padded = self._pad_sequence(interval_idx, self.n_lines)[0]  # type: ignore
 
         treatment_indices = torch.argmax(p_padded, dim=-1)  # (n_lines,)
 
@@ -176,7 +187,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.ESMEDataset = None
         self.static_data = None
         self.interval_bounds = None
-        self.horizon = horizon
+        self.horizon = [horizon for _ in range(n_lines)]
 
     def prepare_data(self):
         esme_data = pd.read_parquet(
@@ -244,7 +255,20 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         patient_ids = self.data["usubjid"].unique()
 
-        self.interval_bounds = torch.linspace(0, self.horizon, self.n_intervals + 1)
+        last_event_time_per_line = (
+            self.data.loc[self.data[event_cols[0]] == 1]
+            .groupby("lineid")[time_cols[0]]
+            .max()
+            .values
+        )
+        self.horizon = np.minimum(self.horizon, last_event_time_per_line.tolist())
+        print("Adjusted horizons per line:", self.horizon)
+        self.interval_bounds = torch.stack(
+            [
+                torch.linspace(0, self.horizon[i], self.n_intervals + 1)
+                for i in range(self.n_lines)
+            ]
+        )
 
         self.ESMEDataset = ESMEOnlineDataset(
             X_list=X_list,
@@ -374,14 +398,14 @@ if __name__ == "__main__":
         data_dir="../../../data",
         subtype="HR+HER2-",
         n_lines=2,
-        horizon=100,
+        horizon=300,
         n_intervals=10,
         batch_size=32,
         fold_idx=3,
         num_folds=10,
         split_seed=12345,
         holdout_size=0.1,
-        num_workers=4,
+        num_workers=1,
     )
     print("DataModule initialized.")
     start = time.time()
@@ -432,3 +456,4 @@ if __name__ == "__main__":
     print("Batch event shape:", event.shape, "dtype:", event.dtype)
     print("Batch mask shape:", mask.shape, "dtype:", mask.dtype)
     print("Batch patient_id shape:", patient_id.shape, "dtype:", patient_id.dtype)
+    print("Horizons:", data_module.horizon)
