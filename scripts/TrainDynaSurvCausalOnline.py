@@ -31,7 +31,7 @@ def main(
     model_config, train_config, eval_config, data_config, split_seed, fast_dev_run=False
 ):
     if fast_dev_run:
-        train_config["trainer"]["max_epochs"] = 5
+        train_config["trainer"]["max_epochs"] = 3
 
     data_module = ESMEOnlineDataModuleCV(
         data_dir=data_config["data_dir"],
@@ -124,7 +124,7 @@ def main(
         callbacks=callbacks,
         enable_checkpointing=True,
         enable_progress_bar=True,
-        check_val_every_n_epoch=2,
+        check_val_every_n_epoch=5,
     )
     trainer.fit(model, datamodule=data_module)
     trainer.test(model, datamodule=data_module)

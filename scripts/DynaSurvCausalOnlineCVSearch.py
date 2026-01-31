@@ -38,8 +38,8 @@ def main(
     fast_dev_run=False,
 ):
     if fast_dev_run:
-        n_folds = 2
-        train_config["trainer"]["max_epochs"] = 5
+        n_folds = 3
+        train_config["trainer"]["max_epochs"] = 3
 
     loss_folds = []
     average_ci_folds = []
@@ -125,7 +125,7 @@ def main(
             callbacks=callbacks,  # type: ignore
             enable_checkpointing=False,
             enable_progress_bar=False,
-            check_val_every_n_epoch=2,
+            check_val_every_n_epoch=5,
         )
 
         trainer.fit(model, datamodule=DataModuleCV)
@@ -149,14 +149,25 @@ def main(
 
 def sample_config():
     return {
-        "n_intervals": random.choice([5, 10, 15, 20]),
+        "n_intervals": random.choice([10, 30, 50, 80, 100]),
         "train_batch_size": random.choice([64, 128, 256, 512]),
         "lstm_hidden_length": random.choice([16, 32, 64]),
         "x_embed_dim": random.choice([16, 32, 64]),
         "p_embed_dim": random.choice([8, 16, 32]),
         "mlpx_hidden_units": random.choice([[64, 32], [128, 64], [32, 32]]),
         "mlpp_hidden_units": random.choice([[16], [32], [64]]),
-        "mlpsa_hidden_units": random.choice([[32, 16], [64, 32], [128, 64]]),
+        "mlpsa_hidden_units": random.choice(
+            [
+                [32, 32],
+                [64, 64],
+                [128, 128],
+                [32, 64],
+                [64, 32],
+                [128, 64],
+                [32, 64, 128],
+                [64, 64, 128, 256],
+            ]
+        ),
         "init_h_hidden": random.choice([[32], [64], [128], [64, 64]]),
         "init_p_hidden": random.choice([[16], [32], [64], [32, 32]]),
         "mlpprop_hidden_units": random.choice([[16, 8], [32, 16], [64, 32]]),
@@ -184,9 +195,12 @@ if __name__ == "__main__":
     parser.add_argument("--project_name", type=str, default=None)
     args = parser.parse_args()
 
-    print(
-        f"Running trial {args.trial_id} with split seed {args.split_seed} and {args.n_folds} folds"
-    )
+    if args.fast_dev_run:
+        print("Running in fast dev run mode: only 2 folds and 5 epochs per fold")
+    else:
+        print(
+            f"Running trial {args.trial_id} with split seed {args.split_seed} and {args.n_folds} folds"
+        )
 
     model_config = sample_config()
     config = load_config("../configs/config.toml")
