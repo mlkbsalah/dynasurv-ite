@@ -76,7 +76,7 @@ def main(
         lr_scheduler_gamma=model_config["lr_scheduler_gamma"],
         attention=model_config["attention"],
         evaluation_horizon_times=eval_config["horizon_times"],
-        brier_integration_step=eval_config["brier_integration_step"],
+        brier_integration_step=eval_config["integration_step"],
     )
 
     callbacks = [
