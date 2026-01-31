@@ -60,17 +60,32 @@ class ESMEOnlineDataset(TorchData.Dataset):
     def __len__(self) -> int:
         return len(self.X_list)
 
-    def transform_target_time(self, time: torch.Tensor) -> torch.Tensor:
-        interval_idx = torch.bucketize(time, self.interval_bounds) - 1  # (n_lines,)
-        interval_idx = torch.clamp(interval_idx, 0, self.n_intervals - 1)
-        if interval_idx < 0 or interval_idx >= self.n_intervals:
-            raise ValueError(
-                f"Time value out of bounds of interval_bounds: time={time}, bounds={self.interval_bounds}"
-            )
-        return interval_idx
+    def transform_time(
+        self, time: torch.Tensor, event: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Transform continuous time to discrete interval indices based on interval_bounds
+
+        Args:
+            time (torch.Tensor): tensor of shape (n_lines, 1) with continuous time values
+            event (torch.Tensor): tensor of shape (n_lines, 1) with event indicators (1 if event occurred, 0 if censored)
+
+        Returns:
+            interval_idx (torch.Tensor): tensor of shape (n_lines,) with discrete interval indices
+            event (torch.Tensor): tensor of shape (n_lines,) with event indicators adjusted for interval indexing
+        """
+        interval_idx = (
+            torch.bucketize(time, self.interval_bounds) - 1
+        )  # (n_lines,) # range [0, n_intervals-1]
+
+        event = torch.where(interval_idx > self.n_intervals - 1, 0, 1)
+        interval_idx = torch.clamp(
+            interval_idx, 0, self.n_intervals - 1
+        )  # Administrative censoring
+
+        return interval_idx, event
 
     def _pad_sequence(
-        self, seq: np.ndarray, target_length: int
+        self, seq: np.ndarray | torch.Tensor, target_length: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         seq_lentgh, seq_dim = seq.shape
 
@@ -83,6 +98,8 @@ class ESMEOnlineDataset(TorchData.Dataset):
         return padded_seq, mask
 
     def __getitem__(self, idx):
+        """Get item at index idx"""
+
         x = self.X_list[idx]  # (n_lines_i, n_features)
         x_static = self.X_static[idx]  # (n_features_static,)
         p = self.P_list[idx]  # (n_lines_i, n_treatments)
@@ -92,24 +109,26 @@ class ESMEOnlineDataset(TorchData.Dataset):
         event = self.event_list[idx]  # (n_lines_i, 1)
         patient_id = self.patient_ids[idx]  # patient identifier
 
+        interval_idx, event = self.transform_time(
+            torch.tensor(time, dtype=torch.float32),
+            torch.tensor(event, dtype=torch.float32),
+        )
+
         x_padded, mask = self._pad_sequence(x, self.n_lines)
         p_padded = self._pad_sequence(p, self.n_lines)[0]
         d_padded = self._pad_sequence(d, self.n_lines)[0]
         time_padded = self._pad_sequence(time, self.n_lines)[0]
         event_padded = self._pad_sequence(event, self.n_lines)[0]
+        interval_idx_padded = self._pad_sequence(interval_idx, self.n_lines)[0]
 
         treatment_indices = torch.argmax(p_padded, dim=-1)  # (n_lines,)
-
-        interval_idx = torch.tensor(
-            [self.transform_target_time(t) for t in time_padded]
-        )  # (n_lines,)
 
         XPd = torch.cat([x_padded, p_padded, d_padded], dim=-1)
 
         return (
             XPd,
             (x_static, p_static),
-            interval_idx,
+            interval_idx_padded.squeeze(),
             treatment_indices,
             time_padded.squeeze(),
             event_padded.squeeze(),
@@ -124,6 +143,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         data_dir: str,
         subtype: str,
         n_lines: int,
+        horizon: float,
         n_intervals: int,
         fold_idx: int | None = None,
         num_folds: int | None = None,
@@ -156,6 +176,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.ESMEDataset = None
         self.static_data = None
         self.interval_bounds = None
+        self.horizon = horizon
 
     def prepare_data(self):
         esme_data = pd.read_parquet(
@@ -223,10 +244,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         patient_ids = self.data["usubjid"].unique()
 
-        self.interval_bounds = torch.linspace(
-            0, self.data["Y_onset_to_death"].max(), self.n_intervals + 1
-        )
-        # self.interval_bounds = torch.quantile(torch.tensor(self.data['Y_onset_to_death'].values, dtype=torch.float32), torch.linspace(0, 1, steps=self.n_intervals + 1))
+        self.interval_bounds = torch.linspace(0, self.horizon, self.n_intervals + 1)
 
         self.ESMEDataset = ESMEOnlineDataset(
             X_list=X_list,
@@ -273,7 +291,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                     random_state=self.split_seed,
                 )
                 all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
-                train_idx, val_idx = all_splits[self.fold_idx]
+                train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
                 train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
 
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
@@ -356,6 +374,7 @@ if __name__ == "__main__":
         data_dir="../../../data",
         subtype="HR+HER2-",
         n_lines=2,
+        horizon=100,
         n_intervals=10,
         batch_size=32,
         fold_idx=3,
