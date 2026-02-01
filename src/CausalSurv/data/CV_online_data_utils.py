@@ -273,7 +273,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                     random_state=self.split_seed,
                 )
                 all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
-                train_idx, val_idx = all_splits[self.fold_idx]
+                train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
                 train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
 
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
