@@ -38,6 +38,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
             time_list (list[np.ndarray]): one per patient (each of shape [n_lines_i, 1]) event times
             event_list (list[np.ndarray]): one per patient (each of shape [n_lines_i, 1]) event indicators
             time_bins (torch.Tensor):    tensor of shape [n_intervals + 1] defining the time intervals
+            patient_ids (np.ndarray):   array of patient identifiers
             n_lines (int):             maximum number of lines to pad to
             interval_bounds (torch.Tensor): tensor of shape (n_lines, n_intervals + 1) defining the time intervals per line
 
@@ -118,7 +119,7 @@ class ESMEOnlineDataset(TorchData.Dataset):
         d = self.d_list[idx]  # (n_lines_i, 1)
         time = self.time_list[idx]  # (n_lines_i, 1)
         event = self.event_list[idx]  # (n_lines_i, 1)
-        patient_id = self.patient_ids[idx]  # patient identifier
+        patient_id = self.patient_ids[idx]  # scalar patient identifier
 
         x_padded, mask = self._pad_sequence(
             x, self.n_lines
