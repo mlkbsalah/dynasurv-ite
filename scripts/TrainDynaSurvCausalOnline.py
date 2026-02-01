@@ -38,7 +38,7 @@ def main(
         subtype=data_config["subtype"],
         n_lines=data_config["n_lines"],
         horizon=data_config["horizon"],
-        n_intervals=model_config["n_intervals"],
+        n_intervals=data_config["n_intervals"],
         batch_size=data_config["batch_size"],
         split_seed=split_seed,
         num_workers=4,

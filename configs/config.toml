@@ -12,6 +12,7 @@ data_dir = "../data"
 subtype = "HR+HER2-"
 n_lines = 4
 horizon = 100 # in months
+n_intervals = 50 # 2months/interval (resolution horizon / n_intervals = months per interval)
 batch_size = 128
 
 [eval]

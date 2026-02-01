@@ -53,7 +53,7 @@ def main(
             subtype=data_config["subtype"],
             n_lines=data_config["n_lines"],
             horizon=data_config["horizon"],
-            n_intervals=model_config["n_intervals"],
+            n_intervals=data_config["n_intervals"],
             batch_size=model_config["train_batch_size"],
             fold_idx=k,
             num_folds=n_folds,
@@ -150,7 +150,6 @@ def main(
 
 def sample_config():
     return {
-        "n_intervals": random.choice([10, 30, 50, 80, 100]),
         "train_batch_size": random.choice([64, 128, 256, 512]),
         "lstm_hidden_length": random.choice([16, 32, 64]),
         "x_embed_dim": random.choice([16, 32, 64]),
@@ -166,7 +165,7 @@ def sample_config():
                 [64, 32],
                 [128, 64],
                 [32, 64, 128],
-                [64, 64, 128, 256],
+                [64, 64, 128],
             ]
         ),
         "init_h_hidden": random.choice([[32], [64], [128], [64, 64]]),
