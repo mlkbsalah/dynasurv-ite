@@ -71,8 +71,8 @@ class ESMEOnlineDataset(TorchData.Dataset):
             event (torch.Tensor): tensor of shape (n_lines, 1) with event indicators (1 if event occurred, 0 if censored)
 
         Returns:
-            interval_idx (torch.Tensor): tensor of shape (n_lines,) with discrete interval indices
-            event (torch.Tensor): tensor of shape (n_lines,) with event indicators adjusted for interval indexing
+            interval_idx (torch.Tensor): tensor of shape (n_lines, 1) with discrete interval indices
+            event (torch.Tensor): tensor of shape (n_lines, 1) with event indicators adjusted for interval indexing
         """
         interval_idx = (
             torch.stack(
@@ -86,9 +86,9 @@ class ESMEOnlineDataset(TorchData.Dataset):
                 ]
             )
             - 1
-        )  # Convert to 0-based index # (n_linea,)
-
-        event = torch.where(interval_idx > self.n_intervals - 1, 0, 1)
+        )  # Convert to 0-based index # (n_lines, 1)
+        # print(f"Inside transform_time - interval_idx before adjustment: {interval_idx}, dtype: {interval_idx.dtype}")
+        event = torch.where(interval_idx > self.n_intervals - 1, 0, event)
         interval_idx = torch.clamp(
             interval_idx, 0, self.n_intervals - 1
         )  # Administrative censoring
@@ -120,26 +120,26 @@ class ESMEOnlineDataset(TorchData.Dataset):
         event = self.event_list[idx]  # (n_lines_i, 1)
         patient_id = self.patient_ids[idx]  # patient identifier
 
-        interval_idx, event = self.transform_time(
-            torch.tensor(time, dtype=torch.float32),
-            torch.tensor(event, dtype=torch.float32),
-        )
-
-        x_padded, mask = self._pad_sequence(x, self.n_lines)
-        p_padded = self._pad_sequence(p, self.n_lines)[0]
-        d_padded = self._pad_sequence(d, self.n_lines)[0]
-        time_padded = self._pad_sequence(time, self.n_lines)[0]
+        x_padded, mask = self._pad_sequence(
+            x, self.n_lines
+        )  # (n_lines, n_features), (n_lines,)
+        p_padded = self._pad_sequence(p, self.n_lines)[0]  # (n_lines, n_treatments)
+        d_padded = self._pad_sequence(d, self.n_lines)[0]  # (n_lines, 1)
+        time_padded = self._pad_sequence(time, self.n_lines)[0]  # (n_lines, 1)
         event_padded = self._pad_sequence(event, self.n_lines)[0]  # type: ignore
-        interval_idx_padded = self._pad_sequence(interval_idx, self.n_lines)[0]  # type: ignore
 
         treatment_indices = torch.argmax(p_padded, dim=-1)  # (n_lines,)
 
-        XPd = torch.cat([x_padded, p_padded, d_padded], dim=-1)
+        interval_idx, event_padded = self.transform_time(
+            time_padded,
+            event_padded,
+        )
 
+        XPd = torch.cat([x_padded, p_padded, d_padded], dim=-1)
         return (
             XPd,
             (x_static, p_static),
-            interval_idx_padded.squeeze(),
+            interval_idx.squeeze(),
             treatment_indices,
             time_padded.squeeze(),
             event_padded.squeeze(),

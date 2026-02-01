@@ -52,6 +52,7 @@ def main(
             data_dir=data_config["data_dir"],
             subtype=data_config["subtype"],
             n_lines=data_config["n_lines"],
+            horizon=data_config["horizon"],
             n_intervals=model_config["n_intervals"],
             batch_size=model_config["train_batch_size"],
             fold_idx=k,
