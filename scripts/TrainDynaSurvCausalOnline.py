@@ -28,7 +28,13 @@ def load_model_config(model_config_dir):
 
 
 def main(
-    model_config, train_config, eval_config, data_config, split_seed, fast_dev_run=False
+    model_config,
+    train_config,
+    eval_config,
+    data_config,
+    split_seed,
+    date,
+    fast_dev_run=False,
 ):
     if fast_dev_run:
         train_config["trainer"]["max_epochs"] = 3
@@ -91,29 +97,29 @@ def main(
             monitor="val_loss",
             mode="min",
             save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}/checkpoints/",
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}/checkpoints/",
             filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
         ),
         ModelCheckpoint(
             monitor="average_ci",
             mode="max",
             save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}/checkpoints/",
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}/checkpoints/",
             filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
         ),
         ModelCheckpoint(
             monitor="average_ibs",
             mode="min",
             save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}/checkpoints/",
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}/checkpoints/",
             filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
         ),
     ]
 
     logger = WandbLogger(
         project=f"DynaSurvCausalOnline_{data_config['subtype']}_{data_config['n_lines']}lines_final_model",
-        name=f"seed_{split_seed}",
-        save_dir="../wandb_logs/",
+        name=f"seed_{split_seed}_{date}",
+        save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}",
     )
 
     trainer = L.Trainer(
@@ -133,11 +139,13 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--split_seed", type=int, required=True)
+    parser.add_argument("--date", type=str, required=True)
     parser.add_argument(
         "--fast_dev_run", action="store_true", help="Enable fast development run mode"
     )
     args = parser.parse_args()
     split_seed = args.split_seed
+    date = args.date
     fast_dev_run = args.fast_dev_run
 
     config = load_config("../configs/config.toml")
@@ -145,7 +153,7 @@ if __name__ == "__main__":
     train_config = config["train"]
     eval_config = config["eval"]
 
-    model_config_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}"
+    model_config_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}"
     best_model_config = load_model_config(model_config_dir)
 
     main(
@@ -154,5 +162,6 @@ if __name__ == "__main__":
         eval_config=eval_config,
         data_config=data_config,
         split_seed=split_seed,
+        date=date,
         fast_dev_run=fast_dev_run,
     )

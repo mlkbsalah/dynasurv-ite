@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import random
+from datetime import datetime
 
 import lightning as L
 import numpy as np
@@ -32,6 +33,7 @@ def main(
     train_config,
     eval_config,
     split_seed,
+    date,
     trial_id,
     n_folds,
     project_name,
@@ -113,7 +115,7 @@ def main(
                 name=f"trial_{trial_id}_fold_{k}",
                 group=f"trial_{trial_id}_CV",
                 reinit=True,
-                save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}",
+                save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}",
             )
             callbacks.append(LearningRateMonitor(logging_interval="epoch"))  # type: ignore
 
@@ -190,13 +192,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--trial_id", type=int, required=False, default=0)
     parser.add_argument("--split_seed", type=int, required=True)
+    parser.add_argument(
+        "--date", type=str, default=datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
     parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--fast_dev_run", action="store_true")
     parser.add_argument("--project_name", type=str, default=None)
     args = parser.parse_args()
 
     if args.fast_dev_run:
-        print("Running in fast dev run mode: only 2 folds and 5 epochs per fold")
+        print("Running in fast dev run mode: only 2 folds and 3 epochs per fold")
     else:
         print(
             f"Running trial {args.trial_id} with split seed {args.split_seed} and {args.n_folds} folds"
@@ -214,13 +219,14 @@ if __name__ == "__main__":
         data_config=data_config,
         eval_config=eval_config,
         split_seed=args.split_seed,
+        date=args.date,
         trial_id=args.trial_id,
         n_folds=args.n_folds,
         project_name=args.project_name,
         fast_dev_run=args.fast_dev_run,
     )
 
-    out_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{args.split_seed}"
+    out_dir = f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{args.split_seed}_{args.date}"
     os.makedirs(out_dir, exist_ok=True)
 
     with open(f"{out_dir}/trial_{args.trial_id}.json", "w") as f:

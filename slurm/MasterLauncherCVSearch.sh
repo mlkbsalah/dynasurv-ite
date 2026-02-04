@@ -4,13 +4,17 @@ N_TRIALS=100
 N_FOLDS=5
 PROJECT_NAME=""
 
+# current date for logging
+DATE=$(date +%Y%m%d_%H%M%S)
+
 # Generate a default random seed if none is provided
 SPLIT_SEED=$(( $(date +%s) % 2147483647 ))
+
 
 # Create log file with timestamp
 LOG_DIR="./logs"
 mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/cv_search_${SPLIT_SEED}_$(date +%Y%m%d_%H%M%S).log"
+LOG_FILE="$LOG_DIR/cv_search_${SPLIT_SEED}_${DATE}.log"
 
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
@@ -42,12 +46,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-log_message "Starting CV run with seed: $SPLIT_SEED, trials: $N_TRIALS, folds: $N_FOLDS, dev mode: ${DEV_MODE:-0}"
+log_message "Starting CV run with seed: $SPLIT_SEED, trials: $N_TRIALS, folds: $N_FOLDS, dev mode: ${DEV_MODE:-0}, date: $DATE"
 
 #Submit trials
 ARRAY_JOB_ID=$(./LaunchCVSearch.sh \
     --n_trials "$N_TRIALS" \
     --n_folds "$N_FOLDS" \
+    --date "$DATE" \
     --split_seed "$SPLIT_SEED" \
     ${PROJECT_NAME:+--project_name "$PROJECT_NAME"} \
     ${DEV_MODE:+--dev_mode})
@@ -57,7 +62,7 @@ log_message "CV Search submitted with job ID: $ARRAY_JOB_ID"
 #Aggregate results
 AGG_JOB_ID=$(sbatch --parsable \
     --dependency=afterok:$ARRAY_JOB_ID \
-    --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME" \
+    --export=ALL,SPLIT_SEED="$SPLIT_SEED",DATE="$DATE",PROJECT_NAME="$PROJECT_NAME" \
     AggregateTrials.sh)
 
 log_message "Aggregation job submitted with job ID: $AGG_JOB_ID"
@@ -65,7 +70,7 @@ log_message "Aggregation job submitted with job ID: $AGG_JOB_ID"
 #Train final model on full data and validate on hold out test set
 TRAIN_FINAL_JOB_ID=$(sbatch --parsable \
     --dependency=afterok:$AGG_JOB_ID \
-    --export=ALL,SPLIT_SEED="$SPLIT_SEED",PROJECT_NAME="$PROJECT_NAME",DEV_MODE="${DEV_MODE:-0}" \
+    --export=ALL,SPLIT_SEED="$SPLIT_SEED",DATE="$DATE",PROJECT_NAME="$PROJECT_NAME",DEV_MODE="${DEV_MODE:-0}" \
     TrainDynaSurvCausalOnline.sh)
 
 log_message "Final model training submitted with job ID: $TRAIN_FINAL_JOB_ID"

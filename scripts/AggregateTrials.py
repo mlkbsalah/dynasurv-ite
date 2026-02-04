@@ -7,9 +7,9 @@ SUBTYPE = "HR+HER2-"
 N_LINES = 4
 
 
-def aggregate_results(seed):
+def aggregate_results(seed, date):
     # read all trial result files
-    result_dir = f"../models/{SUBTYPE}/{N_LINES}lines/seed_{seed}"
+    result_dir = f"../models/{SUBTYPE}/{N_LINES}lines/seed_{seed}_{date}"
     files = glob.glob(f"{result_dir}/trial_*.json")
     all_results = [json.load(open(f)) for f in files]
 
@@ -31,7 +31,8 @@ if __name__ == "__main__":
     # parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--date", type=str, required=True)
     args = parser.parse_args()
 
     # aggregate results
-    aggregate_results(args.seed)
+    aggregate_results(args.seed, args.date)

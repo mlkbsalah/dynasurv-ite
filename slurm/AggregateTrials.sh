@@ -13,4 +13,4 @@ source activate pytorch_env
 PROJECT_DIR="/workdir/bensalama/DynaSurv"
 cd "$PROJECT_DIR/scripts"
 
-python AggregateTrials.py --seed $SPLIT_SEED
+python AggregateTrials.py --seed $SPLIT_SEED --date $DATE

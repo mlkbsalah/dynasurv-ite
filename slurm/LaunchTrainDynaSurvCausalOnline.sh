@@ -7,6 +7,10 @@ while [[ $# -gt 0 ]]; do
       SPLIT_SEED="$2"
       shift 2
       ;;
+    -d|--date)
+      DATE="$2"
+      shift 2
+      ;;
     -dev|--dev_mode)
       DEV_MODE=1
       shift 1
@@ -15,6 +19,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: ./launch [options]"
       echo "Options:"
       echo "  -s, --split_seed      Split seed (required)"
+      echo "  -d, --date            Date (required)"
       echo "  -dev, --dev_mode      Enable fast development run mode"
       exit 0
       ;;
@@ -26,10 +31,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 #Arguments parsing
-if [[ -z "$SPLIT_SEED" ]]; then
-	echo "Usage: sbatch script.sh [split_seed]"
-	echo "Error: split_seed is a required argument"
+if [[ -z "$SPLIT_SEED" ]] || [[ -z "$DATE" ]]; then
+	echo "Usage: sbatch script.sh [split_seed] [date]"
+	echo "Error: split_seed and date are required arguments."
 	exit 1
 fi
 
-sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED,DEV_MODE=$DEV_MODE TrainDynaSurvCausalOnline.sh
+sbatch --parsable --export=ALL,SPLIT_SEED=$SPLIT_SEED,DATE=$DATE,DEV_MODE=$DEV_MODE TrainDynaSurvCausalOnline.sh

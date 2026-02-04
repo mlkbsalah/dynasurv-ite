@@ -26,4 +26,5 @@ fi
 # Script
 python3 TrainDynaSurvCausalOnline.py \
         --split_seed $SPLIT_SEED \
+        --date $DATE \
         $FAST_DEV_FLAG
