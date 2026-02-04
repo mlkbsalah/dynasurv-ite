@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Tuple
 
 import lightning as L
 import numpy as np
@@ -8,117 +8,180 @@ import torch
 import torch.utils.data as TorchData
 from sklearn.model_selection import KFold
 
+FULL_ESME_COLUMN_SCHEME = {
+    "x_prefix": "X_",
+    "x_static_prefix": "X_",
+    "p_cols": ["T_treatment_category"],
+    "p_static_prefix": "T_",
+    "d_cols": ["X_buffer_time"],
+    "time_col": "Y_onset_to_death",
+    "event_col": "Y_death",
+    "pat_id": ["usubjid"],
+    "lineid": ["lineid"],
+}
+
 
 def stack_by_lines(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
-    """Stack variables patient-wise, variable number of lines per patient.   list[np.ndarray(patient_i_lines, len(cols))]"""
-    grouped = df.groupby("usubjid")[cols]
-    return [group.to_numpy() for _, group in grouped]
+    """Stack variables patient-wise, variable number of lines per patient.   list[np.ndarray(patient_i_lines, len(cols))]
+    Args:
+        df (pd.DataFrame): DataFrame containing patient data with 'usubjid' and 'lineid' columns.
+        cols (list[str]): List of column names to stack.
+    Returns:
+        list[np.ndarray]: List of numpy arrays, each array corresponds to a patient and has shape (patient_i_lines, len(cols)).
+    """
+
+    if not df.set_index(["usubjid", "lineid"]).index.is_monotonic_increasing:
+        raise ValueError(
+            "DataFrame must be sorted by ['usubjid', 'lineid'] before stacking by lines."
+            "Unsorted DataFrame may lead to incorrect temporal ordering of lines per patient."
+        )
+
+    data_numpy = df[cols].to_numpy()
+    patient_ids = df["usubjid"].to_numpy()
+
+    change_indices = np.where(np.diff(patient_ids) != 0)[0] + 1
+
+    splits = np.split(data_numpy, change_indices)
+    return splits
+
+
+def pad_sequence_to_length(
+    sequences: list[torch.Tensor], target_length: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Pad a list of sequences to a target length.
+
+    Args:
+        sequences (list[torch.Tensor]): List of tensors of shape (seq_length, *feature_dim). *feature_dim can be any shape.
+        target_length (int): Target length to pad sequences to. Must be greater than or equal to the length of the longest sequence.
+
+    Returns:
+        -padded_sequences: Padded sequences of shape (batch_size, target_length, *feature_dim).
+        -mask: Bool tensor of shape (batch_size, target_length) where True indicates valid (non-padded) time steps and False indicates padding positions.
+    """
+    first_seq = sequences[0]
+    feature_dim = first_seq.shape[1:]
+    dtype = first_seq.dtype
+    device = first_seq.device
+
+    padded_sequences = torch.zeros(
+        (len(sequences), target_length, *feature_dim), dtype=dtype, device=device
+    )
+    mask = torch.zeros((len(sequences), target_length), dtype=torch.bool, device=device)
+    for i, seq in enumerate(sequences):
+        seq_length = seq.shape[0]
+
+        if seq_length > target_length:
+            raise ValueError(
+                "Target_length must be greater than or equal to the length of the longest sequence."
+                f"Sequence length {seq_length} exceeds target length {target_length}."
+            )
+
+        if seq.shape[1:] != feature_dim:
+            raise ValueError(
+                "All sequences must have the same dimensionality except for the length dimension."
+                f"Expected feature dimension {feature_dim}, but got {seq.shape[1:]}."
+            )
+
+        padded_sequences[i, :seq_length] = seq
+        mask[i, :seq_length] = True
+
+    return padded_sequences, mask
+
+
+def stack_and_pad(
+    df: pd.DataFrame, cols: list[str], target_length: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Wrapper function to stack by lines and pad sequences to a target length."""
+    sequences = stack_by_lines(df, cols)
+    tensor_sequences = [torch.tensor(seq, dtype=torch.float32) for seq in sequences]
+    padded_sequences, mask = pad_sequence_to_length(tensor_sequences, target_length)
+    return padded_sequences, mask
+
+
+def transform_time(self, time: torch.Tensor, bounds: torch.Tensor) -> torch.Tensor:
+    """Transform continuous times into discrete interval indices based on provided bounds.
+    Args:
+        time (torch.Tensor): Tensor of shape (n_patients, n_lines, 1) containing continuous time-to-event values.
+        bounds (torch.Tensor): Tensor of shape (n_intervals + 1,) defining the boundaries of time intervals.
+    Returns:
+        torch.Tensor: Tensor of shape (n_patients, n_lines, 1) containing interval indices.
+    """
+
+    n_intervals = len(bounds) - 1
+    interval_idx = torch.bucketize(time, bounds) - 1
+    interval_idx = torch.clamp(interval_idx, min=0, max=n_intervals - 1)
+
+    return interval_idx
 
 
 class ESMEOnlineDataset(TorchData.Dataset):
     def __init__(
         self,
-        X_list,
-        X_static,
-        P_list,
-        P_static,
-        d_list,
-        time_list,
-        event_list,
-        patient_ids,
-        n_lines: int,
-        interval_bounds: torch.Tensor,
+        X: torch.Tensor,
+        X_static: torch.Tensor,
+        P: torch.Tensor,
+        treatment_indices: torch.Tensor,
+        P_static: torch.Tensor,
+        d: torch.Tensor,
+        time: torch.Tensor,
+        event: torch.Tensor,
+        interval_idx: torch.Tensor,
+        mask: torch.Tensor,
+        patient_ids: np.ndarray,
     ):
         """Class constructor for ESME dataset
 
         Args:
-            X_list (list[np.ndarray]):   one per patient (each of shape [n_lines_i, n_features])
-            P_list (list[np.ndarray]):   one per patient (each of shape [n_lines_i, n_treatments])
-            d_list (list[np.ndarray]):   one per patient (each of shape [n_lines_i, 1]) buffer time between lines
-            time_list (list[np.ndarray]): one per patient (each of shape [n_lines_i, 1]) event times
-            event_list (list[np.ndarray]): one per patient (each of shape [n_lines_i, 1]) event indicators
-            time_bins (torch.Tensor):    tensor of shape [n_intervals + 1] defining the time intervals
-            n_lines (int):             maximum number of lines to pad to
+            X (torch.Tensor): Dynamic features of shape (n_patients, n_lines, n_features)
+            X_static (torch.Tensor): Static features of shape (n_patients, n_features_static)
+            P (torch.Tensor): Treatment assignments of shape (n_patients, n_lines, n_treatments)
+            P_static (torch.Tensor): Static treatment features of shape (n_patients, n_treatments_static)
+            d (torch.Tensor): Buffer duration between lines of shape (n_patients, n_lines, 1)
+            time (torch.Tensor): Time-to-event of shape (n_patients, n_lines, 1)
+            event (torch.Tensor): Event indicators of shape (n_patients, n_lines, 1)
+            interval_idx (torch.Tensor): Interval indices of shape (n_patients, n_lines, 1)
+            patient_ids (np.ndarray): Array of patient identifiers of shape (n_patients,)
 
         Remarks:
             Each patient sample contains all their lines, padded to n_lines.
         """
-        self.X_list = X_list
+        self.X = X
         self.X_static = X_static
-        self.P_list = P_list
+        self.P = P
         self.P_static = P_static
-        self.d_list = d_list
-        self.time_list = time_list
-        self.event_list = event_list
+        self.treatment_indices = treatment_indices
+        self.d = d
+        self.time = time
+        self.event = event
+        self.interval_idx = interval_idx
+        self.mask = mask
         self.patient_ids = patient_ids
 
-        self.interval_bounds = interval_bounds
-        self.n_lines = n_lines
-
-        self.n_intervals = len(interval_bounds) - 1
-
     def __len__(self) -> int:
-        return len(self.X_list)
-
-    def transform_target_time(self, time: torch.Tensor) -> torch.Tensor:
-        interval_idx = torch.bucketize(time, self.interval_bounds) - 1  # (n_lines,)
-        interval_idx = torch.clamp(interval_idx, 0, self.n_intervals - 1)
-        if interval_idx < 0 or interval_idx >= self.n_intervals:
-            raise ValueError(
-                f"Time value out of bounds of interval_bounds: time={time}, bounds={self.interval_bounds}"
-            )
-        return interval_idx
-
-    def _pad_sequence(
-        self, seq: np.ndarray, target_length: int
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        seq_lentgh, seq_dim = seq.shape
-
-        padded_seq = torch.zeros((target_length, seq_dim), dtype=torch.float32)
-        mask = torch.zeros((target_length,), dtype=torch.long)
-
-        padded_seq[:seq_lentgh] = torch.tensor(seq, dtype=torch.float32)
-        mask[:seq_lentgh] = 1
-
-        return padded_seq, mask
+        return len(self.patient_ids)
 
     def __getitem__(self, idx):
-        x = self.X_list[idx]  # (n_lines_i, n_features)
+        x = self.X[idx]  # (n_lines_i, n_features)
         x_static = self.X_static[idx]  # (n_features_static,)
-        p = self.P_list[idx]  # (n_lines_i, n_treatments)
+        p = self.P[idx]  # (n_lines_i, n_treatments)
+        treatment_idx = self.treatment_indices[idx]  # (n_lines_i,)
         p_static = self.P_static[idx]  # (n_treatments_static,)
-        d = self.d_list[idx]  # (n_lines_i, 1)
-        time = self.time_list[idx]  # (n_lines_i, 1)
-        event = self.event_list[idx]  # (n_lines_i, 1)
-        patient_id = self.patient_ids[idx]  # patient identifier
+        d = self.d[idx]  # (n_lines_i, 1)
+        time = self.time[idx]  # (n_lines_i, 1)
+        event = self.event[idx]  # (n_lines_i, 1)
+        interval_idx = self.interval_idx[idx]  # (n_lines_i, 1)
+        patient_id = self.patient_ids[idx]  # scalar
+        mask = self.mask[idx]  # (n_lines_i,)
 
-        x_padded, mask = self._pad_sequence(x, self.n_lines)
-        p_padded = self._pad_sequence(p, self.n_lines)[0]
-        d_padded = self._pad_sequence(d, self.n_lines)[0]
-        time_padded = self._pad_sequence(time, self.n_lines)[0]
-        event_padded = self._pad_sequence(event, self.n_lines)[0]
+        XPd = torch.cat([x, p, d], dim=-1)
+        static = (x_static, p_static)
 
-        treatment_indices = torch.argmax(p_padded, dim=-1)  # (n_lines,)
-
-        interval_idx = torch.tensor(
-            [self.transform_target_time(t) for t in time_padded]
-        )  # (n_lines,)
-
-        XPd = torch.cat([x_padded, p_padded, d_padded], dim=-1)
-
-        return (
-            XPd,
-            (x_static, p_static),
-            interval_idx,
-            treatment_indices,
-            time_padded.squeeze(),
-            event_padded.squeeze(),
-            mask.squeeze(),
-            patient_id,
-        )
+        return (XPd, static, interval_idx, treatment_idx, time, event, mask, patient_id)
 
 
 class ESMEOnlineDataModuleCV(L.LightningDataModule):
+    VALID_SUBTYPES = ["HR+HER2-", "HER2+", "TN"]
+
     def __init__(
         self,
         data_dir: str,
@@ -126,19 +189,18 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         n_lines: int,
         n_intervals: int,
         batch_size: int,
+        split_seed: int,
+        columns_scheme: Dict | None = None,
         final_training: bool = False,
         fold_idx: int | None = None,
         num_folds: int | None = None,
-        split_seed: int | None = None,
         holdout_size: float = 0.1,
         num_workers: int = 4,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
-        self.subtype = subtype
-        assert self.subtype in ["HR+HER2-", "HER2+", "TN"], (
-            "subtype must be one of ['HR+HER2-', 'HER2+', 'TN']"
-        )
+        self.column_scheme = columns_scheme or FULL_ESME_COLUMN_SCHEME
+        self._subtype = subtype
 
         self.n_lines = n_lines
         self.n_intervals = n_intervals
@@ -147,7 +209,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.batch_size = batch_size
         self.fold_idx = fold_idx
         self.num_folds = num_folds
-        self.split_seed = split_seed
+        self._split_seed = split_seed
         self.holdout_size = holdout_size
         self.num_workers = num_workers
         self.final_training = final_training
@@ -157,106 +219,222 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.static_data = None
         self.interval_bounds = None
 
-    def prepare_data(self):
-        esme_data = pd.read_parquet(
-            str(
-                self.data_dir
-                / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"
+    # ========== Properties ==========
+    @property
+    def subtype(self) -> str:
+        return self._subtype
+
+    @property
+    def split_seed(self) -> int:
+        return self._split_seed
+
+    @subtype.setter
+    def subtype(self, value: str) -> None:
+        if value not in self.VALID_SUBTYPES:
+            raise ValueError(
+                f"Invalid subtype: {value}. \n"
+                f"subtype must be one of {self.VALID_SUBTYPES}"
             )
+        self._subtype = value
+
+    @split_seed.setter
+    def split_seed(self, value: int) -> None:
+        if value is None or not isinstance(value, int):
+            raise ValueError("split_seed must be a valid integer.")
+        self._split_seed = value
+
+    # ========= Data Preparation ==========
+
+    def _resolve_columns(self, df: pd.DataFrame, spec: list[str] | str) -> list[str]:
+        """Resolve column names base on specification.
+        Args:
+            df (pd.DataFrame): DataFrame containing the data.
+            spec (list[str] | str): Column specification. If list, treated as explicit column names.
+                                    If str, treated as prefix to match column names.
+        Returns:
+            list[str]: Resolved column names.
+        Raises:
+            ValueError: If specified columns are not found in the DataFrame."""
+        if isinstance(spec, list):
+            missing = [col for col in spec if col not in df.columns]
+            if missing:
+                raise ValueError(f"Columns {missing} not found in DataFrame.")
+            return spec
+
+        if isinstance(spec, str):
+            cols = [col for col in df.columns if col.startswith(spec)]
+            if not cols:
+                raise ValueError(f"No columns found with prefix '{spec}'.")
+            return cols
+
+    def _build_column_map(
+        self, df_dynamic: pd.DataFrame, df_static: pd.DataFrame
+    ) -> Dict[str, list[str]]:
+        """Build column mapping based on the provided column scheme.
+        Args:
+            df_dynamic (pd.DataFrame): DataFrame containing dynamic data.
+            df_static (pd.DataFrame): DataFrame containing static data.
+        Returns:
+            Dict[str, list[str]]: Mapping of data components to their respective column names.
+        """
+        column_map = {
+            "x": self._resolve_columns(df_dynamic, self.column_scheme["x_prefix"]),
+            "x_static": self._resolve_columns(
+                df_static, self.column_scheme["x_static_prefix"]
+            ),
+            "p": self.column_scheme["p_cols"],
+            "p_static": self._resolve_columns(
+                df_static, self.column_scheme["p_static_prefix"]
+            ),
+            "d": self.column_scheme["d_cols"],
+            "time": [self.column_scheme["time_col"]],
+            "event": [self.column_scheme["event_col"]],
+            "pat_id": self.column_scheme["pat_id"],
+            "lineid": self.column_scheme["lineid"],
+        }
+        return column_map
+
+    def _load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        df_dynamic = pd.read_parquet(
+            self.data_dir
+            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorized.parquet"
         )
-        static_data = pd.read_parquet(
-            str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet")
+        df_static = pd.read_parquet(
+            self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"
         )
 
-        merged = esme_data.merge(
-            static_data, on="usubjid", how="inner", suffixes=("", "_static")
+        return df_dynamic, df_static
+
+    def _merge_and_filter(
+        self, df_dynamic: pd.DataFrame, df_static: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Merge dynamic and static dataframes on patient ID and filter by number of lines."""
+
+        assert self.column_map is not None, (
+            "Column map must be initialized before merging data."
         )
-        self.data = merged[esme_data.columns]
-        self.data = (
-            self.data.loc[self.data["lineid"] <= self.n_lines]
-            .sort_values(by=["usubjid", "lineid"])
+        df_merge = df_dynamic.merge(
+            df_static, on=self.column_map["pat_id"][0], how="inner"
+        )
+        df_merge = (
+            df_merge.loc[df_merge[self.column_map["lineid"][0]] <= self.n_lines]
+            .sort_values(by=self.column_map["pat_id"] + self.column_map["lineid"])
             .reset_index(drop=True)
             .copy()
         )
-        self.static_data = (
-            merged[static_data.columns]
-            .drop_duplicates("usubjid")
-            .reset_index(drop=True)
-            .copy()
-        )
+        return df_merge
 
-        X_cols = [
-            col
-            for col in self.data.columns
-            if col.startswith("X_") and not col.startswith("X_buffer_time")
-        ]
-        P_cols = ["T_treatment_category"]
-        d_cols = ["X_buffer_time"]
-        time_cols = ["Y_onset_to_death"]
-        event_cols = ["Y_death"]
-        X_static_cols = [
-            col for col in self.static_data.columns if col.startswith("X_")
-        ]
-        P_static_cols = [
-            col for col in self.static_data.columns if col.startswith("T_")
-        ]
-
-        P_encoded = pd.get_dummies(
-            self.data[P_cols + ["usubjid"]], columns=P_cols, prefix="", prefix_sep=""
+    def _transform_to_tensor(self, df_merge: pd.DataFrame):
+        p_encoded = pd.get_dummies(
+            df_merge[
+                self.column_map["p"]
+                + self.column_map["pat_id"]
+                + self.column_map["lineid"]
+            ],
+            prefix="",
+            prefix_sep="",
         )
         self.treatment_dict = {
-            i: col for i, col in enumerate(P_encoded.columns.drop("usubjid").tolist())
+            i: col
+            for i, col in enumerate(
+                p_encoded.columns.drop(
+                    self.column_map["pat_id"] + self.column_map["lineid"]
+                ).tolist()
+            )
         }
 
-        X_list = stack_by_lines(self.data, X_cols)
-        P_list = stack_by_lines(P_encoded, P_encoded.columns.drop("usubjid").tolist())
-        d_list = stack_by_lines(self.data, d_cols)
-        time_list = stack_by_lines(self.data, time_cols)
-        event_list = stack_by_lines(self.data, event_cols)
+        X_padded, mask = stack_and_pad(df_merge, self.column_map["x"], self.n_lines)
+        P_padded, _ = stack_and_pad(
+            p_encoded,
+            p_encoded.columns.drop(
+                self.column_map["pat_id"] + self.column_map["lineid"]
+            ).tolist(),
+            self.n_lines,
+        )
+        d_padded, _ = stack_and_pad(df_merge, self.column_map["d"], self.n_lines)
+        time_padded, _ = stack_and_pad(df_merge, self.column_map["time"], self.n_lines)
+        event_padded, _ = stack_and_pad(
+            df_merge, self.column_map["event"], self.n_lines
+        )
 
         X_static = torch.tensor(
-            self.static_data[X_static_cols].values, dtype=torch.float32
+            df_merge.groupby(self.column_map["pat_id"][0])
+            .first()[self.column_map["x_static"]]
+            .to_numpy(),
+            dtype=torch.float32,
         )
         P_static = torch.tensor(
-            self.static_data[P_static_cols].values, dtype=torch.float32
+            df_merge.groupby(self.column_map["pat_id"][0])
+            .first()[self.column_map["p_static"]]
+            .to_numpy(),
+            dtype=torch.float32,
         )
 
-        patient_ids = self.data["usubjid"].unique()
-
-        self.interval_bounds = torch.linspace(
-            0, self.data["Y_onset_to_death"].max(), self.n_intervals + 1
+        patient_ids = (
+            df_merge[self.column_map["pat_id"][0]].drop_duplicates().to_numpy()
         )
-        # self.interval_bounds = torch.quantile(torch.tensor(self.data['Y_onset_to_death'].values, dtype=torch.float32), torch.linspace(0, 1, steps=self.n_intervals + 1))
+
+        treatment_indices = torch.argmax(P_padded, dim=-1)
+
+        interval_bounds = torch.linspace(
+            0, df_merge[self.column_map["time"][0]].max(), self.n_intervals + 1
+        )
+        event_in_bounds = torch.where(
+            time_padded <= interval_bounds[-1], event_padded, 0
+        )
+        time_in_bounds = torch.where(
+            time_padded <= interval_bounds[-1],
+            time_padded,
+            interval_bounds[-1],
+        )
+        interval_idx = transform_time(time_padded, event_padded, interval_bounds)
+
+        return (
+            {
+                "X": X_padded,
+                "X_static": X_static,
+                "P": P_padded,
+                "P_static": P_static,
+                "treatment_indices": treatment_indices,
+                "d": d_padded,
+                "time": time_in_bounds,
+                "event": event_in_bounds,
+                "interval_idx": interval_idx,
+                "patient_ids": patient_ids,
+                "mask": mask,
+            },
+            interval_bounds,
+        )
+
+    def prepare_data(
+        self,
+    ) -> None:
+        df_dynamic, df_static = self._load_data()
+
+        self.column_map = self._build_column_map(df_dynamic, df_static)
+        df_merge = self._merge_and_filter(df_dynamic, df_static)
+
+        padded_tensor_data, self.interval_bounds = self._transform_to_tensor(df_merge)
 
         self.ESMEDataset = ESMEOnlineDataset(
-            X_list=X_list,
-            X_static=X_static,
-            P_list=P_list,
-            P_static=P_static,
-            d_list=d_list,
-            time_list=time_list,
-            event_list=event_list,
-            patient_ids=patient_ids,
-            n_lines=self.n_lines,
-            interval_bounds=self.interval_bounds,
+            **padded_tensor_data,
         )
+
+    # ========= Data splitting ==========
 
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
             self.prepare_data()
-        assert self.ESMEDataset is not None, (
-            "ESMEDataset must be initialized before setup."
-        )
+            assert self.ESMEDataset is not None
 
-        assert self.split_seed is not None, (
-            "split_seed must be provided for reproducible splits."
-        )
-        total_size = len(self.ESMEDataset)
-        holdout_size = int(self.holdout_size * total_size)
-        cv_size = total_size - holdout_size
+        dataset_length = len(self.ESMEDataset)
+        holdout_length = int(self.holdout_size * dataset_length)
+
         generator = torch.Generator().manual_seed(self.split_seed)
         self.cv_dataset, self.holdout_dataset = TorchData.random_split(
-            self.ESMEDataset, [cv_size, holdout_size], generator=generator
+            self.ESMEDataset,
+            [dataset_length - holdout_length, holdout_length],
+            generator=generator,
         )
 
         if self.final_training:
@@ -281,6 +459,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
             if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
+
+    # ========= DataLoaders ==========
 
     def train_dataloader(self):
         return TorchData.DataLoader(
@@ -310,34 +490,12 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
 
     def get_data_dimensions(self):
-        esme_data = pd.read_parquet(
-            str(
-                self.data_dir
-                / f"model_entry_imputed_data_{self.subtype}_stable_types_categorized.parquet"
-            )
-        )
-        static_data = pd.read_parquet(
-            str(self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet")
-        )
-        static_data = static_data.loc[
-            static_data["usubjid"].isin(esme_data["usubjid"].unique())
-        ].reset_index(drop=True)
+        column_map = self._build_column_map(*self._load_data())
 
-        x_dim = len(
-            [
-                col
-                for col in esme_data.columns
-                if col.startswith("X_") and not col.startswith("X_buffer_time")
-            ]
-        )
-        p_dim = len(
-            pd.get_dummies(esme_data["T_treatment_category"].astype(str)).columns
-        )
-        p_static_dim = len([col for col in static_data.columns if col.startswith("T_")])
-        x_static_dim = len([col for col in static_data.columns if col.startswith("X_")])
-        interval_bounds = torch.linspace(
-            0, esme_data["Y_onset_to_death"].max(), self.n_intervals + 1
-        )
+        x_dim = len(column_map["x"])
+        p_dim = len(self.treatment_dict)
+        x_static_dim = len(column_map["x_static"])
+        p_static_dim = len(column_map["p_static"])
 
         return {
             "x_input_dim": x_dim,
@@ -345,7 +503,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             "p_static_dim": p_static_dim,
             "x_static_dim": x_static_dim,
             "output_dim": self.n_intervals,
-            "time_bins": interval_bounds,
+            "time_bins": self.interval_bounds,
         }
 
 
@@ -388,6 +546,8 @@ if __name__ == "__main__":
     start = time.time()
     batch = next(iter(train_loader))
     print(f"First batch retrieved in {time.time() - start:.2f} seconds.")
+
+    print("Data dimensions:", data_module.get_data_dimensions())
     print("Batch contents:")
     (
         XPd,
