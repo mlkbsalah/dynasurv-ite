@@ -2,11 +2,13 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import lightning as L
-import numpy as np
 import pandas as pd
 import torch
 import torch.utils.data as TorchData
 from sklearn.model_selection import KFold
+
+from .dataset import ESMEOnlineDataset
+from .utils import stack_and_pad, transform_time
 
 FULL_ESME_COLUMN_SCHEME = {
     "x_prefix": "X_",
@@ -19,164 +21,6 @@ FULL_ESME_COLUMN_SCHEME = {
     "pat_id": ["usubjid"],
     "lineid": ["lineid"],
 }
-
-
-def stack_by_lines(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
-    """Stack variables patient-wise, variable number of lines per patient.   list[np.ndarray(patient_i_lines, len(cols))]
-    Args:
-        df (pd.DataFrame): DataFrame containing patient data with 'usubjid' and 'lineid' columns.
-        cols (list[str]): List of column names to stack.
-    Returns:
-        list[np.ndarray]: List of numpy arrays, each array corresponds to a patient and has shape (patient_i_lines, len(cols)).
-    """
-
-    if not df.set_index(["usubjid", "lineid"]).index.is_monotonic_increasing:
-        raise ValueError(
-            "DataFrame must be sorted by ['usubjid', 'lineid'] before stacking by lines."
-            "Unsorted DataFrame may lead to incorrect temporal ordering of lines per patient."
-        )
-
-    data_numpy = df[cols].to_numpy()
-    patient_ids = df["usubjid"].to_numpy()
-
-    change_indices = np.where(np.diff(patient_ids) != 0)[0] + 1
-
-    splits = np.split(data_numpy, change_indices)
-    return splits
-
-
-def pad_sequence_to_length(
-    sequences: list[torch.Tensor], target_length: int
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Pad a list of sequences to a target length.
-
-    Args:
-        sequences (list[torch.Tensor]): List of tensors of shape (seq_length, *feature_dim). *feature_dim can be any shape.
-        target_length (int): Target length to pad sequences to. Must be greater than or equal to the length of the longest sequence.
-
-    Returns:
-        -padded_sequences: Padded sequences of shape (batch_size, target_length, *feature_dim).
-        -mask: Bool tensor of shape (batch_size, target_length) where True indicates valid (non-padded) time steps and False indicates padding positions.
-    """
-    first_seq = sequences[0]
-    feature_dim = first_seq.shape[1:]
-    dtype = first_seq.dtype
-    device = first_seq.device
-
-    padded_sequences = torch.zeros(
-        (len(sequences), target_length, *feature_dim), dtype=dtype, device=device
-    )
-    mask = torch.zeros((len(sequences), target_length), dtype=torch.bool, device=device)
-    for i, seq in enumerate(sequences):
-        seq_length = seq.shape[0]
-
-        if seq_length > target_length:
-            raise ValueError(
-                "Target_length must be greater than or equal to the length of the longest sequence."
-                f"Sequence length {seq_length} exceeds target length {target_length}."
-            )
-
-        if seq.shape[1:] != feature_dim:
-            raise ValueError(
-                "All sequences must have the same dimensionality except for the length dimension."
-                f"Expected feature dimension {feature_dim}, but got {seq.shape[1:]}."
-            )
-
-        padded_sequences[i, :seq_length] = seq
-        mask[i, :seq_length] = True
-
-    return padded_sequences, mask
-
-
-def stack_and_pad(
-    df: pd.DataFrame, cols: list[str], target_length: int
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Wrapper function to stack by lines and pad sequences to a target length."""
-    sequences = stack_by_lines(df, cols)
-    tensor_sequences = [torch.tensor(seq, dtype=torch.float32) for seq in sequences]
-    padded_sequences, mask = pad_sequence_to_length(tensor_sequences, target_length)
-    return padded_sequences, mask
-
-
-def transform_time(self, time: torch.Tensor, bounds: torch.Tensor) -> torch.Tensor:
-    """Transform continuous times into discrete interval indices based on provided bounds.
-    Args:
-        time (torch.Tensor): Tensor of shape (n_patients, n_lines, 1) containing continuous time-to-event values.
-        bounds (torch.Tensor): Tensor of shape (n_intervals + 1,) defining the boundaries of time intervals.
-    Returns:
-        torch.Tensor: Tensor of shape (n_patients, n_lines, 1) containing interval indices.
-    """
-
-    n_intervals = len(bounds) - 1
-    interval_idx = torch.bucketize(time, bounds) - 1
-    interval_idx = torch.clamp(interval_idx, min=0, max=n_intervals - 1)
-
-    return interval_idx
-
-
-class ESMEOnlineDataset(TorchData.Dataset):
-    def __init__(
-        self,
-        X: torch.Tensor,
-        X_static: torch.Tensor,
-        P: torch.Tensor,
-        treatment_indices: torch.Tensor,
-        P_static: torch.Tensor,
-        d: torch.Tensor,
-        time: torch.Tensor,
-        event: torch.Tensor,
-        interval_idx: torch.Tensor,
-        mask: torch.Tensor,
-        patient_ids: np.ndarray,
-    ):
-        """Class constructor for ESME dataset
-
-        Args:
-            X (torch.Tensor): Dynamic features of shape (n_patients, n_lines, n_features)
-            X_static (torch.Tensor): Static features of shape (n_patients, n_features_static)
-            P (torch.Tensor): Treatment assignments of shape (n_patients, n_lines, n_treatments)
-            P_static (torch.Tensor): Static treatment features of shape (n_patients, n_treatments_static)
-            d (torch.Tensor): Buffer duration between lines of shape (n_patients, n_lines, 1)
-            time (torch.Tensor): Time-to-event of shape (n_patients, n_lines, 1)
-            event (torch.Tensor): Event indicators of shape (n_patients, n_lines, 1)
-            interval_idx (torch.Tensor): Interval indices of shape (n_patients, n_lines, 1)
-            patient_ids (np.ndarray): Array of patient identifiers of shape (n_patients,)
-
-        Remarks:
-            Each patient sample contains all their lines, padded to n_lines.
-        """
-        self.X = X
-        self.X_static = X_static
-        self.P = P
-        self.P_static = P_static
-        self.treatment_indices = treatment_indices
-        self.d = d
-        self.time = time
-        self.event = event
-        self.interval_idx = interval_idx
-        self.mask = mask
-        self.patient_ids = patient_ids
-
-    def __len__(self) -> int:
-        return len(self.patient_ids)
-
-    def __getitem__(self, idx):
-        x = self.X[idx]  # (n_lines_i, n_features)
-        x_static = self.X_static[idx]  # (n_features_static,)
-        p = self.P[idx]  # (n_lines_i, n_treatments)
-        treatment_idx = self.treatment_indices[idx]  # (n_lines_i,)
-        p_static = self.P_static[idx]  # (n_treatments_static,)
-        d = self.d[idx]  # (n_lines_i, 1)
-        time = self.time[idx]  # (n_lines_i, 1)
-        event = self.event[idx]  # (n_lines_i, 1)
-        interval_idx = self.interval_idx[idx]  # (n_lines_i, 1)
-        patient_id = self.patient_ids[idx]  # scalar
-        mask = self.mask[idx]  # (n_lines_i,)
-
-        XPd = torch.cat([x, p, d], dim=-1)
-        static = (x_static, p_static)
-
-        return (XPd, static, interval_idx, treatment_idx, time, event, mask, patient_id)
 
 
 class ESMEOnlineDataModuleCV(L.LightningDataModule):
@@ -387,7 +231,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             time_padded,
             interval_bounds[-1],
         )
-        interval_idx = transform_time(time_padded, event_padded, interval_bounds)
+        interval_idx = transform_time(time_padded, interval_bounds)
 
         return (
             {
