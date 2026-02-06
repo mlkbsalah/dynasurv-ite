@@ -378,8 +378,27 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
         p_static_dim = len([col for col in static_data.columns if col.startswith("T_")])
         x_static_dim = len([col for col in static_data.columns if col.startswith("X_")])
-        interval_bounds = torch.linspace(
-            0, esme_data["Y_onset_to_death"].max(), self.n_intervals + 1
+
+        esme_data = (
+            esme_data.loc[esme_data["lineid"] <= self.n_lines]
+            .sort_values(by=["usubjid", "lineid"])
+            .reset_index(drop=True)
+            .copy()
+        )
+
+        last_event_time_per_line = (
+            esme_data[esme_data["Y_death"] == 1]
+            .groupby("lineid")["Y_onset_to_death"]
+            .max()
+            .values
+        )
+
+        horizon = np.minimum(self.horizon, last_event_time_per_line.tolist())
+        interval_bounds = torch.stack(
+            [
+                torch.linspace(0, horizon[i], self.n_intervals + 1)
+                for i in range(self.n_lines)
+            ]
         )
 
         return {

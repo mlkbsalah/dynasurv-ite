@@ -1,4 +1,5 @@
 from typing import Tuple
+from warnings import warn
 
 import lightning as L
 import numpy as np
@@ -234,13 +235,17 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
-            "train/survival_loss", surv_loss, prog_bar=True, on_step=True, on_epoch=True
+            "train/survival_loss",
+            surv_loss,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
         )
         self.log(
             "train/propensity_loss",
             prop_loss,
             prog_bar=True,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
         )
 
@@ -324,22 +329,26 @@ class DynaSurvCausalOnline(L.LightningModule):
                 test_events=e_line.cpu(),
                 test_times=t_line.cpu(),
                 discrete_cumhazards=line_discrete_cumhazards.cpu(),
+                interval_bounds=self.interval_bounds[line].cpu(),
                 device="cpu",
             )
             ci.append(c_index_td)
 
-            ibs_line, bs_val_line, bs_ipcw_weights = self.eval_brier_score_ipcw(
-                train_events=torch.tensor(
-                    self.train_events[line], dtype=torch.bool, device="cpu"
-                ),
-                train_times=torch.tensor(
-                    self.train_times[line], dtype=torch.float32, device="cpu"
-                ),
-                test_events=e_line.cpu(),
-                test_times=t_line.cpu(),
-                discrete_survival=line_discrete_survival.cpu(),
-                tmax=self.evaluation_horizon_times[line],
-                device="cpu",
+            ibs_line, bs_val_line, bs_ipcw_weights, bs_eval_times = (
+                self.eval_brier_score_ipcw(
+                    train_events=torch.tensor(
+                        self.train_events[line], dtype=torch.bool, device="cpu"
+                    ),
+                    train_times=torch.tensor(
+                        self.train_times[line], dtype=torch.float32, device="cpu"
+                    ),
+                    test_events=e_line.cpu(),
+                    test_times=t_line.cpu(),
+                    discrete_survival=line_discrete_survival.cpu(),
+                    interval_bounds=self.interval_bounds[line].cpu(),
+                    tmax=self.evaluation_horizon_times[line],
+                    device="cpu",
+                )
             )
             ibs.append(ibs_line)
 
@@ -431,10 +440,11 @@ class DynaSurvCausalOnline(L.LightningModule):
         test_events,
         test_times,
         discrete_cumhazards,
+        interval_bounds,
         device,
-    ):
+    ) -> Tuple[float, torch.Tensor]:
         cumhazards = self.eval_factual_cumhazard(
-            discrete_cumhazards, test_times, device
+            discrete_cumhazards, test_times, interval_bounds, device
         )  # (valid_batch, n_intervals + 1)
 
         ci_ipcw_weights = get_ipcw(
@@ -460,18 +470,18 @@ class DynaSurvCausalOnline(L.LightningModule):
         test_events,
         test_times,
         discrete_survival,
+        interval_bounds,
         tmax,
         device,
     ):
-        bs_eval_times = torch.linspace(
-            0,
-            tmax,
-            steps=self.brier_integration_step,
-            dtype=torch.float32,
-            device=device,
-        )
+        bs_eval_times = torch.arange(
+            start=0.0,
+            end=tmax,
+            step=self.brier_integration_step,
+        ).to(device)
+
         survival_prob = self.eval_factual_survival(
-            discrete_survival, bs_eval_times, device
+            discrete_survival, bs_eval_times, interval_bounds, device
         )  # (valid_batch, n_intervals + 1)
 
         bs_ipcw_weights = get_ipcw(
@@ -490,7 +500,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         )
         ibs = bs_fun.integral()
 
-        return ibs, bs_val, bs_ipcw_weights
+        return ibs, bs_val, bs_ipcw_weights, bs_eval_times
 
     # ====================== Inference methods ============================
     def predict(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -510,6 +520,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         self,
         discrete_cumhazards: torch.Tensor,
         eval_time: torch.Tensor,
+        interval_bounds: torch.Tensor,
         device: torch.device = torch.device("cpu"),
     ):
         """return cumulative hazard at eval time for all batch and all lines
@@ -521,7 +532,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         Returns:
             torch.Tensor: (batch, n_eval_points) cumulative hazards at eval_time for all batch and all lines
         """
-        interval_bounds = self.interval_bounds.to(device)
+        interval_bounds = interval_bounds.to(device)
         eval_time = eval_time.to(device)
         discrete_cumhazards = discrete_cumhazards.to(device)
 
@@ -529,7 +540,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             torch.bucketize(eval_time, interval_bounds, right=True) - 1
         )  # (n_eval_points,)
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
-            print(
+            warn(
                 "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
             )
             interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
@@ -547,6 +558,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         self,
         discrete_survival: torch.Tensor,
         eval_time: torch.Tensor,
+        interval_bounds: torch.Tensor,
         device: torch.device = torch.device("cpu"),
     ):
         """evaluate `S(t|X,P,A)` at eval_time for all batch and all lines
@@ -558,7 +570,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         Returns:
             torch.Tensor: (batch, n_lines, n_eval_points) survival probabilities at eval_time for all batch and all lines
         """
-        interval_bounds = self.interval_bounds.to(device)
+        interval_bounds = interval_bounds.to(device)
         discrete_survival = discrete_survival.to(device)
         eval_time = eval_time.to(device)
 
@@ -566,7 +578,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             torch.bucketize(eval_time, interval_bounds, right=True) - 1
         )  # (n_eval_points,)
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
-            print(
+            warn(
                 "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
             )
             interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
