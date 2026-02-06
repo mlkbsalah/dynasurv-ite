@@ -418,7 +418,7 @@ if __name__ == "__main__":
         data_dir="../../../data",
         subtype="HR+HER2-",
         n_lines=2,
-        horizon=300,
+        horizon=100,
         n_intervals=10,
         batch_size=32,
         fold_idx=3,
@@ -476,4 +476,11 @@ if __name__ == "__main__":
     print("Batch event shape:", event.shape, "dtype:", event.dtype)
     print("Batch mask shape:", mask.shape, "dtype:", mask.dtype)
     print("Batch patient_id shape:", patient_id.shape, "dtype:", patient_id.dtype)
-    print("Horizons:", data_module.horizon)
+
+    dimensions = data_module.get_data_dimensions()
+    print(
+        "Data dimensions:",
+        dimensions["time_bins"],
+        "Shape:",
+        dimensions["time_bins"].shape,
+    )
