@@ -55,7 +55,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         weight_decay: float,
         attention: bool,
         evaluation_horizon_times: list[float] = [100, 75, 50, 30],
-        brier_integration_step: int = 6,
+        brier_integration_step: float = 6.0,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -71,7 +71,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.interval_bounds: torch.Tensor
 
         self.evaluation_horizon_times = evaluation_horizon_times
-        self.brier_integration_step = brier_integration_step
+        self._brier_integration_step = brier_integration_step
 
         self.lstm = embed_LSTM_ITE(
             x_input_dim=self.x_input_dim,
@@ -129,6 +129,15 @@ class DynaSurvCausalOnline(L.LightningModule):
         # IPCW buffer
         self.train_times = None
         self.train_events = None
+
+    # ===================== Properties ============================
+    @property
+    def brier_integration_step(self) -> float:
+        return self._brier_integration_step
+
+    @brier_integration_step.setter
+    def brier_integration_step(self, value: float):
+        self._brier_integration_step = value
 
     # ====================== Core model logic =============================
     def forward(
