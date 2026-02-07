@@ -5,23 +5,27 @@ import pandas as pd
 import torch
 
 
-def stack_by_lines(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
-    """Stack variables patient-wise, variable number of lines per patient.   list[np.ndarray(patient_i_lines, len(cols))]
+def split_dataframe(
+    df: pd.DataFrame, feature_cols: list[str], id_col: str, visit_col: str
+) -> list[np.ndarray]:
+    """Split the DataFrame into a list of length the unique patient ids of numpy arrays, where each array is of shape (n_visit_i, len(feature_cols)) corresponding to the visits of a single patient.
     Args:
-        df (pd.DataFrame): DataFrame containing patient data with 'usubjid' and 'lineid' columns.
-        cols (list[str]): List of column names to stack.
+        df (pd.DataFrame): DataFrame containing patient data with id_col, visit_col columns and feature_cols
+        feature_cols (list[str]): List of column names
+        id_col (str): Column name for patient ID
+        visit_col (str): Column name for visit number
     Returns:
-        list[np.ndarray]: List of numpy arrays, each array corresponds to a patient and has shape (patient_i_lines, len(cols)).
+        list[np.ndarray]: List of numpy arrays, each array corresponds to a patient and has shape (n_visit_i, len(feature_cols)).
     """
 
-    if not df.set_index(["usubjid", "lineid"]).index.is_monotonic_increasing:
+    if not df.set_index([id_col, visit_col]).index.is_monotonic_increasing:
         raise ValueError(
-            "DataFrame must be sorted by ['usubjid', 'lineid'] before stacking by lines."
+            f"DataFrame must be sorted by [{id_col}, {visit_col}] before stacking by lines."
             "Unsorted DataFrame may lead to incorrect temporal ordering of lines per patient."
         )
 
-    data_numpy = df[cols].to_numpy()
-    patient_ids = df["usubjid"].to_numpy()
+    data_numpy = df[feature_cols].to_numpy()
+    patient_ids = df[id_col].to_numpy()
 
     change_indices = np.where(np.diff(patient_ids) != 0)[0] + 1
 
@@ -30,28 +34,28 @@ def stack_by_lines(df: pd.DataFrame, cols: list[str]) -> list[np.ndarray]:
 
 
 def pad_sequence_to_length(
-    sequences: list[torch.Tensor], target_length: int
+    sequence: list[torch.Tensor], target_length: int
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Pad a list of sequences to a target length.
+    """Pad a sequence to a target length.
 
     Args:
-        sequences (list[torch.Tensor]): List of tensors of shape (seq_length, *feature_dim). *feature_dim can be any shape.
+        sequence (list[torch.Tensor]): List of tensors of shape (seq_length, *feature_dim). *feature_dim can be any shape.
         target_length (int): Target length to pad sequences to. Must be greater than or equal to the length of the longest sequence.
 
     Returns:
         -padded_sequences: Padded sequences of shape (batch_size, target_length, *feature_dim).
         -mask: Bool tensor of shape (batch_size, target_length) where True indicates valid (non-padded) time steps and False indicates padding positions.
     """
-    first_seq = sequences[0]
+    first_seq = sequence[0]
     feature_dim = first_seq.shape[1:]
     dtype = first_seq.dtype
     device = first_seq.device
 
     padded_sequences = torch.zeros(
-        (len(sequences), target_length, *feature_dim), dtype=dtype, device=device
+        (len(sequence), target_length, *feature_dim), dtype=dtype, device=device
     )
-    mask = torch.zeros((len(sequences), target_length), dtype=torch.bool, device=device)
-    for i, seq in enumerate(sequences):
+    mask = torch.zeros((len(sequence), target_length), dtype=torch.bool, device=device)
+    for i, seq in enumerate(sequence):
         seq_length = seq.shape[0]
 
         if seq_length > target_length:
@@ -72,26 +76,10 @@ def pad_sequence_to_length(
     return padded_sequences, mask
 
 
-def stack_and_pad(
-    df: pd.DataFrame, cols: list[str], target_length: int
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Wrapper function to stack by lines and pad sequences to a target length.
-    Args:
-        df (pd.DataFrame): DataFrame containing patient data with 'usubjid' and 'lineid' columns.
-        cols (list[str]): List of column names to stack and pad.
-        target_length (int): Target length to pad sequences to. Must be greater than or equal to the length of the longest sequence.
-    Returns:
-        padded_sequences: Padded sequences of shape (batch_size, target_length, len(cols)).
-        mask: Bool tensor of shape (batch_size, target_length) where True indicates valid (non-padded) time steps and False indicates padding positions.
-    """
-    sequences = stack_by_lines(df, cols)
-    tensor_sequences = [torch.tensor(seq, dtype=torch.float32) for seq in sequences]
-    padded_sequences, mask = pad_sequence_to_length(tensor_sequences, target_length)
-    return padded_sequences, mask
-
-
 def transform_time(time: torch.Tensor, bounds: torch.Tensor) -> torch.Tensor:
     """Transform continuous times into discrete interval indices based on provided bounds.
+        `bounds[i-1] < time <= bounds[i] => interval index = i-1`
+    if time is less than or equal to the first bound, it will be assigned to interval 0. If time is greater than the last bound, it will be assigned to the last interval (n_intervals - 1).
     Args:
         time (torch.Tensor): Tensor of shape (n_patients, n_lines, 1) containing continuous time-to-event values.
         bounds (torch.Tensor): Tensor of shape (n_intervals + 1,) defining the boundaries of time intervals.
