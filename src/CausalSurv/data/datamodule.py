@@ -9,7 +9,7 @@ import torch
 import torch.utils.data as TorchData
 
 from .dataset import ESMEOnlineDataset
-from .utils import stack_and_pad, transform_time
+from .utils import pad_sequence_to_length, split_dataframe, transform_time
 
 FULL_ESME_COLUMN_SCHEME = {
     "x_prefix": "X_",
@@ -174,6 +174,24 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
         return df_merge
 
+    def _split_and_pad(
+        self, df: pd.DataFrame, cols: list[str], target_length: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Wrapper function to split the dataframe and pad sequences to a target length.
+        Args:
+            df (pd.DataFrame): DataFrame containing patient data with 'usubjid' and 'lineid' columns.
+            cols (list[str]): List of column names to split and pad.
+            target_length (int): Target length to pad sequences to. Must be greater than or equal to the length of the longest sequence.
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: Padded sequences and mask tensors.
+        """
+        sequences = split_dataframe(
+            df, cols, self.column_map["pat_id"][0], self.column_map["lineid"][0]
+        )
+        tensor_sequences = [torch.tensor(seq, dtype=torch.float32) for seq in sequences]
+        padded_sequences, mask = pad_sequence_to_length(tensor_sequences, target_length)
+        return padded_sequences, mask
+
     def _transform_to_tensor(self, df_merge: pd.DataFrame):
         p_encoded = pd.get_dummies(
             df_merge[
@@ -193,17 +211,21 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             )
         }
 
-        X_padded, mask = stack_and_pad(df_merge, self.column_map["x"], self.n_lines)
-        P_padded, _ = stack_and_pad(
+        X_padded, mask = self._split_and_pad(
+            df_merge, self.column_map["x"], self.n_lines
+        )
+        P_padded, _ = self._split_and_pad(
             p_encoded,
             p_encoded.columns.drop(
                 self.column_map["pat_id"] + self.column_map["lineid"]
             ).tolist(),
             self.n_lines,
         )
-        d_padded, _ = stack_and_pad(df_merge, self.column_map["d"], self.n_lines)
-        time_padded, _ = stack_and_pad(df_merge, self.column_map["time"], self.n_lines)
-        event_padded, _ = stack_and_pad(
+        d_padded, _ = self._split_and_pad(df_merge, self.column_map["d"], self.n_lines)
+        time_padded, _ = self._split_and_pad(
+            df_merge, self.column_map["time"], self.n_lines
+        )
+        event_padded, _ = self._split_and_pad(
             df_merge, self.column_map["event"], self.n_lines
         )
 

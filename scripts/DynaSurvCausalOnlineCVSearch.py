@@ -11,7 +11,7 @@ import wandb
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 
-from CausalSurv.data.CV_online_data_utils import ESMEOnlineDataModuleCV
+from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
 from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 
 
