@@ -13,6 +13,8 @@ class StepFunction:
             x (torch.Tensor): x-axis points
             y (torch.Tensor): corresponding y-axis points
             side (str): determine the side of the step, whether to take the left or right value
+                - "right": the step function is right-continuous
+                - "left": the step function is left-continuous
             domain (tuple, optional): domain of the step function
         """
         self.x = x
