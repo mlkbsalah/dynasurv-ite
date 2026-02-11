@@ -1,26 +1,6 @@
 import torch
 
 
-def PROPLoss(
-    propensity: torch.Tensor, treatment_index: torch.Tensor, reduction: str = "mean"
-) -> torch.Tensor:
-    """
-    Propensity loss function using Cross Entropy Loss.
-
-    Args:
-        propensity: Predicted propensity scores, shape (batch, n_treatments)
-        treatment_index: Ground truth treatment indices, shape (batch,)
-    Returns:
-        loss: Scalar loss value (mean over batch and time)
-    """
-
-    n_treatments = propensity.size(-1)
-    propensity = propensity.view(-1, n_treatments)
-    loss = torch.nn.CrossEntropyLoss(reduction=reduction)(propensity, treatment_index)
-
-    return loss
-
-
 class NLLogisticHazard:
     """Class for logistic hazard discrete time survival model loss."""
 
