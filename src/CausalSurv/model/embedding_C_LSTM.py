@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from CausalSurv.model.mlp import MLP
+from ..model.mlp import MLP
 
 
 class embed_LSTM(nn.Module):

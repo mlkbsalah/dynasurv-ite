@@ -4,9 +4,9 @@ import lightning as L
 import torch
 from sksurv.metrics import concordance_index_censored
 
-from CausalSurv.metrics.loss import NLLogisticHazard
-from CausalSurv.model.embedding_C_LSTM import embed_LSTM
-from CausalSurv.model.mlp import MLP
+from ..metrics.loss import NLLogisticHazard
+from ..model.embedding_C_LSTM import embed_LSTM
+from ..model.mlp import MLP
 
 
 class DynaSurvOnline(L.LightningModule):

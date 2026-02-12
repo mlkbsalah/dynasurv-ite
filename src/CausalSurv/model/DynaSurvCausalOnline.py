@@ -7,9 +7,9 @@ from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
-from CausalSurv.metrics.loss import NLLogisticHazard
-from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
-from CausalSurv.model.mlp import MLP
+from ..metrics.loss import NLLogisticHazard
+from ..model.embedding_C_LSTM_ITE import embed_LSTM_ITE
+from ..model.mlp import MLP
 
 
 class DynaSurvCausalOnline(L.LightningModule):
