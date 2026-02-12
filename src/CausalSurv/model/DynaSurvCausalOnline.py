@@ -139,29 +139,33 @@ class DynaSurvCausalOnline(L.LightningModule):
         Args:
             XPd: (batch, n_lines, features = x_input_dim + p_input_dim + 1)
             X_static: ( (batch, x_static_dim), (batch, p_static_dim) )
-
-
         Returns:
-            cond_sa: (batch, n_lines, n_treatments, output_sa_length)
+            hazard_logit: (batch, n_lines, n_treatments, n_intervals)
+            latent_state: (batch, n_lines, latent_dim)
         """
         h, c, p = self._init_lstm_states(X_static, XPd.device)
         hazards_logit = []
-        propensity = []
+        latent_state = []
 
         for t in range(XPd.shape[1]):
-            all_responses_t, propensity_t, (h, c, p) = self._forward_one_step(
-                XPd[:, t, :], (h, c, p)
-            )
-            hazards_logit.append(
-                all_responses_t
-            )  # list of (batch, n_treatments, n_intervals)
-            propensity.append(propensity_t)  # list of (batch, n_treatments)
-        hazards_logit = torch.stack(
-            hazards_logit, dim=1
-        )  # (batch, n_lines, n_treatments, n_intervals)
-        propensity = torch.stack(propensity, dim=1)  # (batch, n_lines, n_treatments)
+            logit_t, (h, c, p) = self._step(XPd[:, t, :], (h, c, p))
+            hazards_logit.append(logit_t)
+            latent_state.append(h)
+        hazards_logit = torch.stack(hazards_logit, dim=1)
+        latent_state = torch.stack(latent_state, dim=1)
 
-        return hazards_logit, propensity
+        return hazards_logit, latent_state
+
+    def _step(
+        self, XPd_t, tuple_in
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Forward pass for one time step."""
+        _, h, c, p = self.lstm(XPd_t, tuple_in)
+        logit_t = self.treatment_head(h).view(
+            -1, self.n_treatments, self.output_length
+        )  # (batch, n_treatments, n_intervals)
+
+        return logit_t, (h, c, p)
 
     def _init_lstm_states(
         self, X_static, device: torch.device
@@ -174,23 +178,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         p0 = self.init_p_mlp(x_static_treatment)
         return h0, c0, p0
 
-    def _forward_one_step(
-        self, XPd_t, tuple_in
-    ) -> Tuple[
-        torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-    ]:
-        """Forward pass for one time step."""
-        _, h, c, p = self.lstm(XPd_t, tuple_in)
-        propensity_t = torch.softmax(
-            self.propensityhead(h), dim=-1
-        )  # (batch, n_treatments)
-        all_response_t = self.treatment_head(h).view(
-            -1, self.n_treatments, self.output_length
-        )  # (batch, n_treatments, n_intervals)
-
-        return all_response_t, propensity_t, (h, c, p)
-
-    def get_factual_predictions(
+    def forward_factual(
         self,
         XPd: torch.Tensor,
         X_static: Tuple[torch.Tensor, torch.Tensor],
@@ -202,12 +190,13 @@ class DynaSurvCausalOnline(L.LightningModule):
             X_static (Tuple[torch.Tensor, torch.Tensor]): ( (batch, x_static_dim), (batch, p_static_dim) )
             treatment_idx (torch.Tensor): (batch, n_lines) integer treatment head indices actually received
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: (factual_hazards_logit, propensity)
+            factual_hazards_logit (troch.Tensor): (batch, n_lines, n_intervals)
+            latent_state (troch.Tensor): (batch, n_lines, latent_dim)
         """
 
-        hazards_logit, propensity = self.forward(
+        hazards_logit, latent_state = self.forward(
             XPd, X_static
-        )  # (batch, n_lines, n_treatments, n_intervals) / (batch, n_lines, n_treatments)
+        )  # (batch, n_lines, n_treatments, n_intervals) / (batch, n_lines, lstm_hidden_length)
         gather_idx = (
             treatment_idx.unsqueeze(-1)
             .unsqueeze(-1)
@@ -216,23 +205,24 @@ class DynaSurvCausalOnline(L.LightningModule):
         factual_hazards_logit = torch.gather(
             hazards_logit, dim=2, index=gather_idx
         ).squeeze(2)  # (batch, n_lines, n_intervals)
-        return factual_hazards_logit, propensity
+        return factual_hazards_logit, latent_state
 
     # ====================== Training and evaluation ======================
     def training_step(self, batch, batch_idx):
         """perform a training step"""
-
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
-
         if self.current_epoch == 0:
             self._accumulate_data(time, event, mask)
 
-        loss, surv_loss, prop_loss = self._compute_loss(
-            XPd, X_static, treatment_idx, interval_idx, event, mask
+        hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
+        surv_loss, prop_loss = self._compute_loss(
+            hazard_logits, latent_state, interval_idx, event, treatment_idx, mask
         )
+        loss = surv_loss - self.lambda_prop_loss * prop_loss
 
+        # ========= logging =========
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
             "train/survival_loss",
@@ -251,16 +241,42 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         return loss
 
-    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+    def _compute_loss(
+        self, hazard_logits, latent_state, interval_idx, event, treatment_idx, mask
+    ):
+        batch_size, n_lines, n_intervals = hazard_logits.shape
+
+        treatment_prediction = torch.softmax(
+            self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
+            dim=-1,
+        )
+
+        prop_loss = self.propensity_loss_fn(
+            treatment_prediction, treatment_idx.view(-1)
+        ).view(batch_size, n_lines)
+        prop_loss = (prop_loss * mask).sum() / mask.sum()
+
+        surv_loss = self.surv_loss_fn(
+            hazard_logits.view(-1, hazard_logits.shape[-1]),
+            interval_idx.view(-1),
+            event.view(-1),
+        ).view(batch_size, n_lines)
+        surv_loss = (surv_loss * mask).sum() / mask.sum()
+
+        return surv_loss, prop_loss
+
+    def validation_step(self, batch, batch_idx):
         """perform a validation step"""
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
         N_lines = time.shape[1]
+        hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
-        loss, surv_loss, prop_loss = self._compute_loss(
-            XPd, X_static, treatment_idx, interval_idx, event, mask
+        surv_loss, prop_loss = self._compute_loss(
+            hazard_logits, latent_state, interval_idx, event, treatment_idx, mask
         )
+        loss = surv_loss - self.lambda_prop_loss * prop_loss
 
         if dataloader_idx == 0:
             self.log(
@@ -296,10 +312,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         if self.trainer.sanity_checking:
             return loss
 
-        discrete_hazards = torch.sigmoid(
-            self.get_factual_predictions(XPd, X_static, treatment_idx)[0]
-        )  # (batch, n_lines, n_intervals)
-
+        discrete_hazards = torch.sigmoid(hazard_logits)
         discrete_survival = torch.cumprod(1 - discrete_hazards, dim=2)
         discrete_survival = torch.cat(
             [torch.ones_like(discrete_survival[:, :, :1]), discrete_survival], dim=2
@@ -453,34 +466,6 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx)
-
-    def _compute_loss(
-        self, XPd, X_static, treatment_idx, interval_idx, event, mask
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        haz_pred_logit, propensity = self.get_factual_predictions(
-            XPd, X_static, treatment_idx
-        )  # (batch, n_lines, n_intervals) / (batch, n_lines, n_treatments)
-
-        batch, n_lines, n_intervals = haz_pred_logit.shape
-        haz_pred_logit_flat = haz_pred_logit.reshape(-1, n_intervals)
-        interval_idx_flat = interval_idx.reshape(-1)
-        event_flat = event.reshape(-1)
-
-        surv_loss_flat = self.surv_loss_fn(
-            haz_pred_logit_flat, interval_idx_flat, event_flat
-        )  # (batch * n_lines, )
-        surv_loss = surv_loss_flat.reshape(batch, n_lines) * mask
-
-        prop_loss_flat = self.propensity_loss_fn(
-            propensity.reshape(-1, self.n_treatments), treatment_idx.reshape(-1)
-        )
-        prop_loss = prop_loss_flat.reshape(batch, n_lines) * mask
-
-        prop_loss = prop_loss.sum() / mask.sum()
-        surv_loss = surv_loss.sum() / mask.sum()
-
-        loss = surv_loss - self.lambda_prop_loss * prop_loss
-        return loss, surv_loss, prop_loss
 
     def _accumulate_data(self, time, event, mask):
         """Collect censoring information for IPCW estimation during epoch 0."""
