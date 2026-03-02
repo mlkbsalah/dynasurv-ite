@@ -216,8 +216,10 @@ class DynaSurvCausalOnline(L.LightningModule):
             self._accumulate_data(time, event, mask)
 
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
-        surv_loss, prop_loss = self._compute_loss(
-            hazard_logits, latent_state, interval_idx, event, treatment_idx, mask
+
+        prop_loss = self._compute_propensity_loss(latent_state, treatment_idx, mask)
+        surv_loss = self._compute_sruvival_loss(
+            hazard_logits, interval_idx, event, mask
         )
         loss = surv_loss - self.lambda_prop_loss * prop_loss
 
@@ -236,29 +238,31 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         return loss
 
-    def _compute_loss(
-        self, hazard_logits, latent_state, interval_idx, event, treatment_idx, mask
-    ):
-        batch_size, n_lines, n_intervals = hazard_logits.shape
-
+    def _compute_propensity_loss(self, latent_state, treatment_idx, mask):
+        batch_size, n_lines, _ = latent_state.shape
         treatment_prediction = torch.softmax(
             self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
             dim=-1,
         )
-
         prop_loss = self.propensity_loss_fn(
             treatment_prediction, treatment_idx.view(-1)
         ).view(batch_size, n_lines)
-        prop_loss = (prop_loss * mask).sum() / mask.sum()
+        masked_prop_loss = (prop_loss * mask).sum() / mask.sum()
 
+        return masked_prop_loss
+
+    def _compute_sruvival_loss(self, hazard_logits, interval_idx, event, mask):
+        batch_size, n_lines, _ = hazard_logits.shape
         surv_loss = self.surv_loss_fn(
             hazard_logits.view(-1, hazard_logits.shape[-1]),
             interval_idx.view(-1),
             event.view(-1),
         ).view(batch_size, n_lines)
-        surv_loss = (surv_loss * mask).sum() / mask.sum()
+        masked_surv_loss = (surv_loss * mask).sum() / mask.sum()
+        return masked_surv_loss
 
-        return surv_loss, prop_loss
+    def _compute_loss():
+        pass
 
     def validation_step(self, batch, batch_idx):
         """perform a validation step"""
