@@ -261,9 +261,6 @@ class DynaSurvCausalOnline(L.LightningModule):
         masked_surv_loss = (surv_loss * mask).sum() / mask.sum()
         return masked_surv_loss
 
-    def _compute_loss():
-        pass
-
     def validation_step(self, batch, batch_idx):
         """perform a validation step"""
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
@@ -272,8 +269,9 @@ class DynaSurvCausalOnline(L.LightningModule):
         N_lines = time.shape[1]
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
-        surv_loss, prop_loss = self._compute_loss(
-            hazard_logits, latent_state, interval_idx, event, treatment_idx, mask
+        prop_loss = self._compute_propensity_loss(latent_state, treatment_idx, mask)
+        surv_loss = self._compute_sruvival_loss(
+            hazard_logits, interval_idx, event, mask
         )
         loss = surv_loss - self.lambda_prop_loss * prop_loss
 
