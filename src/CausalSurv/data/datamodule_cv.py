@@ -58,9 +58,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.num_workers = num_workers
         self.final_training = final_training
 
-        self.data = None
         self.ESMEDataset = None
-        self.static_data = None
         self.interval_bounds = None
 
     # ========== Properties ==========
@@ -296,6 +294,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         dataset_length = len(self.ESMEDataset)
         holdout_length = int(self.holdout_size * dataset_length)
 
+        # train/finetuning - RealTest (holdout)
         generator = torch.Generator().manual_seed(self.split_seed)
         self.cv_dataset, self.holdout_dataset = TorchData.random_split(
             self.ESMEDataset,
