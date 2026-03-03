@@ -234,19 +234,23 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
-            "train/survival_loss", surv_loss, prog_bar=True, on_step=True, on_epoch=True
+            "train/survival_loss",
+            surv_loss,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
         )
         self.log(
             "train/propensity_loss",
             prop_loss,
             prog_bar=True,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
         )
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """perform a validation step"""
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
@@ -257,24 +261,37 @@ class DynaSurvCausalOnline(L.LightningModule):
             XPd, X_static, treatment_idx, interval_idx, event, mask
         )
 
-        self.log(
-            "val_loss",
-            loss,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
-        self.log(
-            "val/survival_loss", surv_loss, prog_bar=True, on_step=False, on_epoch=True
-        )
-        self.log(
-            "val/propensity_loss",
-            prop_loss,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        if dataloader_idx == 0:
+            self.log(
+                "val_loss",
+                loss,
+                prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+            )
+        elif dataloader_idx == 1:
+            self.log(
+                "early_stop_loss",
+                loss,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
 
+            self.log(
+                "val/survival_loss",
+                surv_loss,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
+            self.log(
+                "val/propensity_loss",
+                prop_loss,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
         if self.trainer.sanity_checking:
             return loss
 
@@ -346,32 +363,47 @@ class DynaSurvCausalOnline(L.LightningModule):
             self.log(
                 f"val/ci_time_step_{line + 1}",
                 c_index_td,
-                prog_bar=True,
+                prog_bar=False,
                 on_step=False,
                 on_epoch=True,
             )
             self.log(
                 f"val/ibs_time_step_{line + 1}",
                 ibs_line,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
+        if dataloader_idx == 0:
+            self.log(
+                "average_ci",
+                float(np.mean(ci)),
                 prog_bar=True,
                 on_step=False,
                 on_epoch=True,
             )
-
-        self.log(
-            "average_ci",
-            float(np.mean(ci)),
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
-        self.log(
-            "average_ibs",
-            float(np.mean(ibs)),
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+            self.log(
+                "average_ibs",
+                float(np.mean(ibs)),
+                prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+            )
+        elif dataloader_idx == 1:
+            self.log(
+                "early_stop_average_ci",
+                float(np.mean(ci)),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
+            self.log(
+                "early_stop_average_ibs",
+                float(np.mean(ibs)),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
 
         return loss, np.mean(ci), np.mean(ibs)
 

@@ -5,7 +5,7 @@ import lightning as L
 import pandas as pd
 import torch
 import torch.utils.data as TorchData
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 
 from .dataset import ESMEOnlineDataset
 from .utils import pad_sequence_to_length, split_dataframe, transform_time
@@ -319,8 +319,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                 train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
                 train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
 
+                train_idx, early_stop_idx = train_test_split(
+                    train_idx, test_size=0.1, shuffle=True
+                )
+
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
                 self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
+                self.es_dataset = TorchData.Subset(self.ESMEDataset, early_stop_idx)
 
             if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
@@ -337,13 +342,16 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
 
     def val_dataloader(self):
-        return TorchData.DataLoader(
-            self.val_dataset,
-            batch_size=len(self.val_dataset),
-            shuffle=False,
-            num_workers=1,
-            persistent_workers=True,
-        )
+        dataloader_kwargs = {
+            "batch_size": len(self.val_dataset),
+            "shuffle": False,
+            "num_workers": 1,
+            "persistent_workers": True,
+        }
+        return [
+            TorchData.DataLoader(self.val_dataset, **dataloader_kwargs),
+            TorchData.DataLoader(self.es_dataset, **dataloader_kwargs),
+        ]
 
     def test_dataloader(self):
         return TorchData.DataLoader(

@@ -128,15 +128,18 @@ def main(
             callbacks=callbacks,  # type: ignore
             enable_checkpointing=False,
             enable_progress_bar=True,
-            check_val_every_n_epoch=5,
+            check_val_every_n_epoch=1,
         )
 
         trainer.fit(model, datamodule=DataModuleCV)
-        val_res = trainer.validate(model, datamodule=DataModuleCV)[0]
-
-        loss_folds.append(val_res["val_loss"])
-        average_ci_folds.append(val_res["average_ci"])
-        average_ibs_folds.append(val_res["average_ibs"])
+        val_res = trainer.validate(
+            model, datamodule=DataModuleCV
+        )[
+            0
+        ]  # We only care about the first dataloader (the other one is just for early stopping)
+        loss_folds.append(val_res["val_loss/dataloader_idx_0"])
+        average_ci_folds.append(val_res["average_ci/dataloader_idx_0"])
+        average_ibs_folds.append(val_res["average_ibs/dataloader_idx_0"])
 
         wandb.finish()
 
