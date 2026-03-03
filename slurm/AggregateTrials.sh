@@ -7,7 +7,7 @@
 #SBATCH --mem=8G
 #SBATCH --time=00:30:00
 
-module load anaconda3/2024.06/gcc-13.2.0
+module anaconda3/2023.09-0/none-none
 source activate pytorch_env
 
 PROJECT_DIR="/workdir/bensalama/DynaSurv"

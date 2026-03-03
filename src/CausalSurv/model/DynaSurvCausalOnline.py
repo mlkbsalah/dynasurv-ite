@@ -7,9 +7,9 @@ from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
-from CausalSurv.metrics.loss import NLLogisticHazard
-from CausalSurv.model.embedding_C_LSTM_ITE import embed_LSTM_ITE
-from CausalSurv.model.mlp import MLP
+from ..metrics.loss import NLLogisticHazard
+from ..model.embedding_C_LSTM_ITE import embed_LSTM_ITE
+from ..model.mlp import MLP
 
 
 class DynaSurvCausalOnline(L.LightningModule):
@@ -41,18 +41,18 @@ class DynaSurvCausalOnline(L.LightningModule):
         mlpp_hidden_units: list[int],
         mlpsa_hidden_units: list[int],
         mlpprop_hidden_units: list[int],
-        init_h_dropout: float,
-        init_p_dropout: float,
-        mlpx_dropout: float,
-        mlpp_dropout: float,
-        mlpsa_dropout: float,
-        mlpprop_dropout: float,
-        lambda_prop_loss: float,
         lr: float,
         lr_scheduler_stepsize: int,
         lr_scheduler_gamma: float,
         weight_decay: float,
         attention: bool,
+        init_h_dropout: float = 0,
+        init_p_dropout: float = 0,
+        mlpx_dropout: float = 0,
+        mlpp_dropout: float = 0,
+        mlpsa_dropout: float = 0,
+        mlpprop_dropout: float = 0,
+        lambda_prop_loss: float = 0,
         evaluation_horizon_times: list[float] = [100, 75, 50, 30],
         brier_integration_step: int = 6,
     ):
