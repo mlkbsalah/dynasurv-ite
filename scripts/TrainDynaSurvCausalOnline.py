@@ -50,6 +50,7 @@ def main(
         final_training=True,
     )
 
+    data_module.prepare_data()
     data_dims = data_module.get_data_dimensions()
 
     model = DynaSurvCausalOnline(
