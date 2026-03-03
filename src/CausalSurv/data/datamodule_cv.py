@@ -223,7 +223,9 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         X_static = torch.tensor(
             df_merge.groupby(self.column_map["pat_id"][0])
-            .first()[self.column_map["x_static"]]
+            .first()[
+                self.column_map["x_static"]
+            ]  # it's static and repetitive so taking the first is enough
             .to_numpy(),
             dtype=torch.float32,
         )

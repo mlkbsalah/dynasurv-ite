@@ -4,7 +4,7 @@ import lightning as L
 import torch
 from sksurv.metrics import concordance_index_censored
 
-from ..metrics.loss import NLLogisticHazard
+from ..metrics.survival_loss import NLLogisticHazard
 from ..model.embedding_C_LSTM import embed_LSTM
 from ..model.mlp import MLP
 

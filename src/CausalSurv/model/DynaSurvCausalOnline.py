@@ -8,7 +8,8 @@ from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
-from ..metrics.loss import NLLogisticHazard
+from ..metrics.mmd_loss import MMDLoss
+from ..metrics.survival_loss import NLLogisticHazard
 from ..model.embedding_C_LSTM_ITE import embed_LSTM_ITE
 from ..model.mlp import MLP
 
@@ -118,9 +119,11 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         self.surv_loss_fn = NLLogisticHazard(reduction="none")
         self.propensity_loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+        self.mmd_loss = MMDLoss()
 
         # Optimizer parameters
         self.lambda_prop_loss = lambda_prop_loss
+        self.lambda_ipm_mmd = lambda_ipm_mmd
         self.lr = lr
         self.weight_decay = weight_decay
         self.lr_scheduler_stepsize = lr_scheduler_stepsize
@@ -222,7 +225,12 @@ class DynaSurvCausalOnline(L.LightningModule):
         surv_loss = self._compute_sruvival_loss(
             hazard_logits, interval_idx, event, mask
         )
-        loss = surv_loss - self.lambda_prop_loss * prop_loss
+        ipm_mmd_reg = self._compute_ipm_mmd(latent_state, treatment_idx, mask)
+        loss = (
+            surv_loss
+            - self.lambda_prop_loss * prop_loss
+            + self.lambda_ipm_mmd * ipm_mmd_reg
+        )
 
         # ========= logging =========
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -265,6 +273,20 @@ class DynaSurvCausalOnline(L.LightningModule):
         ).view(batch_size, n_lines)
         masked_surv_loss = (surv_loss * mask).sum() / mask.sum()
         return masked_surv_loss
+
+    def _compute_ipm_mmd(self, latent_state, treatment_idx, mask):
+        z_treatment_groups = [
+            latent_state[treatment_idx == k] for k in range(self.n_treatments)
+        ]
+
+        pairwise_mmd = torch.tensor(0, dtype=torch.float32)
+        for i in range(len(z_treatment_groups)):
+            for j in range(i, len(z_treatment_groups)):
+                pairwise_mmd += self.mmd_loss(
+                    z_treatment_groups[i], z_treatment_groups[j]
+                )
+
+        return pairwise_mmd
 
     def validation_step(self, batch, batch_idx):
         """perform a validation step"""
@@ -333,8 +355,8 @@ class DynaSurvCausalOnline(L.LightningModule):
             if not valid_mask.any():
                 continue
 
-            t_line = time[valid_mask, line]  # (valid_batch, )
-            e_line = event[valid_mask, line].bool()  # (valid_batch, )
+            t_line = time[valid_mask, line]  # (valid_batch, 1)
+            e_line = event[valid_mask, line].bool()  # (valid_batch, 1)
             line_discrete_survival = discrete_survival[
                 valid_mask, line, :
             ]  # (valid_batch, n_intervals + 1)
@@ -346,7 +368,6 @@ class DynaSurvCausalOnline(L.LightningModule):
                 raise ValueError(
                     "IPCW weights cannot be computed before training epoch 0 is completed."
                 )
-
             c_index_td, _ = self.eval_cindex_ipcw(
                 train_events=torch.tensor(
                     self.train_events[line], dtype=torch.bool, device="cpu"
@@ -661,7 +682,7 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         interval_idx = (
             torch.bucketize(eval_time, interval_bounds, right=True) - 1
-        )  # (n_eval_points,)
+        )  # (n_eval_points, )
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
             print(
                 "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."

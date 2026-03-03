@@ -76,6 +76,7 @@ def main(
         mlpsa_dropout=model_config["mlpsa_dropout"],
         mlpprop_dropout=model_config["mlpprop_dropout"],
         lambda_prop_loss=model_config["lambda_prop_loss"],
+        lambda_ipm_mmd=model_config["lambda_ipm_mmd"],
         lr=model_config["lr"],
         weight_decay=model_config["weight_decay"],
         lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
