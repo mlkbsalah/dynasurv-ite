@@ -1,9 +1,9 @@
 [train]
 [train.trainer]
-max_epochs = 300
+max_epochs = 200
 
 [train.early_stopping]
-monitor = "val_loss"
+monitor = "early_stop_loss/dataloader_idx_1"
 mode = "min"
 patience = 50
 
@@ -15,4 +15,4 @@ batch_size = 128
 
 [eval]
 horizon_times = [100, 75, 50, 30] # in months
-integration_step = 6 # the dx in the trapezoidal rule for integrating Brier score over time
+integration_step = 100 # the dx in the trapezoidal rule for integrating Brier score over time

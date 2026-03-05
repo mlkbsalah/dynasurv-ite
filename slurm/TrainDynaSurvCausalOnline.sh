@@ -8,8 +8,8 @@
 #SBATCH --partition=gpu
 
 # Module and env setup
-module load anaconda3/2024.06/gcc-13.2.0
-module load cuda/12.8.0/gcc-13.2.0
+module load anaconda3/2023.09-0/none-none
+module load cuda/13.0.2/none-none
 
 source activate pytorch_env
 

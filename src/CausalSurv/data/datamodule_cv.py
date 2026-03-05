@@ -5,7 +5,7 @@ import lightning as L
 import pandas as pd
 import torch
 import torch.utils.data as TorchData
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 
 from .dataset import ESMEOnlineDataset
 from .utils import pad_sequence_to_length, split_dataframe, transform_time
@@ -16,8 +16,8 @@ FULL_ESME_COLUMN_SCHEME = {
     "p_cols": ["T_treatment_category"],
     "p_static_prefix": "T_",
     "d_cols": ["X_buffer_time"],
-    "time_col": "Y_onset_to_death",
-    "event_col": "Y_death",
+    "time_col": "Y_onset_to_death_in_line",
+    "event_col": "Y_line_death_status",
     "pat_id": ["usubjid"],
     "lineid": ["lineid"],
 }
@@ -58,9 +58,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.num_workers = num_workers
         self.final_training = final_training
 
-        self.data = None
         self.ESMEDataset = None
-        self.static_data = None
         self.interval_bounds = None
 
     # ========== Properties ==========
@@ -141,7 +139,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
     def _load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_dynamic = pd.read_parquet(
             self.data_dir
-            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorized.parquet"
+            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorized_V2.parquet"
         )
         df_static = pd.read_parquet(
             self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"
@@ -296,6 +294,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         dataset_length = len(self.ESMEDataset)
         holdout_length = int(self.holdout_size * dataset_length)
 
+        # train/finetuning - RealTest (holdout)
         generator = torch.Generator().manual_seed(self.split_seed)
         self.cv_dataset, self.holdout_dataset = TorchData.random_split(
             self.ESMEDataset,
@@ -320,8 +319,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                 train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
                 train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
 
+                train_idx, early_stop_idx = train_test_split(
+                    train_idx, test_size=0.1, shuffle=True
+                )
+
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
                 self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
+                self.es_dataset = TorchData.Subset(self.ESMEDataset, early_stop_idx)
 
             if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
@@ -338,13 +342,19 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
 
     def val_dataloader(self):
-        return TorchData.DataLoader(
-            self.val_dataset,
-            batch_size=len(self.val_dataset),
-            shuffle=False,
-            num_workers=1,
-            persistent_workers=True,
-        )
+        dataloader_kwargs = {
+            "batch_size": len(self.val_dataset),
+            "shuffle": False,
+            "num_workers": 1,
+            "persistent_workers": True,
+        }
+        if not self.final_training:
+            return [
+                TorchData.DataLoader(self.val_dataset, **dataloader_kwargs),
+                TorchData.DataLoader(self.es_dataset, **dataloader_kwargs),
+            ]
+        else:
+            return TorchData.DataLoader(self.val_dataset, **dataloader_kwargs)
 
     def test_dataloader(self):
         return TorchData.DataLoader(

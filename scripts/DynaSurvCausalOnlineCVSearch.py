@@ -81,12 +81,6 @@ def main(
             mlpp_hidden_units=model_config["mlpp_hidden_units"],
             mlpsa_hidden_units=model_config["mlpsa_hidden_units"],
             mlpprop_hidden_units=model_config["mlpprop_hidden_units"],
-            init_h_dropout=model_config["init_h_dropout"],
-            init_p_dropout=model_config["init_p_dropout"],
-            mlpx_dropout=model_config["mlpx_dropout"],
-            mlpp_dropout=model_config["mlpp_dropout"],
-            mlpsa_dropout=model_config["mlpsa_dropout"],
-            mlpprop_dropout=model_config["mlpprop_dropout"],
             lambda_prop_loss=model_config["lambda_prop_loss"],
             lr=model_config["lr"],
             weight_decay=model_config["weight_decay"],
@@ -126,16 +120,19 @@ def main(
             logger=logger,
             callbacks=callbacks,  # type: ignore
             enable_checkpointing=False,
-            enable_progress_bar=False,
-            check_val_every_n_epoch=5,
+            enable_progress_bar=True,
+            check_val_every_n_epoch=1,
         )
 
         trainer.fit(model, datamodule=DataModuleCV)
-        val_res = trainer.validate(model, datamodule=DataModuleCV)[0]
-
-        loss_folds.append(val_res["val_loss"])
-        average_ci_folds.append(val_res["average_ci"])
-        average_ibs_folds.append(val_res["average_ibs"])
+        val_res = trainer.validate(
+            model, datamodule=DataModuleCV
+        )[
+            0
+        ]  # We only care about the first dataloader (the other one is just for early stopping)
+        loss_folds.append(val_res["val_loss/dataloader_idx_0"])
+        average_ci_folds.append(val_res["average_ci/dataloader_idx_0"])
+        average_ibs_folds.append(val_res["average_ibs/dataloader_idx_0"])
 
         wandb.finish()
 
@@ -150,41 +147,31 @@ def main(
 
 
 def sample_config():
+    fc_search = [[8, 16, 32, 64, 128]]
     return {
         "n_intervals": random.choice([10, 30, 50, 80, 100]),
         "train_batch_size": random.choice([64, 128, 256, 512]),
-        "lstm_hidden_length": random.choice([16, 32, 64]),
-        "x_embed_dim": random.choice([16, 32, 64]),
-        "p_embed_dim": random.choice([8, 16, 32]),
-        "mlpx_hidden_units": random.choice([[64, 32], [128, 64], [32, 32]]),
-        "mlpp_hidden_units": random.choice([[16], [32], [64]]),
+        "lstm_hidden_length": random.choice([8, 16, 32, 64]),
+        "x_embed_dim": random.choice([16, 32, 64, 128]),  # size around 80
+        "p_embed_dim": random.choice([2, 8, 16, 32]),  # size around 11
+        "mlpx_hidden_units": random.choice(fc_search),
+        "mlpp_hidden_units": random.choice(fc_search),
+        "init_h_hidden": random.choice(fc_search),
+        "init_p_hidden": random.choice(fc_search),
         "mlpsa_hidden_units": random.choice(
             [
+                [16, 16],
                 [32, 32],
                 [64, 64],
-                [128, 128],
-                [32, 64],
-                [64, 32],
-                [128, 64],
-                [32, 64, 128],
-                [64, 64, 128, 256],
             ]
         ),
-        "init_h_hidden": random.choice([[32], [64], [128], [64, 64]]),
-        "init_p_hidden": random.choice([[16], [32], [64], [32, 32]]),
-        "mlpprop_hidden_units": random.choice([[16, 8], [32, 16], [64, 32]]),
+        "mlpprop_hidden_units": random.choice(fc_search),
         "attention": True,
-        "mlpx_dropout": np.random.uniform(0.0, 0.5),
-        "mlpp_dropout": np.random.uniform(0.0, 0.5),
-        "mlpsa_dropout": np.random.uniform(0.0, 0.5),
-        "init_h_dropout": np.random.uniform(0.0, 0.5),
-        "init_p_dropout": np.random.uniform(0.0, 0.5),
-        "mlpprop_dropout": np.random.uniform(0.0, 0.5),
         "lambda_prop_loss": np.random.uniform(0.0, 1.0),
         "lr": 10 ** np.random.uniform(-5, -2),
         "weight_decay": 10 ** np.random.uniform(-6, -2),
-        "lr_scheduler_stepsize": random.choice([50, 100, 200]),
-        "lr_scheduler_gamma": random.choice([0.1, 0.3, 0.6, 0.9]),
+        "lr_scheduler_stepsize": random.choice([10, 30, 50]),
+        "lr_scheduler_gamma": random.choice([0.1, 0.3, 0.6]),
     }
 
 
