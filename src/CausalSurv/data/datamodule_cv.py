@@ -16,8 +16,8 @@ FULL_ESME_COLUMN_SCHEME = {
     "p_cols": ["T_treatment_category"],
     "p_static_prefix": "T_",
     "d_cols": ["X_buffer_time"],
-    "time_col": "Y_onset_to_death",
-    "event_col": "Y_death",
+    "time_col": "Y_onset_to_death_in_line",
+    "event_col": "Y_line_death_status",
     "pat_id": ["usubjid"],
     "lineid": ["lineid"],
 }
@@ -139,7 +139,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
     def _load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_dynamic = pd.read_parquet(
             self.data_dir
-            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorized.parquet"
+            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorized_V2.parquet"
         )
         df_static = pd.read_parquet(
             self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"
@@ -348,10 +348,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             "num_workers": 1,
             "persistent_workers": True,
         }
-        return [
-            TorchData.DataLoader(self.val_dataset, **dataloader_kwargs),
-            TorchData.DataLoader(self.es_dataset, **dataloader_kwargs),
-        ]
+        if not self.final_training:
+            return [
+                TorchData.DataLoader(self.val_dataset, **dataloader_kwargs),
+                TorchData.DataLoader(self.es_dataset, **dataloader_kwargs),
+            ]
+        else:
+            return TorchData.DataLoader(self.val_dataset, **dataloader_kwargs)
 
     def test_dataloader(self):
         return TorchData.DataLoader(

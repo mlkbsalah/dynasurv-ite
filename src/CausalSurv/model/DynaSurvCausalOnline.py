@@ -376,19 +376,25 @@ class DynaSurvCausalOnline(L.LightningModule):
                 on_epoch=True,
             )
 
-        weighted_ibs = np.sum(ibs / np.sum(mask, axis=0))
+        # ic(ibs, (np.sum(mask.cpu().numpy(), axis = 0) / np.sum(mask.cpu().numpy())) )
+
+        n_t = np.sum(mask.cpu().numpy(), axis=0)
+        w = 1 / n_t
+        w = w / w.sum()
+
+        weighted_ibs = np.sum(ibs * w)
 
         if dataloader_idx == 0:
             self.log(
                 "average_ci",
-                float(weighted_ibs),
+                float(np.mean(ci)),
                 prog_bar=True,
                 on_step=False,
                 on_epoch=True,
             )
             self.log(
                 "average_ibs",
-                float(np.mean(ibs)),
+                float(weighted_ibs),
                 prog_bar=True,
                 on_step=False,
                 on_epoch=True,
@@ -403,7 +409,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             )
             self.log(
                 "early_stop_average_ibs",
-                float(np.mean(ibs)),
+                float(weighted_ibs),
                 prog_bar=False,
                 on_step=False,
                 on_epoch=True,
@@ -531,7 +537,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         test_times,
         discrete_survival,
         tmax,
-        device,
+        device=torch.device("cpu"),
     ):
         bs_eval_times = torch.linspace(
             0,
@@ -707,6 +713,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             torch.bucketize(eval_time, interval_bounds, right=True) - 1
         )  # (n_eval_points,)
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
+            print(interval_idx)
             print(
                 "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
             )
