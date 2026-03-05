@@ -62,7 +62,6 @@ def main(
             num_workers=4,
         )
 
-        DataModuleCV.prepare_data()
         data_dims = DataModuleCV.get_data_dimensions()
 
         model = DynaSurvCausalOnline(
@@ -127,7 +126,7 @@ def main(
             logger=logger,
             callbacks=callbacks,  # type: ignore
             enable_checkpointing=False,
-            enable_progress_bar=True,
+            enable_progress_bar=False,
             check_val_every_n_epoch=5,
         )
 
@@ -194,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_id", type=int, required=False, default=0)
     parser.add_argument("--split_seed", type=int, required=True)
     parser.add_argument(
-        "--date", type=str, default=datetime.now().strftime("%d%m%Y_%H%M%S")
+        "--date", type=str, default=datetime.now().strftime("%Y%m%d_%H%M%S")
     )
     parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--fast_dev_run", action="store_true")

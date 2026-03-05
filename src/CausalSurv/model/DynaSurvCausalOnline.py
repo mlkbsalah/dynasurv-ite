@@ -434,13 +434,13 @@ class DynaSurvCausalOnline(L.LightningModule):
         device,
     ):
         cumhazards = self.eval_factual_cumhazard(
-            discrete_cumhazards, test_times.squeeze(), device
+            discrete_cumhazards, test_times, device
         )  # (valid_batch, n_intervals + 1)
 
         ci_ipcw_weights = get_ipcw(
-            event=train_events.squeeze(),
-            time=train_times.squeeze(),
-            new_time=test_times.squeeze(),
+            event=train_events,
+            time=train_times,
+            new_time=test_times,
         )
 
         ci_fun = ConcordanceIndex()
@@ -475,8 +475,8 @@ class DynaSurvCausalOnline(L.LightningModule):
         )  # (valid_batch, n_intervals + 1)
 
         bs_ipcw_weights = get_ipcw(
-            event=train_events.squeeze(),
-            time=train_times.squeeze(),
+            event=train_events,
+            time=train_times,
             new_time=bs_eval_times,
         )
 
