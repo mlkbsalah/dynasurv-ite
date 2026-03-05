@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Tuple
 
 import lightning as L
@@ -32,20 +33,20 @@ class DynaSurvCausalOnline(L.LightningModule):
         n_treatments: int,
         output_length: int,
         interval_bounds: torch.Tensor,
-        lstm_hidden_length: int,
-        x_embed_dim: int,
-        p_embed_dim: int,
-        init_h_hidden: list[int],
-        init_p_hidden: list[int],
-        mlpx_hidden_units: list[int],
-        mlpp_hidden_units: list[int],
-        mlpsa_hidden_units: list[int],
-        mlpprop_hidden_units: list[int],
-        lr: float,
-        lr_scheduler_stepsize: int,
-        lr_scheduler_gamma: float,
-        weight_decay: float,
-        attention: bool,
+        lstm_hidden_length: int = 128,
+        x_embed_dim: int = 64,
+        p_embed_dim: int = 16,
+        init_h_hidden: list[int] = [32],
+        init_p_hidden: list[int] = [32],
+        mlpx_hidden_units: list[int] = [128],
+        mlpp_hidden_units: list[int] = [32],
+        mlpsa_hidden_units: list[int] = [64, 64, 64],
+        mlpprop_hidden_units: list[int] = [64, 32],
+        lr: float = 1e-5,
+        lr_scheduler_stepsize: int = 20,
+        lr_scheduler_gamma: float = 0.3,
+        weight_decay: float = 0.05,
+        attention: bool = True,
         init_h_dropout: float = 0,
         init_p_dropout: float = 0,
         mlpx_dropout: float = 0,
@@ -374,10 +375,13 @@ class DynaSurvCausalOnline(L.LightningModule):
                 on_step=False,
                 on_epoch=True,
             )
+
+        weighted_ibs = np.sum(ibs / np.sum(mask, axis=0))
+
         if dataloader_idx == 0:
             self.log(
                 "average_ci",
-                float(np.mean(ci)),
+                float(weighted_ibs),
                 prog_bar=True,
                 on_step=False,
                 on_epoch=True,
@@ -405,7 +409,41 @@ class DynaSurvCausalOnline(L.LightningModule):
                 on_epoch=True,
             )
 
-        return loss, np.mean(ci), np.mean(ibs)
+        return loss, np.mean(ci), weighted_ibs
+
+    def fit_censoring_estimator(self, train_loader):
+        """
+        Extract train times and events from the training loader and store them
+        for IPCW computation during validation/test evaluation.
+        Call once after training or before test evaluation.
+        """
+        all_times = defaultdict(list)
+        all_events = defaultdict(list)
+
+        for batch in train_loader:
+            (
+                XPd,
+                X_static,
+                interval_idx,
+                treatment_idx,
+                time,
+                event,
+                mask,
+                patient_id,
+            ) = batch
+            N_lines = time.shape[1]
+
+            for line in range(N_lines):
+                valid_mask = mask[:, line].bool()
+                if not valid_mask.any():
+                    continue
+                all_times[line].append(time[valid_mask, line].cpu().numpy())
+                all_events[line].append(event[valid_mask, line].cpu().numpy())
+
+        self.train_times = {line: np.concatenate(all_times[line]) for line in all_times}
+        self.train_events = {
+            line: np.concatenate(all_events[line]).astype(bool) for line in all_events
+        }
 
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx)
@@ -525,18 +563,89 @@ class DynaSurvCausalOnline(L.LightningModule):
         return ibs, bs_val, bs_ipcw_weights
 
     # ====================== Inference methods ============================
-    def predict(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return a tuple of (hazards, survivals) for all treatments and time steps.
+    def predict(
+        self, XPd, X_static, gather: bool = False, factual_idx: None = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return a tuple of (hazards, survivals) for all time steps.
 
         Args:
             XPd: (batch, n_lines, features)
             X_static: ( (batch, x_static_dim), (batch, p_static_dim) )
+            gather: boolean, gather at the factual indexes
+            factual_idx: (batch, n_lines)
+
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
                 hazards: (batch, n_lines, n_treatments, n_intervals)
                 survivals: (batch, n_lines, n_treatments, n_intervals)
         """
-        return (torch.zeros(1), torch.zeros(1))  # Placeholder
+        kwargs = {"XPd": XPd, "X_static": X_static}
+        if gather:
+            if factual_idx is None:
+                raise RuntimeError(
+                    "Setting gather to True requires factual index but None was given"
+                )
+            kwargs.update({"gather": gather, "factual_idx": factual_idx})
+        return (
+            self.predict_discrete_hazard(**kwargs),
+            self.predict_discrete_survival(**kwargs),
+        )
+
+    def predict_discrete_hazard(
+        self,
+        XPd,
+        X_static,
+        gather: bool = False,
+        factual_idx: None = None,
+        cum: bool = False,
+    ) -> torch.Tensor:
+        if gather:
+            if factual_idx is None:
+                raise RuntimeError("gather set to true with no treatment idx")
+
+            discrete_hazards = torch.sigmoid(
+                self.get_factual_predictions(XPd, X_static, factual_idx)[0]
+            )  # (batch, n_lines, n_intervals)
+
+        else:
+            discrete_hazards = torch.sigmoid(
+                self.forward(XPd, X_static)[0]
+            )  # (batch, n_lines, n_treatments, n_intervals)
+
+        discrete_hazards = torch.cat(
+            [torch.zeros_like(discrete_hazards[..., :1]), discrete_hazards],
+            dim=-1,
+        )  # (batch, n_lines, n_intervals + 1)/(batch, n_lines, n_treatments, n_intervals + 1) to account for H(0)=0
+
+        if cum:
+            discrete_cumhazards = torch.cumsum(discrete_hazards, dim=-1)
+
+            return discrete_cumhazards
+        else:
+            return discrete_hazards
+
+    def predict_discrete_survival(
+        self, XPd, X_static, gather: bool = False, factual_idx: None = None
+    ):
+        if gather:
+            if factual_idx is None:
+                raise RuntimeError("gather set to true with no treatment idx")
+
+            discrete_hazards = torch.sigmoid(
+                self.get_factual_predictions(XPd, X_static, factual_idx)[0]
+            )  # (batch, n_lines, n_intervals)
+
+        else:
+            discrete_hazards = torch.sigmoid(
+                self.forward(XPd, X_static)[0]
+            )  # (batch, n_lines, n_treatments, n_intervals)
+
+        discrete_survival = torch.cumprod(1 - discrete_hazards, dim=-1)
+        discrete_survival = torch.cat(
+            [torch.ones_like(discrete_survival[..., :1]), discrete_survival], dim=-1
+        )  # (batch, n_lines, n_intervals + 1)/ (batch, n_lines, n_treatments, n_intervals + 1)to account for S(0)=1
+
+        return discrete_survival
 
     def eval_factual_cumhazard(
         self,
@@ -623,61 +732,3 @@ class DynaSurvCausalOnline(L.LightningModule):
             gamma=self.lr_scheduler_gamma,
         )
         return [optimizer], [scheduler]
-
-
-if __name__ == "__main__":
-    batch_size = 99
-    times_steps = 4
-    x_input_dim = 10
-    p_input_dim = 5
-    output_sa_length = 77
-
-    x_static_dim = 8
-    p_static_dim = 6
-
-    features = x_input_dim + p_input_dim + 1
-    sample_XPd = torch.randn(size=(batch_size, times_steps, features))
-    sample_X_static_general = torch.randn(size=(batch_size, x_static_dim))
-    sample_X_static_treatment = torch.randn(size=(batch_size, p_static_dim))
-    sample_X_static = (sample_X_static_general, sample_X_static_treatment)
-
-    treatment_idx = torch.randint(0, p_input_dim, (batch_size, times_steps))
-
-    model = DynaSurvCausalOnline(
-        x_input_dim=x_input_dim,
-        p_input_dim=p_input_dim,
-        n_treatments=p_input_dim,
-        x_static_dim=x_static_dim,
-        p_static_dim=p_static_dim,
-        output_length=output_sa_length,
-        interval_bounds=torch.linspace(0, 100, steps=output_sa_length + 1),
-        lstm_hidden_length=32,
-        x_embed_dim=16,
-        p_embed_dim=16,
-        init_h_hidden=[32, 16],
-        init_p_hidden=[32, 16],
-        mlpx_hidden_units=[32, 16],
-        mlpp_hidden_units=[32, 16],
-        mlpsa_hidden_units=[32, 16],
-        mlpprop_hidden_units=[32, 16],
-        init_h_dropout=0.1,
-        init_p_dropout=0.1,
-        mlpx_dropout=0.1,
-        mlpp_dropout=0.1,
-        mlpsa_dropout=0.1,
-        mlpprop_dropout=0.1,
-        lambda_prop_loss=0.1,
-        lr=1e-3,
-        weight_decay=1e-5,
-        lr_scheduler_stepsize=50,
-        lr_scheduler_gamma=0.1,
-        attention=True,
-    )
-    hazard_pred = torch.sigmoid(model(sample_XPd, sample_X_static)[0])
-    factual_hazard_pred = torch.sigmoid(
-        model.get_factual_predictions(
-            sample_XPd, sample_X_static, treatment_idx=treatment_idx
-        )[0]
-    )
-    print(f"Input shape: {sample_XPd.shape},\nOutput shape: {hazard_pred.shape}")
-    print(f"Factual hazard shape: {factual_hazard_pred.shape}")
