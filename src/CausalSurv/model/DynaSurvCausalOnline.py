@@ -4,6 +4,9 @@ from typing import Tuple
 import lightning as L
 import numpy as np
 import torch
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
@@ -55,6 +58,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         mlpsa_dropout: float = 0,
         mlpprop_dropout: float = 0,
         lambda_prop_loss: float = 0,
+        lambda_ipm_mmd: float = 0,
         evaluation_horizon_times: list[float] = [100, 75, 50, 30],
         brier_integration_step: int = 6,
     ):
@@ -73,6 +77,8 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         self.evaluation_horizon_times = evaluation_horizon_times
         self.brier_integration_step = brier_integration_step
+
+        self.min_mmd_samples = lstm_hidden_length / 2
 
         self.lstm = embed_LSTM_ITE(
             x_input_dim=self.x_input_dim,
@@ -251,44 +257,7 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         return loss
 
-    def _compute_propensity_loss(self, latent_state, treatment_idx, mask):
-        batch_size, n_lines, _ = latent_state.shape
-        treatment_prediction = torch.softmax(
-            self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
-            dim=-1,
-        )
-        prop_loss = self.propensity_loss_fn(
-            treatment_prediction, treatment_idx.view(-1)
-        ).view(batch_size, n_lines)
-        masked_prop_loss = (prop_loss * mask).sum() / mask.sum()
-
-        return masked_prop_loss
-
-    def _compute_sruvival_loss(self, hazard_logits, interval_idx, event, mask):
-        batch_size, n_lines, _ = hazard_logits.shape
-        surv_loss = self.surv_loss_fn(
-            hazard_logits.view(-1, hazard_logits.shape[-1]),
-            interval_idx.view(-1),
-            event.view(-1),
-        ).view(batch_size, n_lines)
-        masked_surv_loss = (surv_loss * mask).sum() / mask.sum()
-        return masked_surv_loss
-
-    def _compute_ipm_mmd(self, latent_state, treatment_idx, mask):
-        z_treatment_groups = [
-            latent_state[treatment_idx == k] for k in range(self.n_treatments)
-        ]
-
-        pairwise_mmd = torch.tensor(0, dtype=torch.float32)
-        for i in range(len(z_treatment_groups)):
-            for j in range(i, len(z_treatment_groups)):
-                pairwise_mmd += self.mmd_loss(
-                    z_treatment_groups[i], z_treatment_groups[j]
-                )
-
-        return pairwise_mmd
-
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """perform a validation step"""
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
@@ -300,7 +269,12 @@ class DynaSurvCausalOnline(L.LightningModule):
         surv_loss = self._compute_sruvival_loss(
             hazard_logits, interval_idx, event, mask
         )
-        loss = surv_loss - self.lambda_prop_loss * prop_loss
+        ipm_mmd_reg = self._compute_ipm_mmd(latent_state, treatment_idx, mask)
+        loss = (
+            surv_loss
+            - self.lambda_prop_loss * prop_loss
+            + self.lambda_ipm_mmd * ipm_mmd_reg
+        )
 
         if dataloader_idx == 0:
             self.log(
@@ -319,20 +293,28 @@ class DynaSurvCausalOnline(L.LightningModule):
                 on_epoch=True,
             )
 
-            self.log(
-                "val/survival_loss",
-                surv_loss,
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
-            self.log(
-                "val/propensity_loss",
-                prop_loss,
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
+        self.log(
+            "val/survival_loss",
+            surv_loss,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            "val/propensity_loss",
+            prop_loss,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+        )
+
+        self.log(
+            "val/ipm_mmd",
+            ipm_mmd_reg,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+        )
         if self.trainer.sanity_checking:
             return loss
 
@@ -382,6 +364,8 @@ class DynaSurvCausalOnline(L.LightningModule):
             )
             ci.append(c_index_td)
 
+            # ic(t_line)
+
             ibs_line, bs_val_line, bs_ipcw_weights = self.eval_brier_score_ipcw(
                 train_events=torch.tensor(
                     self.train_events[line], dtype=torch.bool, device="cpu"
@@ -393,7 +377,7 @@ class DynaSurvCausalOnline(L.LightningModule):
                 test_times=t_line.cpu(),
                 discrete_survival=line_discrete_survival.cpu(),
                 tmax=self.evaluation_horizon_times[line],
-                device="cpu",
+                device=torch.device("cpu"),
             )
             ibs.append(ibs_line)
 
@@ -453,6 +437,60 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         return loss, np.mean(ci), weighted_ibs
 
+    def _compute_propensity_loss(self, latent_state, treatment_idx, mask):
+        batch_size, n_lines, _ = latent_state.shape
+        treatment_prediction = torch.softmax(
+            self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
+            dim=-1,
+        )
+        prop_loss = self.propensity_loss_fn(
+            treatment_prediction, treatment_idx.view(-1)
+        ).view(batch_size, n_lines)
+        masked_prop_loss = (prop_loss * mask).sum() / mask.sum()
+
+        return masked_prop_loss
+
+    def _compute_sruvival_loss(self, hazard_logits, interval_idx, event, mask):
+        batch_size, n_lines, _ = hazard_logits.shape
+        surv_loss = self.surv_loss_fn(
+            hazard_logits.view(-1, hazard_logits.shape[-1]),
+            interval_idx.view(-1),
+            event.view(-1),
+        ).view(batch_size, n_lines)
+        masked_surv_loss = (surv_loss * mask).sum() / mask.sum()
+        return masked_surv_loss
+
+    def _compute_ipm_mmd(self, latent_state, treatment_idx, mask):
+        pairwise_mmd = torch.tensor(
+            0.0, dtype=torch.float32, device=latent_state.device
+        )
+        n_pairs = 0
+
+        for line in range(latent_state.shape[1]):
+            valid_mask = mask[:, line].bool()
+            if not valid_mask.any():
+                continue
+
+            z_line = latent_state[valid_mask, line, :]
+            t_line = treatment_idx[valid_mask, line]
+
+            valid_treatments = self.valid_treatments_per_line[line]
+            z_groups = {k: z_line[t_line == k] for k in valid_treatments}
+
+            for i, k_i in enumerate(valid_treatments):
+                for k_j in valid_treatments[i:]:
+                    n_i = z_groups[k_i].shape[0]
+                    n_j = z_groups[k_j].shape[0]
+
+                    if n_i < self.min_mmd_samples or n_j < self.min_mmd_samples:
+                        continue
+
+                    weight = min(n_i, n_j) / max(n_i, n_j)
+                    pairwise_mmd += weight * self.mmd_loss(z_groups[k_i], z_groups[k_j])
+                    n_pairs += 1
+
+        return pairwise_mmd / n_pairs if n_pairs > 0 else pairwise_mmd
+
     def fit_censoring_estimator(self, train_loader):
         """
         Extract train times and events from the training loader and store them
@@ -490,6 +528,38 @@ class DynaSurvCausalOnline(L.LightningModule):
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx)
 
+    def compute_treatment_prediction_auc(self, XPd, X_static, treatment_idx, mask):
+        _, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
+        aucs = []
+
+        for line in range(XPd.shape[1]):
+            mask_line = mask[:, line].bool()
+            X = latent_state[mask_line, line].detach().cpu().numpy()
+            y = treatment_idx[mask_line, line].cpu().numpy()
+
+            valid_ks = self.valid_treatments_per_line[line]
+            valid_mask = np.isin(y, valid_ks)
+            X = X[valid_mask]
+            y = y[valid_mask]
+
+            x_train, x_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, stratify=y, random_state=42
+            )
+
+            rfc = RandomForestClassifier(random_state=42)
+            rfc.fit(x_train, y_train)
+
+            rfc_probs = rfc.predict_proba(x_test)
+            auc = roc_auc_score(
+                y_test,
+                rfc_probs,
+                multi_class="ovr",
+                labels=rfc.classes_,
+            )
+            aucs.append(auc)
+
+        return aucs
+
     def _accumulate_data(self, time, event, mask):
         """Collect censoring information for IPCW estimation during epoch 0."""
         if (self.train_times is None) or (self.train_events is None):
@@ -517,14 +587,16 @@ class DynaSurvCausalOnline(L.LightningModule):
         discrete_cumhazards,
         device,
     ):
+        # ic(test_times)
         cumhazards = self.eval_factual_cumhazard(
-            discrete_cumhazards, test_times, device
+            discrete_cumhazards, test_times.squeeze(), device
         )  # (valid_batch, n_intervals + 1)
 
+        # ic(train_events.shape, train_times.shape, test_times.shape)
         ci_ipcw_weights = get_ipcw(
-            event=train_events,
-            time=train_times,
-            new_time=test_times,
+            event=train_events.squeeze(),
+            time=train_times.squeeze(),
+            new_time=test_times.squeeze(),
         )
 
         ci_fun = ConcordanceIndex()
@@ -559,9 +631,9 @@ class DynaSurvCausalOnline(L.LightningModule):
         )  # (valid_batch, n_intervals + 1)
 
         bs_ipcw_weights = get_ipcw(
-            event=train_events,
-            time=train_times,
-            new_time=bs_eval_times,
+            event=train_events.squeeze(),
+            time=train_times.squeeze(),
+            new_time=bs_eval_times.squeeze(),
         )
 
         bs_fun = BrierScore()
@@ -618,7 +690,7 @@ class DynaSurvCausalOnline(L.LightningModule):
                 raise RuntimeError("gather set to true with no treatment idx")
 
             discrete_hazards = torch.sigmoid(
-                self.get_factual_predictions(XPd, X_static, factual_idx)[0]
+                self.forward_factual(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_intervals)
 
         else:
@@ -646,7 +718,7 @@ class DynaSurvCausalOnline(L.LightningModule):
                 raise RuntimeError("gather set to true with no treatment idx")
 
             discrete_hazards = torch.sigmoid(
-                self.get_factual_predictions(XPd, X_static, factual_idx)[0]
+                self.forward_factual(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_intervals)
 
         else:
@@ -680,9 +752,15 @@ class DynaSurvCausalOnline(L.LightningModule):
         eval_time = eval_time.to(device)
         discrete_cumhazards = discrete_cumhazards.to(device)
 
+        # ic(eval_time.shape, discrete_cumhazards.shape)
+
         interval_idx = (
             torch.bucketize(eval_time, interval_bounds, right=True) - 1
         )  # (n_eval_points, )
+
+        # ic(interval_idx)
+
+        # ic(interval_idx.shape)
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
             print(
                 "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
@@ -747,3 +825,19 @@ class DynaSurvCausalOnline(L.LightningModule):
             gamma=self.lr_scheduler_gamma,
         )
         return [optimizer], [scheduler]
+
+    # ====================== Lighrning hooks ======================
+    def _setup_valid_treatments(self):
+        """shared setup for fit and test"""
+        assert hasattr(self.trainer, "datamodule"), (
+            "Trainer does not have a datamodule, make sure to pass it to trainer.fit/test()"
+        )
+        self.valid_treatments_per_line = (
+            self.trainer.datamodule.valid_treatments_per_line
+        )
+
+    def on_fit_start(self) -> None:
+        self._setup_valid_treatments()
+
+    def on_test_start(self) -> None:
+        self._setup_valid_treatments()

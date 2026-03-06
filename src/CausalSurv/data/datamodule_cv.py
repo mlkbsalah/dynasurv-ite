@@ -34,16 +34,17 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         n_intervals: int,
         batch_size: int,
         split_seed: int,
-        columns_scheme: Dict | None = None,
+        min_samples_per_treatment: int = 200,
+        columns_scheme: Dict = FULL_ESME_COLUMN_SCHEME,
         final_training: bool = False,
-        fold_idx: int | None = None,
         num_folds: int | None = None,
-        holdout_size: float = 0.1,
+        fold_idx: int | None = None,
+        holdout_size: float = 0.2,
         num_workers: int = 4,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
-        self.column_scheme = columns_scheme or FULL_ESME_COLUMN_SCHEME
+        self.column_scheme = columns_scheme
         self._subtype = subtype
 
         self.n_lines = n_lines
@@ -57,6 +58,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.holdout_size = holdout_size
         self.num_workers = num_workers
         self.final_training = final_training
+
+        self.min_samples_per_treatment = min_samples_per_treatment
 
         self.ESMEDataset = None
         self.interval_bounds = None
@@ -184,6 +187,27 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         padded_sequences, mask = pad_sequence_to_length(tensor_sequences, target_length)
         return padded_sequences, mask
 
+    def _compute_valid_treatments_per_line(
+        self, treatment_indices: torch.Tensor, mask: torch.Tensor, min_samples: int = 32
+    ) -> dict[int, list[int]]:
+        valid_treatments = {}
+        n_treatments = len(self.treatment_dict)
+
+        for line in range(treatment_indices.shape[1]):
+            valid_mask = mask[:, line].bool()
+            if not valid_mask.any():
+                continue
+            t_line = treatment_indices[valid_mask, line]
+
+            valid = [
+                k
+                for k in range(n_treatments)
+                if (t_line == k).sum().item() >= min_samples
+            ]
+            valid_treatments[line] = valid
+
+        return valid_treatments
+
     def _transform_to_tensor(self, df_merge: pd.DataFrame):
         p_encoded = pd.get_dummies(
             df_merge[
@@ -255,6 +279,10 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
         interval_idx = transform_time(time_padded, interval_bounds)
 
+        valid_treatments_per_line = self._compute_valid_treatments_per_line(
+            treatment_indices, mask, self.min_samples_per_treatment
+        )
+
         return (
             {
                 "X": X_padded,
@@ -270,17 +298,20 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                 "mask": mask,
             },
             interval_bounds,
+            valid_treatments_per_line,
         )
 
     def prepare_data(
         self,
     ) -> None:
-        df_dynamic, df_static = self._load_data()
+        self.df_dynamic, self.df_static = self._load_data()
 
-        self.column_map = self._build_column_map(df_dynamic, df_static)
-        df_merge = self._merge_and_filter(df_dynamic, df_static)
+        self.column_map = self._build_column_map(self.df_dynamic, self.df_static)
+        df_merge = self._merge_and_filter(self.df_dynamic, self.df_static)
 
-        padded_tensor_data, self.interval_bounds = self._transform_to_tensor(df_merge)
+        padded_tensor_data, self.interval_bounds, self.valid_treatments_per_line = (
+            self._transform_to_tensor(df_merge)
+        )
 
         self.ESMEDataset = ESMEOnlineDataset(
             **padded_tensor_data,

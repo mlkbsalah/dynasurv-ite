@@ -64,6 +64,7 @@ def main(
         mlpsa_hidden_units=model_config["mlpsa_hidden_units"],
         mlpprop_hidden_units=model_config["mlpprop_hidden_units"],
         lambda_prop_loss=model_config["lambda_prop_loss"],
+        lambda_ipm_mmd=model_config["lambda_ipm_loss"],
         lr=model_config["lr"],
         weight_decay=model_config["weight_decay"],
         lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
@@ -107,12 +108,12 @@ def main(
     logger = WandbLogger(
         project=f"DynaSurvCausalOnline_{data_config['subtype']}_{data_config['n_lines']}lines_new_inline_outcome",
         name=f"seed_{split_seed}_{date}",
-        save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/seed_{split_seed}_{date}",
+        save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}",
     )
 
     trainer = L.Trainer(
         max_epochs=train_config["trainer"]["max_epochs"],
-        accelerator="gpu",
+        accelerator="cpu",
         devices=1,
         logger=logger,
         callbacks=callbacks,

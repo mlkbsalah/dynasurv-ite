@@ -2,11 +2,19 @@ import torch
 import torch.nn as nn
 
 
+def pairwise_distances(X):
+    dot = torch.mm(X, X.t())
+    sq = (X * X).sum(dim=1)
+    distances = sq.unsqueeze(1) + sq.unsqueeze(0) - 2 * dot
+    return distances.clamp(min=0)
+
+
 class RBF(nn.Module):
     def __init__(self, n_kernels=5, mul_factor=2.0, bandwidth=None):
         super().__init__()
-        self.bandwidth_multipliers = mul_factor ** (
-            torch.arange(n_kernels) - n_kernels // 2
+        self.register_buffer(
+            "bandwidth_multipliers",
+            mul_factor ** (torch.arange(n_kernels) - n_kernels // 2),
         )
         self.bandwidth = bandwidth
 
@@ -19,12 +27,14 @@ class RBF(nn.Module):
 
     def forward(self, X):
         L2_distances = torch.cdist(X, X) ** 2
-        return torch.exp(
+        val = torch.exp(
             -L2_distances[None, ...]
             / (self.get_bandwidth(L2_distances) * self.bandwidth_multipliers)[
                 :, None, None
             ]
         ).sum(dim=0)
+        # ic(val)
+        return val
 
 
 class MMDLoss(nn.Module):
@@ -34,9 +44,10 @@ class MMDLoss(nn.Module):
 
     def forward(self, X, Y):
         K = self.kernel(torch.vstack([X, Y]))
-
+        # ic(K)
         X_size = X.shape[0]
         XX = K[:X_size, :X_size].mean()
         XY = K[:X_size, X_size:].mean()
         YY = K[X_size:, X_size:].mean()
+        # ic(XX, XY, YY)
         return XX - 2 * XY + YY
