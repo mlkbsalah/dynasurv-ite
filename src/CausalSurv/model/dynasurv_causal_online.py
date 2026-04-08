@@ -11,6 +11,7 @@ from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
+from ..metrics.emd_loss import EMDLoss
 from ..metrics.mmd_loss import MMDLoss
 from ..metrics.survival_loss import NLLogisticHazard
 from ..model.embedding_C_LSTM_ITE import embed_LSTM_ITE
@@ -59,6 +60,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         mlpprop_dropout: float = 0,
         lambda_prop_loss: float = 0,
         lambda_ipm_mmd: float = 0,
+        lambda_ipm_emd2: float = 0,
         evaluation_horizon_times: list[float] = [100, 75, 50, 30],
         brier_integration_step: int = 6,
     ):
@@ -126,10 +128,12 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.surv_loss_fn = NLLogisticHazard(reduction="none")
         self.propensity_loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
         self.mmd_loss = MMDLoss()
+        self.emd2_loss = EMDLoss()
 
         # Optimizer parameters
         self.lambda_prop_loss = lambda_prop_loss
         self.lambda_ipm_mmd = lambda_ipm_mmd
+        self.lambda_ipm_emd2 = lambda_ipm_emd2
         self.lr = lr
         self.weight_decay = weight_decay
         self.lr_scheduler_stepsize = lr_scheduler_stepsize
@@ -237,6 +241,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             - self.lambda_prop_loss * prop_loss
             + self.lambda_ipm_mmd * ipm_mmd_reg
         )
+        # ipm_wass_reg = self.compute_ipm_w2(latent_state, treatment_idx, mask)
 
         # ========= logging =========
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -250,6 +255,14 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.log(
             "train/propensity_loss",
             prop_loss,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+        )
+
+        self.log(
+            "train/ipm_reg",
+            ipm_mmd_reg,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
@@ -270,10 +283,12 @@ class DynaSurvCausalOnline(L.LightningModule):
             hazard_logits, interval_idx, event, mask
         )
         ipm_mmd_reg = self._compute_ipm_mmd(latent_state, treatment_idx, mask)
+        imp_emd2_reg = self._compute_ipm_emd2(latent_state, treatment_idx, mask)
         loss = (
             surv_loss
             - self.lambda_prop_loss * prop_loss
             + self.lambda_ipm_mmd * ipm_mmd_reg
+            + self.lambda_ipm_emd2 * imp_emd2_reg
         )
 
         if dataloader_idx == 0:
@@ -311,6 +326,14 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.log(
             "val/ipm_mmd",
             ipm_mmd_reg,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+        )
+
+        self.log(
+            "val/ipm_emd2",
+            imp_emd2_reg,
             prog_bar=True,
             on_step=False,
             on_epoch=True,
@@ -485,11 +508,38 @@ class DynaSurvCausalOnline(L.LightningModule):
                     if n_i < self.min_mmd_samples or n_j < self.min_mmd_samples:
                         continue
 
-                    weight = min(n_i, n_j) / max(n_i, n_j)
-                    pairwise_mmd += weight * self.mmd_loss(z_groups[k_i], z_groups[k_j])
+                    pairwise_mmd += self.mmd_loss(z_groups[k_i], z_groups[k_j])
                     n_pairs += 1
 
         return pairwise_mmd / n_pairs if n_pairs > 0 else pairwise_mmd
+
+    def _compute_ipm_emd2(self, latent_state, treatment_idx, mask):
+        pairwise_w2 = torch.tensor(0.0, dtype=torch.float32, device=latent_state.device)
+        n_pairs = 0
+
+        for line in range(latent_state.shape[1]):
+            valid_mask = mask[:, line].bool()
+            if not valid_mask.any():
+                continue
+
+            z_line = latent_state[valid_mask, line, :]
+            t_line = treatment_idx[valid_mask, line]
+
+            valid_treatments = self.valid_treatments_per_line[line]
+            z_groups = {k: z_line[t_line == k] for k in valid_treatments}
+
+            for i, k_i in enumerate(valid_treatments):
+                for k_j in valid_treatments[i:]:
+                    n_i = z_groups[k_i].shape[0]
+                    n_j = z_groups[k_j].shape[0]
+
+                    if n_i < self.min_mmd_samples or n_j < self.min_mmd_samples:
+                        continue
+
+                    pairwise_w2 += self.emd2_loss(z_groups[k_i], z_groups[k_j])
+                    n_pairs += 1
+
+        return pairwise_w2 / n_pairs if n_pairs > 0 else pairwise_w2
 
     def fit_censoring_estimator(self, train_loader):
         """
@@ -826,7 +876,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         )
         return [optimizer], [scheduler]
 
-    # ====================== Lighrning hooks ======================
+    # ====================== Lightning hooks ======================
     def _setup_valid_treatments(self):
         """shared setup for fit and test"""
         assert hasattr(self.trainer, "datamodule"), (

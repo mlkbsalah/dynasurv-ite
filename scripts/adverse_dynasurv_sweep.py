@@ -2,10 +2,10 @@ import os
 
 import lightning as L
 import tomllib
+from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 from lightning.pytorch.callbacks import EarlyStopping
 
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
-from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 
 
 def load_config(config_path):
@@ -61,8 +61,9 @@ def main(
             mlpp_hidden_units=model_config["mlpp_hidden_units"],
             mlpsa_hidden_units=model_config["mlpsa_hidden_units"],
             mlpprop_hidden_units=model_config["mlpprop_hidden_units"],
-            lambda_prop_loss=0,
-            lambda_ipm_mmd=alpha,
+            lambda_ipm_emd2=0,
+            lambda_prop_loss=alpha,
+            lambda_ipm_mmd=0,
             lr=model_config["lr"],
             weight_decay=model_config["weight_decay"],
             lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
@@ -73,7 +74,7 @@ def main(
         )
 
         trainer = L.Trainer(
-            max_epochs=200,
+            max_epochs=30,
             accelerator="gpu",
             devices=1,
             callbacks=EarlyStopping(
@@ -117,8 +118,8 @@ if __name__ == "__main__":
         eval_config=eval_config,
         data_config=data_config,
         split_seed=split_seed,
-        lambda_ipm=[0.0001, 0.001, 0.01, 0.1, 1.0, 10.0],
+        lambda_ipm=[0, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0],
     )
 
     df = pd.DataFrame(auc_dict)
-    df.to_csv("auc_results_ipm.csv")
+    df.to_csv("auc_results_adverse.csv")

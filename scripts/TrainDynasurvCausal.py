@@ -5,13 +5,11 @@ import lightning as L
 import tomllib
 from lightning.pytorch.callbacks import (
     EarlyStopping,
-    LearningRateMonitor,
-    ModelCheckpoint,
 )
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
-from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
+from CausalSurv.model import DynaSurvCausalOnline
 
 
 def load_config(config_path):
@@ -64,7 +62,8 @@ def main(
         mlpsa_hidden_units=model_config["mlpsa_hidden_units"],
         mlpprop_hidden_units=model_config["mlpprop_hidden_units"],
         lambda_prop_loss=model_config["lambda_prop_loss"],
-        lambda_ipm_mmd=model_config["lambda_ipm_loss"],
+        lambda_ipm_mmd=model_config["lambda_ipm_mmd"],
+        lambda_ipm_emd2=model_config["lambda_ipm_emd2"],
         lr=model_config["lr"],
         weight_decay=model_config["weight_decay"],
         lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
@@ -75,34 +74,34 @@ def main(
     )
 
     callbacks = [
-        LearningRateMonitor(logging_interval="epoch"),
+        #     LearningRateMonitor(logging_interval="epoch"),
         EarlyStopping(
             monitor="val_loss",
             mode=train_config["early_stopping"]["mode"],
             patience=train_config["early_stopping"]["patience"],
             verbose=True,
         ),
-        ModelCheckpoint(
-            monitor="val_loss",
-            mode="min",
-            save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
-            filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
-        ),
-        ModelCheckpoint(
-            monitor="average_ci",
-            mode="max",
-            save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
-            filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
-        ),
-        ModelCheckpoint(
-            monitor="average_ibs",
-            mode="min",
-            save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
-            filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
-        ),
+        #     ModelCheckpoint(
+        #         monitor="val_loss",
+        #         mode="min",
+        #         save_top_k=1,
+        #         dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+        #         filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
+        #     ),
+        #     ModelCheckpoint(
+        #         monitor="average_ci",
+        #         mode="max",
+        #         save_top_k=1,
+        #         dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+        #         filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
+        #     ),
+        #     ModelCheckpoint(
+        #         monitor="average_ibs",
+        #         mode="min",
+        #         save_top_k=1,
+        #         dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+        #         filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
+        #     ),
     ]
 
     logger = WandbLogger(
