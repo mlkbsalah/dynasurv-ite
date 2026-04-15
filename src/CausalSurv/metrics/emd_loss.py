@@ -11,6 +11,6 @@ class EMDLoss(nn.Module):
         a = torch.ones(x.shape[0]) / x.shape[0]
         b = torch.ones(y.shape[0]) / y.shape[0]
         M = ot.dist(x, y)
-        ot_dist = ot.emd2(a, b, M, log=False)
+        ot_dist = ot.bregman.sinkhorn(a, b, M, reg=0.1)
 
         return ot_dist
