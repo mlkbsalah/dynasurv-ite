@@ -1,0 +1,76 @@
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    node distance=2.0cm and 3.0cm,
+    arr/.style={-{Stealth}, thick},
+    every node/.style={circle, draw, fill=gray!40, minimum size=1.1cm, font=\small},
+]
+
+    % --- Row 1: O nodes (top) --- OS: terminal
+    \node (O1) {$O_{k-1}$};
+    \node[right=of O1] (O2) {$O_{k}$};
+    \node[right=of O2] (O3) {$O_{k+1}$};
+
+    % --- Row 2: P nodes --- PFS: feeds into next state
+    \node[below=of O1] (P1) {$P_{k-1}$};
+    \node[below=of O2] (P2) {$P_{k}$};
+    \node[below=of O3] (P3) {$P_{k+1}$};
+
+    % --- Row 3: A nodes ---
+    \node[below=of P1] (A1) {$A_{k-1}$};
+    \node[below=of P2] (A2) {$A_{k}$};
+    \node[below=of P3] (A3) {$A_{k+1}$};
+
+    % --- Row 4: X nodes (bottom) ---
+    \node[below=of A1] (X1) {$X_{k-1}$};
+    \node[below=of A2] (X2) {$X_{k}$};
+    \node[below=of A3] (X3) {$X_{k+1}$};
+
+    % --- Within-column edges ---
+    % X -> A -> P, X -> A -> O
+    \draw[arr] (X1) -- (A1);
+    \draw[arr] (A1) -- (P1);
+    \draw[arr] (A1) to[bend left=20] (O1);
+    \draw[arr] (X1) to[bend right=45] (P1);
+    \draw[arr] (X1) to[bend right=60] (O1);
+    \draw[arr] (P1) -- (O1);  % progression influences OS
+
+    \draw[arr] (X2) -- (A2);
+    \draw[arr] (A2) -- (P2);
+    \draw[arr] (A2) to[bend left=20] (O2);
+    \draw[arr] (X2) to[bend right=45] (P2);
+    \draw[arr] (X2) to[bend right=60] (O2);
+    \draw[arr] (P2) -- (O2);
+
+    \draw[arr] (X3) -- (A3);
+    \draw[arr] (A3) -- (P3);
+    \draw[arr] (A3) to[bend left=20] (O3);
+    \draw[arr] (X3) to[bend right=45] (P3);
+    \draw[arr] (X3) to[bend right=60] (O3);
+    \draw[arr] (P3) -- (O3);
+
+    % --- Horizontal: X -> X ---
+    \draw[arr] (X1) -- (X2);
+    \draw[arr] (X2) -- (X3);
+
+    % --- Horizontal: A -> A ---
+    \draw[arr] (A1) -- (A2);
+    \draw[arr] (A2) -- (A3);
+
+    % --- A -> X (treatment shapes next state) ---
+    \draw[arr] (A1) -- (X2);
+    \draw[arr] (A2) -- (X3);
+
+    % --- P -> X (progression triggers next line, updates state) ---
+    \draw[arr] (P1) to[bend left=15] (X2);
+    \draw[arr] (P2) to[bend left=15] (X3);
+
+    % --- O has no outgoing edges (terminal) ---
+
+\end{tikzpicture}
+\caption{Sequential causal structure over treatment lines. $X_k$ is the patient state,
+$A_k$ the treatment, $P_k$ the progression-free survival, and $O_k$ the overall survival
+at line $k$. $O_k$ is terminal (death); $P_k$ feeds into the next state as progression
+triggers the next treatment line.}
+\label{fig:dag}
+\end{figure}
