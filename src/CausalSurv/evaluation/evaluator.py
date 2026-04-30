@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 from prettytable import PrettyTable
+from sksurv.nonparametric import kaplan_meier_estimator
 
 from CausalSurv.data import ESMEOnlineDataModuleCV
 from CausalSurv.model import DynaSurvCausalOnline
@@ -293,3 +294,124 @@ class DynasurvEvaluator:
             plt.show()
 
         return
+
+    def treatment_calibration_KM(self, save_plots=False):
+        assert isinstance(self._model, DynaSurvCausalOnline)
+        N_LINES = self._datamodule.n_lines
+
+        (
+            XPd,
+            X_static,
+            interval_idx,
+            treatment_indices,
+            time,
+            event,
+            mask,
+            patient_id,
+        ) = next(iter(self._test_dataloader))
+
+        disc_surv = self._model.predict_discrete_survival(
+            XPd, X_static, gather=True, factual_idx=treatment_indices
+        )
+
+        for line in range(N_LINES):
+            fig, axis = plt.subplots(
+                nrows=1,
+                ncols=(len(self._datamodule.valid_treatments_per_line[line])),
+                figsize=(5 * len(self._datamodule.valid_treatments_per_line[line]), 4),
+            )
+            valid_mask = mask[:, line] == 1
+            if not valid_mask.any():
+                continue
+
+            line_surv = disc_surv[valid_mask, line, :]
+            t_line = treatment_indices[valid_mask, line]
+            time_line = time[valid_mask, line]
+            event_line = event[valid_mask, line]
+
+            i = 0
+            for treatment_k in self._datamodule.treatment_dict.keys():
+                if treatment_k in self._datamodule.valid_treatments_per_line[line]:
+                    ax = axis[i]
+                    treatment_mask = t_line == treatment_k
+                    u_times, surv_probs = kaplan_meier_estimator(
+                        event_line[treatment_mask].numpy().astype(bool).squeeze(),
+                        time_line[treatment_mask].numpy().squeeze(),
+                    )
+
+                    avg_pred_surv = line_surv[treatment_mask].mean(dim=0).cpu().numpy()
+
+                    ax.plot(
+                        avg_pred_surv,
+                        label=f"Predicted - {self._datamodule.treatment_dict[treatment_k]} (N={treatment_mask.sum()})",
+                    )
+                    ax.step(
+                        u_times,
+                        surv_probs,
+                        where="post",
+                        label=f"{self._datamodule.treatment_dict[treatment_k]}",
+                    )
+                    ax.set_title(
+                        f"Line {line + 1} - Treatment: {self._datamodule.treatment_dict[treatment_k]}"
+                    )
+                    ax.set_xlabel("Time")
+                    ax.set_ylabel("Survival Probability")
+                    ax.legend()
+                    i += 1
+            plt.suptitle(
+                f"Predicted Survival vs Kaplan-Meier Estimate - Line {line + 1}"
+            )
+            plt.tight_layout()
+            if save_plots:
+                plt.savefig(
+                    f"predicted_survival_vs_kaplan_meier_line_{line + 1}.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+            plt.show()
+
+    def average_km(self):
+        assert isinstance(self._model, DynaSurvCausalOnline)
+        N_LINES = self._datamodule.n_lines
+
+        (
+            XPd,
+            X_static,
+            interval_idx,
+            treatment_indices,
+            time,
+            event,
+            mask,
+            patient_id,
+        ) = next(iter(self._test_dataloader))
+
+        disc_surv = self._model.predict_discrete_survival(
+            XPd, X_static, gather=True, factual_idx=treatment_indices
+        )
+
+        figure, axis = plt.subplots(nrows=1, ncols=N_LINES, figsize=(5 * N_LINES, 4))
+        for line in range(N_LINES):
+            ax = axis[line]
+            valid_mask = mask[:, line] == 1
+            if not valid_mask.any():
+                continue
+
+            line_surv = disc_surv[valid_mask, line, :]
+            time_line = time[valid_mask, line]
+            event_line = event[valid_mask, line]
+
+            u_times, surv_probs = kaplan_meier_estimator(
+                event_line.numpy().astype(bool).squeeze(),
+                time_line.numpy().squeeze(),
+            )
+
+            avg_pred_surv = line_surv.mean(dim=0).cpu().numpy()
+            ax.plot(avg_pred_surv, label=f"Predicted - Line {line + 1}")
+            ax.step(u_times, surv_probs, where="post", label="Kaplan-Meier")
+            ax.set_title(f"Line {line + 1}")
+            ax.set_xlabel("Time")
+            ax.set_ylabel("Survival Probability")
+            ax.legend()
+        plt.suptitle("Average Predicted Survival vs Kaplan-Meier Estimate")
+        plt.tight_layout()
+        plt.show()
