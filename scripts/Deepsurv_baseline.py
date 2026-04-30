@@ -25,14 +25,14 @@ MAX_LINE = 4
 
 PAT_ID_COL = "usubjid"
 LINE_ID_COL = "lineid"
-TIME_COL = "Y_onset_to_death_in_line"
-EVENT_COL = "Y_line_death_status"
+TIME_COL = "Y_onset_to_death"
+EVENT_COL = "Y_global_death_status"
 
 # Must match DynaSurv configs/config.toml evaluation_horizon_times and brier_integration_step
 EVALUATION_HORIZON_TIMES = [100.0, 75.0, 50.0, 30.0]
 BRIER_INTEGRATION_STEPS = 6
 TEST_SIZE = 0.2
-RANDOM_STATE = 42
+RANDOM_STATE = 2691820962
 N_BOOTSTRAP = 100
 CI_ALPHA = 0.95
 
@@ -61,9 +61,10 @@ def make_data():
         .reset_index(drop=True)
         .copy()
     )
-
+    df_merge = df_dynamic.copy()
     # One-hot encode categorical columns to match ESMEOnlineDataModuleCV encoding
-    feature_prefixes = ("X_", "T_")
+    feature_prefixes = ("X_", "T_treatment_")
+    # feature_prefixes = ("X_")
     cat_cols = [
         c
         for c in df_merge.columns
@@ -76,8 +77,13 @@ def make_data():
 
     Y_col = [TIME_COL, EVENT_COL]
     X_col = [
-        col for col in df_merge.columns if col.startswith("X_") or col.startswith("T_")
+        col
+        for col in df_merge.columns
+        if col.startswith("X_") or col.startswith("T_treatment_")
     ] + [PAT_ID_COL]
+    # X_col = [
+    #     col for col in df_merge.columns if col.startswith("X_") and col != "X_onset_to_progression"
+    # ] + [PAT_ID_COL]
     ic(f"Total features (after encoding): {len(X_col)}")
 
     XY_list = [

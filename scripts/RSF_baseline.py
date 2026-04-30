@@ -3,10 +3,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from icecream import ic
 from joblib import Parallel, delayed
 from prettytable import PrettyTable
 from sklearn.model_selection import train_test_split
-from sksurv.linear_model import CoxnetSurvivalAnalysis
+from sksurv.ensemble import RandomSurvivalForest
 from sksurv.nonparametric import kaplan_meier_estimator
 from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
@@ -30,8 +31,14 @@ EVALUATION_HORIZON_TIMES = [100.0, 75.0, 50.0, 30.0]
 BRIER_INTEGRATION_STEPS = 6
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
-N_BOOTSTRAP = 100
+N_BOOTSTRAP = 30
 CI_ALPHA = 0.95
+
+# RSF hyperparameters (Ishwaran et al. 2008 recommendations)
+N_ESTIMATORS = 500
+MIN_SAMPLES_LEAF = 15  # key regulariser for survival forests
+MAX_FEATURES = "sqrt"
+N_JOBS = -1
 
 
 def make_data():
@@ -47,8 +54,6 @@ def make_data():
         .copy()
     )
 
-    # One-hot encode categorical columns (e.g. T_treatment_category) to match
-    # the pd.get_dummies encoding done in ESMEOnlineDataModuleCV._transform_to_tensor
     feature_prefixes = ("X_", "T_")
     cat_cols = [
         c
@@ -57,14 +62,12 @@ def make_data():
         and df_merge[c].dtype in ("object", "category")
     ]
     if cat_cols:
-        # ic(f"One-hot encoding categorical columns: {cat_cols}")
         df_merge = pd.get_dummies(df_merge, columns=cat_cols, dtype=float)
 
     Y_col = [TIME_COL, EVENT_COL]
     X_col = [
         col for col in df_merge.columns if col.startswith("X_") or col.startswith("T_")
     ] + [PAT_ID_COL]
-    # ic(f"Total features (after encoding): {len(X_col)}")
 
     XY_list = [
         (
@@ -98,11 +101,7 @@ def _to_structured(Y: pd.DataFrame) -> np.ndarray:
 
 
 def _eval_step_fns(step_fns, t_eval: np.ndarray, fill_before: float) -> np.ndarray:
-    """Vectorised evaluation of a list of sksurv StepFunctions at times t_eval.
-
-    Values before the first knot are set to fill_before (1.0 for survival,
-    0.0 for cumhazard). Values after the last knot are held flat.
-    """
+    """Vectorised evaluation of a list of sksurv StepFunctions at times t_eval."""
     n = len(step_fns)
     m = len(t_eval)
     out = np.full((n, m), fill_before, dtype=np.float32)
@@ -158,7 +157,6 @@ def compute_ece(
 
 
 def _bootstrap_single(score_fn, n_test: int, seed: int):
-    """One bootstrap resample — module-level so loky can pickle it."""
     rng = np.random.default_rng(seed)
     idx = rng.integers(0, n_test, size=n_test)
     try:
@@ -168,16 +166,12 @@ def _bootstrap_single(score_fn, n_test: int, seed: int):
 
 
 def bootstrap_ci(score_fn, n_test: int, seed: int = 0):
-    """Percentile bootstrap CI over test-set resamples (parallelised via joblib).
-
-    score_fn(idx) -> tuple[float, ...] accepts a 1-D integer index array drawn
-    with replacement. Returns (lo, hi) each a matching tuple of CI bounds.
-    """
-    raw = Parallel(n_jobs=4)(
+    """Percentile bootstrap CI over test-set resamples (parallelised via joblib)."""
+    raw = Parallel(n_jobs=1, backend="threading")(
         delayed(_bootstrap_single)(score_fn, n_test, seed + i)
         for i in range(N_BOOTSTRAP)
     )
-    arr = np.array([r for r in raw if r is not None])  # (n_valid, n_metrics)
+    arr = np.array([r for r in raw if r is not None])
     lo_pct = (1 - CI_ALPHA) / 2 * 100
     hi_pct = (1 + CI_ALPHA) / 2 * 100
     return (
@@ -190,25 +184,26 @@ def fmt(val: float, lo: float, hi: float) -> str:
     return f"{val:.3f} [{lo:.3f}, {hi:.3f}]"
 
 
-def fit_cox(X: pd.DataFrame, Y: pd.DataFrame):
+def fit_rsf(X: pd.DataFrame, Y: pd.DataFrame):
     feature_cols = [c for c in X.columns if c != PAT_ID_COL]
-    cox = CoxnetSurvivalAnalysis(
-        l1_ratio=0.9, alpha_min_ratio=0.1, fit_baseline_model=True
-    )  # type: ignore[arg-type]
-    cox.fit(X[feature_cols].astype(float), _to_structured(Y))
-    return cox, feature_cols
+    rsf = RandomSurvivalForest(
+        n_estimators=N_ESTIMATORS,
+        min_samples_leaf=MIN_SAMPLES_LEAF,
+        max_features=MAX_FEATURES,
+        oob_score=True,  # out-of-bag C-index for free — useful for monitoring
+        n_jobs=N_JOBS,
+        random_state=RANDOM_STATE,
+        verbose=0,
+    )
+    rsf.fit(X[feature_cols].astype(float), _to_structured(Y))
+    ic(f"RSF OOB C-index: {rsf.oob_score_:.3f}")
+    return rsf, feature_cols
 
 
-def evaluate_cox(
-    cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax, eval_time
+def evaluate_rsf(
+    rsf, feature_cols, y_train_struct, X_test, y_test_struct, tmax, eval_time
 ):
-    """Evaluate a fitted Cox model with the same IPCW C-index and IBS as DynaSurv.
-
-    C-index: time-dependent, IPCW-weighted (matches eval_cindex_ipcw).
-             estimate is the (n_test, n_test) cumhazard matrix H_i(t_j).
-    IBS:     IPCW-weighted over linspace(0, tmax, BRIER_INTEGRATION_STEPS)
-             (matches eval_brier_score_ipcw).
-    """
+    """Evaluate RSF with IPCW C-index, IBS, and ECE — identical protocol to Cox/DeepSurv."""
     train_events = torch.tensor(y_train_struct["event"].copy(), dtype=torch.bool)
     train_times = torch.tensor(y_train_struct["time"].copy(), dtype=torch.float32)
     test_events = torch.tensor(y_test_struct["event"].copy(), dtype=torch.bool)
@@ -216,9 +211,8 @@ def evaluate_cox(
 
     X_test_f = X_test[feature_cols].astype(float)
 
-    # ---- C-index (IPCW, time-dependent) --------------------------------
-    # cumhaz_matrix[i, j] = H_i(t_j), matching DynaSurv's eval_factual_cumhazard
-    cumhaz_fns = cox.predict_cumulative_hazard_function(X_test_f)
+    # ---- C-index (IPCW, time-dependent) ----------------------------------------
+    cumhaz_fns = rsf.predict_cumulative_hazard_function(X_test_f)
     cumhaz_matrix = torch.tensor(
         _eval_step_fns(cumhaz_fns, test_times.numpy(), fill_before=0.0)
     )  # (n_test, n_test)
@@ -234,11 +228,11 @@ def evaluate_cox(
         weight=ci_ipcw_weights,
     ).item()
 
-    # ---- IBS (IPCW) -----------------------------------------------------
+    # ---- IBS (IPCW) -------------------------------------------------------------
     bs_eval_times = torch.linspace(
         0, tmax, steps=BRIER_INTEGRATION_STEPS, dtype=torch.float32
     )
-    surv_fns = cox.predict_survival_function(X_test_f)
+    surv_fns = rsf.predict_survival_function(X_test_f)
     surv_matrix = torch.tensor(
         _eval_step_fns(surv_fns, bs_eval_times.numpy(), fill_before=1.0)
     )  # (n_test, BRIER_INTEGRATION_STEPS)
@@ -256,8 +250,8 @@ def evaluate_cox(
     )
     ibs = bs_fun.integral().item()
 
-    # ---- ECE ---------------------------------------------------------------
-    surv_fns_ece = cox.predict_survival_function(X_test_f)
+    # ---- ECE --------------------------------------------------------------------
+    surv_fns_ece = rsf.predict_survival_function(X_test_f)
     pred_surv_at_t = _eval_step_fns(
         surv_fns_ece, np.array([eval_time]), fill_before=1.0
     )[:, 0]
@@ -307,25 +301,23 @@ if __name__ == "__main__":
         y_train_struct = _to_structured(Y_train)
         y_test_struct = _to_structured(Y_test)
 
-        # ic(f"Line {line_idx + 1}: fitting Cox on {len(X_train)} patients...")
-        cox, feature_cols = fit_cox(X_train, Y_train)
+        ic(f"Line {line_idx + 1}: fitting RSF on {len(X_train)} patients...")
+        rsf, feature_cols = fit_rsf(X_train, Y_train)
 
-        # Point estimates on the full test set
-        c_index, ibs, ece = evaluate_cox(
-            cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax, tmax
+        c_index, ibs, ece = evaluate_rsf(
+            rsf, feature_cols, y_train_struct, X_test, y_test_struct, tmax, tmax
         )
 
-        # Bootstrap CIs (resample test set only, model is fixed)
         def _score(
             idx,
-            _cox=cox,
+            _rsf=rsf,
             _fc=feature_cols,
             _ytr=y_train_struct,
             _Xte=X_test,
             _yte=y_test_struct,
         ):
-            return evaluate_cox(
-                _cox,
+            return evaluate_rsf(
+                _rsf,
                 _fc,
                 _ytr,
                 _Xte.iloc[idx].reset_index(drop=True),
