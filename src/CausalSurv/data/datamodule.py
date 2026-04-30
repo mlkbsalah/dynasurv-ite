@@ -3,12 +3,10 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import lightning as L
-import numpy as np
 import pandas as pd
 import torch
 import torch.utils.data as TorchData
 
-from .dataset import ESMEOnlineDataset
 from .utils import pad_sequence_to_length, split_dataframe, transform_time
 
 FULL_ESME_COLUMN_SCHEME = {
@@ -18,7 +16,7 @@ FULL_ESME_COLUMN_SCHEME = {
     "p_static_prefix": "T_",
     "d_cols": ["X_buffer_time"],
     "time_col": "Y_onset_to_death",
-    "event_col": "Y_death",
+    "event_col": "Y_global_death_status",
     "pat_id": ["usubjid"],
     "lineid": ["lineid"],
 }
@@ -82,17 +80,6 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             raise ValueError("split_seed must be a valid integer.")
         self._split_seed = value
 
-    @property
-    def train_val_test_split(self) -> Sequence[float]:
-        return self._train_val_test_split
-
-    @train_val_test_split.setter
-    def train_val_test_split(self, value: Sequence[float]) -> None:
-        if not isinstance(value, Sequence) or len(value) != 3 or np.sum(value) != 1.0:
-            raise ValueError(
-                "train_val_test_split must be a tuple of three floats that sum to 1."
-            )
-
     # ========= Data Preparation ==========
 
     def _resolve_columns(self, df: pd.DataFrame, spec: list[str] | str) -> list[str]:
@@ -147,7 +134,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
     def _load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_dynamic = pd.read_parquet(
             self.data_dir
-            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorized.parquet"
+            / f"model_entry_imputed_data_{self._subtype}_stable_types_categorizedV2.parquet"
         )
         df_static = pd.read_parquet(
             self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"
@@ -278,22 +265,6 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             interval_bounds,
         )
 
-    def prepare_data(
-        self,
-    ) -> None:
-        df_dynamic, df_static = self._load_data()
-
-        self.column_map = self._build_column_map(df_dynamic, df_static)
-        df_merge = self._merge_and_filter(df_dynamic, df_static)
-
-        padded_tensor_data, self.interval_bounds = self._transform_to_tensor(df_merge)
-
-        self.ESMEDataset = ESMEOnlineDataset(
-            **padded_tensor_data,
-        )
-
-    # ========= Data splitting ==========
-
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
             self.prepare_data()
@@ -358,69 +329,3 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             "output_dim": self.n_intervals,
             "time_bins": self.interval_bounds,
         }
-
-
-if __name__ == "__main__":
-    import time
-
-    data_module = ESMEOnlineDataModuleCV(
-        data_dir="../../../data",
-        subtype="HR+HER2-",
-        n_lines=2,
-        n_intervals=10,
-        batch_size=32,
-        split_seed=12345,
-        train_val_test_split=[0.8, 0.1, 0.1],
-        num_workers=4,
-    )
-    print("DataModule initialized.")
-    start = time.time()
-    data_module.prepare_data()
-    print(f"Data prepared in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    data_module.setup()
-    print(f"DataModule setup complete in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    train_loader = data_module.train_dataloader()
-    print(f"Train DataLoader created in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    val_loader = data_module.val_dataloader()
-    print(f"Validation DataLoader created in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    test_loader = data_module.test_dataloader()
-    print(f"Test DataLoader created in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    batch = next(iter(train_loader))
-    print(f"First batch retrieved in {time.time() - start:.2f} seconds.")
-
-    print("Data dimensions:", data_module.get_data_dimensions())
-    print("Batch contents:")
-    (
-        XPd,
-        (x_static, p_static),
-        interval_idx,
-        treatment_indices,
-        time,
-        event,
-        mask,
-        patient_id,
-    ) = batch
-    print("Batch XPd shape:", XPd.shape, "dtype:", XPd.dtype)
-    print("Batch x_static shape:", x_static.shape, "dtype:", x_static.dtype)
-    print("Batch p_static shape:", p_static.shape, "dtype:", p_static.dtype)
-    print("Batch interval_idx shape:", interval_idx.shape, "dtype:", interval_idx.dtype)
-    print(
-        "Batch treatment_indices shape:",
-        treatment_indices.shape,
-        "dtype:",
-        treatment_indices.dtype,
-    )
-    print("Batch time shape:", time.shape, "dtype:", time.dtype)
-    print("Batch event shape:", event.shape, "dtype:", event.dtype)
-    print("Batch mask shape:", mask.shape, "dtype:", mask.dtype)
-    print("Batch patient_id shape:", patient_id.shape, "dtype:", patient_id.dtype)

@@ -7,7 +7,7 @@ import torch
 import torch.utils.data as TorchData
 from sklearn.model_selection import KFold, train_test_split
 
-from .dataset import ESMEOnlineDataset
+from .dataset_progression import ESMEProgressionOnlineDataset
 from .utils import pad_sequence_to_length, split_dataframe, transform_time
 
 FULL_ESME_COLUMN_SCHEME = {
@@ -18,12 +18,14 @@ FULL_ESME_COLUMN_SCHEME = {
     "d_cols": ["X_buffer_time"],
     "time_col": "Y_onset_to_death",
     "event_col": "Y_global_death_status",
+    "progression_time_col": ["Y_onset_to_progression"],
+    "progression_event_col": ["Y_progression"],
     "pat_id": ["usubjid"],
     "lineid": ["lineid"],
 }
 
 
-class ESMEOnlineDataModuleCV(L.LightningDataModule):
+class ESMEProgressionOnlineDataModuleCV(L.LightningDataModule):
     VALID_SUBTYPES = ["HR+HER2-", "HER2+", "TN"]
 
     def __init__(
@@ -41,6 +43,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         fold_idx: int | None = None,
         holdout_size: float = 0.2,
         num_workers: int = 4,
+        bound_split: str = "uniform",
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -54,6 +57,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.batch_size = batch_size
         self.fold_idx = fold_idx
         self.num_folds = num_folds
+        self.bound_split = bound_split
         self._split_seed = split_seed
         self.holdout_size = holdout_size
         self.num_workers = num_workers
@@ -62,7 +66,9 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.min_samples_per_treatment = min_samples_per_treatment
 
         self.ESMEDataset = None
-        self.interval_bounds = None
+        self.death_bounds = None
+        self.progression_bounds = None
+        self._raw_tensors = None
 
     # ========== Properties ==========
     @property
@@ -134,6 +140,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             "d": self.column_scheme["d_cols"],
             "time": [self.column_scheme["time_col"]],
             "event": [self.column_scheme["event_col"]],
+            "progression_time": self.column_scheme["progression_time_col"],
+            "progression_event": self.column_scheme["progression_event_col"],
             "pat_id": self.column_scheme["pat_id"],
             "lineid": self.column_scheme["lineid"],
         }
@@ -167,6 +175,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             .reset_index(drop=True)
             .copy()
         )
+
+        self.raw_df = df_merge.copy()
         return df_merge
 
     def _split_and_pad(
@@ -245,6 +255,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             df_merge, self.column_map["event"], self.n_lines
         )
 
+        progression_time_padded, _ = self._split_and_pad(
+            df_merge, self.column_map["progression_time"], self.n_lines
+        )
+        progression_event_padded, _ = self._split_and_pad(
+            df_merge, self.column_map["progression_event"], self.n_lines
+        )
+
         X_static = torch.tensor(
             df_merge.groupby(self.column_map["pat_id"][0])
             .first()[
@@ -266,102 +283,204 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         treatment_indices = torch.argmax(P_padded, dim=-1)
 
-        interval_bounds = torch.linspace(
-            0, df_merge[self.column_map["time"][0]].max(), self.n_intervals + 1
-        )
-        event_in_bounds = torch.where(
-            time_padded <= interval_bounds[-1], event_padded, 0
-        )
-        time_in_bounds = torch.where(
-            time_padded <= interval_bounds[-1],
-            time_padded,
-            interval_bounds[-1],
-        )
-        interval_idx = transform_time(time_padded, interval_bounds)
+        return {
+            "X": X_padded,
+            "X_static": X_static,
+            "P": P_padded,
+            "P_static": P_static,
+            "treatment_indices": treatment_indices,
+            "d": d_padded,
+            "time_padded": time_padded,
+            "event_padded": event_padded,
+            "progression_time_padded": progression_time_padded,
+            "progression_event_padded": progression_event_padded,
+            "patient_ids": patient_ids,
+            "mask": mask,
+        }
 
-        valid_treatments_per_line = self._compute_valid_treatments_per_line(
-            treatment_indices, mask, self.min_samples_per_treatment
-        )
-
-        return (
-            {
-                "X": X_padded,
-                "X_static": X_static,
-                "P": P_padded,
-                "P_static": P_static,
-                "treatment_indices": treatment_indices,
-                "d": d_padded,
-                "time": time_in_bounds,
-                "event": event_in_bounds,
-                "interval_idx": interval_idx,
-                "patient_ids": patient_ids,
-                "mask": mask,
-            },
-            interval_bounds,
-            valid_treatments_per_line,
-        )
-
-    def prepare_data(
+    def _build_bounds(
         self,
-    ) -> None:
-        self.df_dynamic, self.df_static = self._load_data()
+        time_padded: torch.Tensor,
+        event_padded: torch.Tensor,
+        progression_time_padded: torch.Tensor,
+        progression_event_padded: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute per-line interval bounds from a (training) subset of patients."""
+        death_bounds_list = []
+        progression_bounds_list = []
+        q = torch.linspace(0, 1, self.n_intervals + 1)
 
+        for line in range(self.n_lines):
+            valid = mask[:, line].bool()
+            t_death = time_padded[valid, line, 0]
+            t_prog = progression_time_padded[valid, line, 0]
+
+            if self.bound_split == "quantile":
+                ev_death = event_padded[valid, line, 0].bool()
+                ev_prog = progression_event_padded[valid, line, 0].bool()
+                line_death_bounds = (
+                    torch.quantile(t_death[ev_death].float(), q)
+                    if ev_death.any()
+                    else torch.linspace(0, t_death.max().item(), self.n_intervals + 1)
+                )
+                line_prog_bounds = (
+                    torch.quantile(t_prog[ev_prog].float(), q)
+                    if ev_prog.any()
+                    else torch.linspace(0, t_prog.max().item(), self.n_intervals + 1)
+                )
+            elif self.bound_split == "uniform":
+                line_death_bounds = torch.linspace(
+                    0, t_death.max().item(), self.n_intervals + 1
+                )
+                line_prog_bounds = torch.linspace(
+                    0, t_prog.max().item(), self.n_intervals + 1
+                )
+            else:
+                raise ValueError(f"Unknown bound_split: {self.bound_split!r}")
+
+            death_bounds_list.append(line_death_bounds)
+            progression_bounds_list.append(line_prog_bounds)
+
+        death_bounds = torch.stack(death_bounds_list, dim=0)  # (n_lines, n_intervals+1)
+        progression_bounds = torch.stack(
+            progression_bounds_list, dim=0
+        )  # (n_lines, n_intervals+1)
+        return death_bounds, progression_bounds
+
+    def _apply_bounds(
+        self,
+        raw_tensors: dict,
+        death_bounds: torch.Tensor,
+        progression_bounds: torch.Tensor,
+    ) -> dict:
+        """Clip times/events to bound range and discretise into intervals."""
+        time_padded = raw_tensors["time_padded"]
+        event_padded = raw_tensors["event_padded"]
+        progression_time_padded = raw_tensors["progression_time_padded"]
+        progression_event_padded = raw_tensors["progression_event_padded"]
+
+        death_max_bc = death_bounds[:, -1].view(1, -1, 1)  # (1, n_lines, 1)
+        prog_max_bc = progression_bounds[:, -1].view(1, -1, 1)  # (1, n_lines, 1)
+
+        death_event_in_bounds = torch.where(
+            time_padded <= death_max_bc, event_padded, torch.zeros_like(event_padded)
+        )
+        death_time_in_bounds = torch.min(time_padded, death_max_bc)
+
+        progression_event_in_bounds = torch.where(
+            progression_time_padded <= prog_max_bc,
+            progression_event_padded,
+            torch.zeros_like(progression_event_padded),
+        )
+        progression_time_in_bounds = torch.min(progression_time_padded, prog_max_bc)
+
+        death_interval = torch.stack(
+            [
+                transform_time(death_time_in_bounds[:, line, :], death_bounds[line])
+                for line in range(self.n_lines)
+            ],
+            dim=1,
+        )
+        progression_interval = torch.stack(
+            [
+                transform_time(
+                    progression_time_in_bounds[:, line, :], progression_bounds[line]
+                )
+                for line in range(self.n_lines)
+            ],
+            dim=1,
+        )
+
+        return {
+            "X": raw_tensors["X"],
+            "X_static": raw_tensors["X_static"],
+            "P": raw_tensors["P"],
+            "P_static": raw_tensors["P_static"],
+            "treatment_indices": raw_tensors["treatment_indices"],
+            "d": raw_tensors["d"],
+            "death_time": death_time_in_bounds,
+            "death_event": death_event_in_bounds,
+            "death_interval": death_interval,
+            "progression_time": progression_time_in_bounds,
+            "progression_event": progression_event_in_bounds,
+            "progression_interval": progression_interval,
+            "patient_ids": raw_tensors["patient_ids"],
+            "mask": raw_tensors["mask"],
+        }
+
+    def prepare_data(self) -> None:
+        self.df_dynamic, self.df_static = self._load_data()
         self.column_map = self._build_column_map(self.df_dynamic, self.df_static)
         df_merge = self._merge_and_filter(self.df_dynamic, self.df_static)
-
-        padded_tensor_data, self.interval_bounds, self.valid_treatments_per_line = (
-            self._transform_to_tensor(df_merge)
-        )
-
-        self.ESMEDataset = ESMEOnlineDataset(
-            **padded_tensor_data,
-        )
+        self._raw_tensors = self._transform_to_tensor(df_merge)
 
     # ========= Data splitting ==========
 
     def setup(self, stage: str | None = None):
-        if self.ESMEDataset is None:
+        if self._raw_tensors is None:
             self.prepare_data()
-            assert self.ESMEDataset is not None
+        assert self._raw_tensors is not None
 
-        dataset_length = len(self.ESMEDataset)
-        holdout_length = int(self.holdout_size * dataset_length)
+        n_patients = len(self._raw_tensors["patient_ids"])
+        holdout_length = int(self.holdout_size * n_patients)
 
-        # train/finetuning - RealTest (holdout)
         generator = torch.Generator().manual_seed(self.split_seed)
-        self.cv_dataset, self.holdout_dataset = TorchData.random_split(
-            self.ESMEDataset,
-            [dataset_length - holdout_length, holdout_length],
-            generator=generator,
+        perm = torch.randperm(n_patients, generator=generator).tolist()
+        cv_idx = perm[: n_patients - holdout_length]
+        holdout_idx = perm[n_patients - holdout_length :]
+
+        if self.final_training:
+            train_idx = cv_idx
+        else:
+            kfold = KFold(
+                n_splits=self.num_folds or 5,
+                shuffle=True,
+                random_state=self.split_seed,
+            )
+            all_splits = list(kfold.split(cv_idx))
+            train_fold_idx, val_fold_idx = all_splits[self.fold_idx]  # type: ignore
+            train_idx = [cv_idx[i] for i in train_fold_idx]
+            val_idx = [cv_idx[i] for i in val_fold_idx]
+            train_idx, early_stop_idx = train_test_split(
+                train_idx, test_size=0.1, shuffle=True, random_state=self.split_seed
+            )
+
+        # Build bounds from training patients only
+        train_sel = torch.tensor(train_idx)
+        raw = self._raw_tensors
+        self.death_bounds, self.progression_bounds = self._build_bounds(
+            raw["time_padded"][train_sel],
+            raw["event_padded"][train_sel],
+            raw["progression_time_padded"][train_sel],
+            raw["progression_event_padded"][train_sel],
+            raw["mask"][train_sel],
         )
+
+        # Apply bounds to all patients, then build the full dataset
+        final_tensors = self._apply_bounds(
+            raw, self.death_bounds, self.progression_bounds
+        )
+        self.valid_treatments_per_line = self._compute_valid_treatments_per_line(
+            final_tensors["treatment_indices"][train_sel],
+            final_tensors["mask"][train_sel],
+            self.min_samples_per_treatment,
+        )
+        self.ESMEDataset = ESMEProgressionOnlineDataset(**final_tensors)
 
         if self.final_training:
             if stage == "fit" or stage is None:
-                self.train_dataset = self.cv_dataset
-                self.val_dataset = self.holdout_dataset
+                self.train_dataset = TorchData.Subset(self.ESMEDataset, cv_idx)
+                self.val_dataset = TorchData.Subset(self.ESMEDataset, holdout_idx)
             if stage == "test" or stage is None:
-                self.test_dataset = self.holdout_dataset
+                self.test_dataset = TorchData.Subset(self.ESMEDataset, holdout_idx)
         else:
             if stage == "fit" or stage is None:
-                kfold = KFold(
-                    n_splits=self.num_folds or 5,
-                    shuffle=True,
-                    random_state=self.split_seed,
-                )
-                all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
-                train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
-                train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
-
-                train_idx, early_stop_idx = train_test_split(
-                    train_idx, test_size=0.1, shuffle=True
-                )
-
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
                 self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
                 self.es_dataset = TorchData.Subset(self.ESMEDataset, early_stop_idx)
-
             if stage == "test" or stage is None:
-                self.test_dataset = self.holdout_dataset
+                self.test_dataset = TorchData.Subset(self.ESMEDataset, holdout_idx)
 
     # ========= DataLoaders ==========
 
@@ -369,7 +488,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         return TorchData.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=False,
+            shuffle=True,
             num_workers=self.num_workers,
             persistent_workers=True,
         )
@@ -395,7 +514,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             batch_size=len(self.test_dataset),
             shuffle=False,
             num_workers=1,
-            persistent_workers=False,
+            persistent_workers=True,
         )
 
     def get_data_dimensions(self):
@@ -412,73 +531,6 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             "p_static_dim": p_static_dim,
             "x_static_dim": x_static_dim,
             "output_dim": self.n_intervals,
-            "time_bins": self.interval_bounds,
+            "death_time_bins": self.death_bounds,
+            "progression_time_bins": self.progression_bounds,
         }
-
-
-if __name__ == "__main__":
-    import time
-
-    data_module = ESMEOnlineDataModuleCV(
-        data_dir="../../../data",
-        subtype="HR+HER2-",
-        n_lines=2,
-        n_intervals=10,
-        batch_size=32,
-        fold_idx=3,
-        num_folds=10,
-        split_seed=12345,
-        holdout_size=0.1,
-        num_workers=4,
-    )
-    print("DataModule initialized.")
-    start = time.time()
-    data_module.prepare_data()
-    print(f"Data prepared in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    data_module.setup()
-    print(f"DataModule setup complete in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    train_loader = data_module.train_dataloader()
-    print(f"Train DataLoader created in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    val_loader = data_module.val_dataloader()
-    print(f"Validation DataLoader created in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    test_loader = data_module.test_dataloader()
-    print(f"Test DataLoader created in {time.time() - start:.2f} seconds.")
-
-    start = time.time()
-    batch = next(iter(train_loader))
-    print(f"First batch retrieved in {time.time() - start:.2f} seconds.")
-
-    print("Data dimensions:", data_module.get_data_dimensions())
-    print("Batch contents:")
-    (
-        XPd,
-        (x_static, p_static),
-        interval_idx,
-        treatment_indices,
-        time,
-        event,
-        mask,
-        patient_id,
-    ) = batch
-    print("Batch XPd shape:", XPd.shape, "dtype:", XPd.dtype)
-    print("Batch x_static shape:", x_static.shape, "dtype:", x_static.dtype)
-    print("Batch p_static shape:", p_static.shape, "dtype:", p_static.dtype)
-    print("Batch interval_idx shape:", interval_idx.shape, "dtype:", interval_idx.dtype)
-    print(
-        "Batch treatment_indices shape:",
-        treatment_indices.shape,
-        "dtype:",
-        treatment_indices.dtype,
-    )
-    print("Batch time shape:", time.shape, "dtype:", time.dtype)
-    print("Batch event shape:", event.shape, "dtype:", event.dtype)
-    print("Batch mask shape:", mask.shape, "dtype:", mask.dtype)
-    print("Batch patient_id shape:", patient_id.shape, "dtype:", patient_id.dtype)
