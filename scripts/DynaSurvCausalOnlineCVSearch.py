@@ -8,11 +8,11 @@ import lightning as L
 import numpy as np
 import tomllib
 import wandb
+from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
-from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
 
 
 def load_config(config_path):
