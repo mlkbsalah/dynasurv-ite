@@ -12,7 +12,7 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
-from CausalSurv.model.DynaSurvCausalOnline import DynaSurvCausalOnline
+from CausalSurv.model import DynaSurvCausalOnline
 
 
 def load_config(config_path):

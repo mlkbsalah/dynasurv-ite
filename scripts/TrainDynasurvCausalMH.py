@@ -5,15 +5,13 @@ import lightning as L
 import tomllib
 from lightning.pytorch.callbacks import (
     EarlyStopping,
-    LearningRateMonitor,
-    # ModelCheckpoint,
 )
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
 
 # from CausalSurv.data import ESMEProgressionOnlineDataModuleCV
-from CausalSurv.model import DynaSurvCausalOnline
+from CausalSurv.model.dynasurv_causal_onlineMH import DynaSurvCausalOnline
 
 
 def load_config(config_path):
@@ -56,8 +54,8 @@ def main(
         p_static_dim=data_dims["p_static_dim"],
         output_length=data_dims["output_dim"],
         interval_bounds=data_dims["time_bins"],
-        # interval_bounds=data_dims["time_bins"],
         n_treatments=data_dims["p_input_dim"],
+        n_lines=data_config["n_lines"],
         lstm_hidden_length=model_config["lstm_hidden_length"],
         x_embed_dim=model_config["x_embed_dim"],
         p_embed_dim=model_config["p_embed_dim"],
@@ -87,7 +85,6 @@ def main(
             patience=train_config["early_stopping"]["patience"],
             verbose=True,
         ),
-        LearningRateMonitor(logging_interval="epoch"),
         #     ModelCheckpoint(
         #         monitor="val_loss",
         #         mode="min",
