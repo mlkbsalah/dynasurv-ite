@@ -4,6 +4,7 @@
 \usepackage{amsfonts}
 \usepackage{amsthm}
 \usepackage{fourier}
+\usepackage{multirow}
 \usepackage{tikz}
 \usepackage[a4paper, margin=.5in]{geometry}
 
@@ -150,6 +151,12 @@ This is the counterfactual overall survival curve at line $k$ under treatment $a
     RMST_a(\tau) = \frac{1}{\tau} \int_{0}^{\tau} S_a(t \mid H_k)\  dt
 \end{align}
 
+\paragraph{Scope of the intervention.}
+The estimand in Equation~\ref{eq:estimand} defines $O_k(a)$ as the potential overall survival time under a \emph{static single-line intervention}: we intervene on $A_k$ only, setting it to $a$, and let the subsequent treatment sequence $A_{k+1:L}$ follow its natural distribution under the observed clinical policy encoded in Equation~\ref{eq:factorization}. Formally, $S_a(t \mid H_k) = \mathbb{P}(O_k(a) > t \mid H_k)$ identifies, under Consistency, Positivity and Sequential Ignorability, from the observational conditional $\mathbb{P}(O_k > t \mid H_k, A_k = a)$ in which the future treatments $A_{k+1:L}$ are \emph{marginalized} rather than fixed. Two consequences of this definition deserve emphasis. First, the estimated effect of setting $A_k = a$ decomposes into a direct pharmacological component and an indirect component mediated by the distribution of subsequent treatments that a line-$k$ decision of $a$ induces. We do not attempt to separate these two channels: isolating the controlled direct effect of $A_k$ on $O_k$ would require sequential ignorability at every future line rather than only at line $k$, together with an explicit model of the state-transition kernel $\mathbb{P}(X_{k+1} \mid H_k, A_k, P_k)$ under every candidate $a$, and a simulator that composes these kernels forward. Because future treatments $A_{k+1:L}$ are descendants of $A_k$ in the causal graph of Figure~\ref{fig:dag} rather than common causes of $A_k$ and $O_k$, the inclusion of the mediated channel does not constitute confounding: the estimator targets the \emph{total} effect of setting $A_k = a$, of which the indirect pathway through future care is a legitimate component. Second, and more importantly, this composite effect is precisely the quantity that maps onto the clinical decision the model is designed to support. At the onset of line $k$, the clinician commits only to $A_k$; the decisions at lines $k+1, k+2, \ldots$ will be made later, by the same clinical system that generated the training data, on the basis of the patient's future state. The decision-relevant question is therefore not ``what is the effect of $a$ on survival in isolation from all downstream care?''--a quantity no realizable intervention can produce--but ``what survival trajectory follows from choosing $a$ now, given that subsequent care will unfold as it normally does for patients like this one?'' Our estimand answers the second question, and the validity of the resulting recommendation rests on the deployment-time future-treatment policy remaining close to the one observed in the training data.
+
+\paragraph{From single-line recommendation to sequential optimization.}
+The framework developed here is deliberately restricted to single-line recommendation and does not claim to produce a globally optimal treatment sequence. Chaining locally optimal line-by-line recommendations does not in general recover the optimal regime: the choice at line $k$ alters the state distribution $\mathbb{P}(X_{k+1} \mid H_k, A_k, P_k)$, and hence the efficacy of the options available at every subsequent line. A treatment that is suboptimal at line $k$ in the sense of equation~\ref{eq:estimand} may nonetheless lead the patient into a state in which the remaining lines are substantially more effective, and the reverse situation is equally possible. Formalizing this trade-off requires moving from a single-line estimand to a dynamic treatment regime: one seeks a policy $\pi^{*} : H_k \mapsto \mathcal{A}$ maximizing a cumulative objective such as total RMST over the remaining horizon, which can be obtained by backward induction on the line index (Q-learning, G-estimation of structural nested mean models) or, when the state space is richer, by off-policy reinforcement learning over the full patient trajectory. Both approaches require strictly stronger identifying assumptions--sequential ignorability at every line rather than only at the decision point of interest---and additional modeling components such as an explicit state-transition model under each candidate treatment so that counterfactual trajectories can be simulated forward. The architecture introduced in Section~\ref{sec:model-overview} already provides several of the necessary ingredients: a shared history encoder, per-treatment outcome heads, and progression heads that summarize treatment response. Extending it to a full sequential policy optimizer is a natural direction for future work and is discussed in Section~\textcolor{red}{[discussion]}.
+
 \subsection{Identifiability}
 
 Estimating the effect of a treatment sequence from observational data requires that the interventional distributions of interest be identifiable from the observed data distribution. In the sequential setting, this relies on three standard assumptions.
@@ -194,7 +201,7 @@ This is the key identifying assumption. It states that all confounders of the tr
     \centering
     \includegraphics[width=.6\textwidth]{model_architecture_small.drawio.pdf}
     \label{fig:modelarchi}
-    \caption{Model architecture of the counterfactual survival prediction model \textcolor{red}{First draft figure requires legend and probably color coding of the blocks to distinguish prediction blocks from model ones}}
+    \caption{Model architecture of the counterfactual survival prediction model \textcolor{red}{First draft figure requires legend and probably color coding of the blocks to distinguish prediction blocks from model ones, \warning there is a typo the heads should have O as superscript \warning}}
 \end{figure}
 
 \subsection{Overview}
@@ -313,65 +320,88 @@ This construction has two consequences for the modeling framework. First, the pr
 \subsection{Factual Prediction Quality}
 \label{sec:factual-validation}
 
-We first assess whether the model fits the observational data well, before turning to the harder question of counterfactual validity. At each treatment line $k$, every patient in the test set has an observed treatment $A_{i,k}$, an observed outcome $(O_{i,k}, \delta^O_{i,k})$, and a model prediction $\hat{S}^O_{A_{i,k}}(t \mid h_{i,k})$ produced by the head corresponding to the actually administered treatment. Factual prediction quality is evaluated by comparing this prediction against the observed survival outcome, using the time-dependent C-index, the integrated Brier score (IBS), and calibration curves. Definitions and formulas for these metrics are deferred to Appendix~\textcolor{red}{[ref]}.
+We first assess whether the model fits the observational data well, before turning to the harder question of counterfactual validity. At each treatment line $k$, every patient in the test set has an observed treatment $A_{i,k}$, an observed outcome $(O_{i,k}, \delta^O_{i,k})$, and a model prediction $\hat{S}^O_{A_{i,k}}(t \mid h_{i,k})$ produced by the head corresponding to the actually administered treatment. Factual prediction quality is evaluated by comparing this prediction against the observed survival outcome, using the time-dependent C-index, the integrated Brier score (IBS), and expected calibration error (ECE). Definitions and formulas for these metrics are deferred to Appendix~\textcolor{red}{It will be added in the appendix later}.
 
 We compare our model against three external baselines and three ablations of our own architecture, allowing us to isolate the contribution of each design choice:
 
 \begin{itemize}
-    \item \textbf{Cox PH} (per line, fitted independently). A standard Cox proportional hazards model fitted at each line $k$ on the patient state $X_k$ and treatment indicator $A_k$. This is the conventional clinical baseline.
-    \item \textbf{DeepSurv}. A multilayer perceptron applied per-line to the same flat feature vector $[X_k, A_k]$, trained with the logistic hazard loss. This isolates the value of nonlinear modeling without any sequential or causal structure.
-    \item \textbf{TARNet (no LSTM)}. A treatment-specific-head architecture identical to ours but without the sequential encoder, the auxiliary progression head, and the IPM regularizer. This isolates the value of the head structure alone.
-    \item \textbf{Ours, $-$ progression head}. Full model without the auxiliary progression head and without the $\rho^P$ feedback into the encoder.
-    \item \textbf{Ours, $-$ IPM}. Full model with the representation balancing term disabled ($\alpha = 0$).
-    \item \textbf{Ours, $-$ LSTM}. Full model with the LSTM encoder replaced by an MLP applied to the most recent state $X_k$ and previous treatment $A_{k-1}$.
-    \item \textbf{Ours (full)}. The complete architecture described in Section~\ref{sec:model-overview}.
+    \item \textbf{Cox-Net PH} (per line, fitted independently). An Cox proportional hazards model with elastic net regularization fitted at each line $k$ on the patient state $X_k$ and treatment indicator $A_k$. This is the conventional clinical baseline.
+    \item \textbf{DeepSurv (flat history) } \textcolor{red}{Deep learning based cox}. A multilayer perceptron applied per-line to the same flat feature vector $[X_k, A_k]$, trained with the partial likelihood loss. This isolates the value of nonlinear modeling without any sequential or causal structure.
+    \item \textbf{SurvITE}. \textcolor{red}{More recent baselines that will probably be needed} 
+    \item \textbf{TARNet (flat history)}. A treatment-specific-head architecture identical to ours but without the sequential encoder, the auxiliary progression head, and the IPM regularizer. This isolates the value of the head structure alone.
+    \item \textbf{RSF}. A random survival forest model 
+    \item \textbf{Ours}. The complete architecture described in Section~\ref{sec:model-overview}.
 \end{itemize}
 
-All models are trained on the same training split, evaluated on the same held-out test set, and metrics are reported with bootstrap 95\% confidence intervals over \textcolor{red}{$B$ = ?} resamples of the test set.
-
-\paragraph{Headline performance.} Table~\ref{tab:factual-headline} reports the C-index and IBS pooled across all treatment lines. \textcolor{red}{[One sentence stating the headline finding: e.g., the full model achieves a C-index of X (95\% CI [a, b]) and IBS of Y, outperforming the strongest baseline (Z) by W. Each ablation degrades performance, with the largest drop coming from removing the [LSTM / IPM / progression head].]}
+All models are trained on the same training split, evaluated on the same held-out test set, and metrics are reported with bootstrap 95\% confidence intervals over 10 resamples of the test set.
 
 \begin{table}[h]
 \centering
-\begin{tabular}{lcc}
+\begin{tabular}{clccc}
 \hline
-\textbf{Model} & \textbf{C-index $\uparrow$} & \textbf{IBS $\downarrow$} \\
+\textbf{Line} & \textbf{Model} & \textbf{C-index $\uparrow$} & \textbf{IBS $\downarrow$} & \textbf{ECE $\downarrow$} \\
 \hline
-Cox PH                  & \textcolor{red}{.} & \textcolor{red}{.} \\
-DeepSurv                & \textcolor{red}{.} & \textcolor{red}{.} \\
-TARNet (no LSTM)        & \textcolor{red}{.} & \textcolor{red}{.} \\
-Ours, $-$ progression   & \textcolor{red}{.} & \textcolor{red}{.} \\
-Ours, $-$ IPM           & \textcolor{red}{.} & \textcolor{red}{.} \\
-Ours, $-$ LSTM          & \textcolor{red}{.} & \textcolor{red}{.} \\
-\textbf{Ours (full)}    & \textcolor{red}{.} & \textcolor{red}{.} \\
+\multirow{7}{*}{1}
+ & Cox PH                  & 0.578 [0.570, 0.588] & 0.144 [0.142, 0.146] & 0.003 [0.003, 0.020] \\
+ & DeepSurv                & 0.670 [0.660, 0.680] & 0.131 [0.127, 0.134] & 0.043 [0.031, 0.062] \\
+ 
+ & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+ & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\hline
+\multirow{7}{*}{2}
+ & Cox PH                  & 0.558 [0.544, 0.570] & 0.139 [0.135, 0.142] & 0.005 [0.002, 0.019] \\
+ & DeepSurv                & 0.652 [0.641, 0.662] & 0.129 [0.123, 0.134] & 0.072 [0.060, 0.086] \\
+ & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+ & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\hline
+\multirow{7}{*}{3}
+ & Cox PH                  & 0.624 [0.612, 0.637] & 0.149 [0.145, 0.153] & 0.022 [0.012, 0.037] \\
+ & DeepSurv                & 0.652 [0.641, 0.665] & 0.148 [0.141, 0.153] & 0.089 [0.077, 0.106] \\
+ & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+ & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\hline
+\multirow{7}{*}{4}
+ & Cox PH                  & 0.478 [0.464, 0.499] & 0.177 [0.173, 0.181] & 0.005 [0.000, 0.028] \\
+ & DeepSurv                & 0.627 [0.609, 0.643] & 0.182 [0.174, 0.190] & 0.156 [0.137, 0.175] \\
+ & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+ & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
 \hline
 \end{tabular}
-\caption{Factual prediction quality, pooled across treatment lines. Values are mean (95\% CI) over bootstrap resamples of the test set. Higher C-index and lower IBS indicate better performance.}
-\label{tab:factual-headline}
+\caption{Factual prediction quality by treatment line. Values are mean [95\% CI] over bootstrap resamples of the test set.}
+\label{tab:factual-perline}
 \end{table}
 
-\paragraph{Per-line breakdown.} Pooled metrics may obscure systematic differences across decision points. Figure~\ref{fig:factual-perline} reports the C-index and IBS as a function of treatment line for each model. \textcolor{red}{[One sentence on the trend: e.g., performance is highest at line 1 where the patient population is most homogeneous, and decreases at later lines as data become sparser and patient heterogeneity increases. The relative ordering of models is consistent across lines / changes at later lines, suggesting that ...].}
+Table~\ref{tab:factual-perline} reports the C-index, IBS and ECE as a function of treatment line for each model. \textcolor{red}{[One sentence on the trend: e.g., performance is highest at line 1 where the patient population is most homogeneous, and decreases at later lines as data become sparser and patient heterogeneity increases. The relative ordering of models is consistent across lines / changes at later lines, suggesting that ...].}
 
 \begin{figure}[h]
 \centering
 \textcolor{red}{[Figure: two side-by-side panels. Left: C-index vs treatment line, one curve per model with shaded 95\% CI bands. Right: IBS vs treatment line, same layout. x-axis: line index $k = 1, \ldots, K_{\max}$. Vertical dashed line marking the line beyond which sample sizes drop below the reliability threshold, if relevant.]}
-\caption{Factual prediction quality as a function of treatment line. Shaded regions are 95\% bootstrap confidence intervals. Lines beyond \textcolor{red}{$k = ?$} are pooled because per-line sample sizes drop below \textcolor{red}{$N$ = ?}.}
+\caption{Factual prediction quality as a function of treatment line}
 \label{fig:factual-perline}
 \end{figure}
 
-\paragraph{Calibration.} The C-index and IBS summarize discrimination and overall accuracy but do not directly assess whether predicted survival probabilities are well-aligned with observed frequencies. Figure~\ref{fig:calibration} shows calibration curves for the full model at evaluation horizons of \textcolor{red}{$t = ?$ months}. \textcolor{red}{[One sentence: e.g., the model is well-calibrated across the predicted-risk distribution at short horizons, with mild over-prediction in the highest-risk decile at longer horizons. Calibration is uniform / non-uniform across treatment arms.]}
+\paragraph{Calibration.} The C-index and IBS summarize discrimination and overall accuracy but do not directly assess whether predicted survival probabilities are well-aligned with observed frequencies. Figure~\ref{fig:calibration} shows calibration curves at evaluation horizons of $t = 6, 12, 18, 24$ months, stratified by treatment line. Calibration curves at later lines ($k \geq 3$) lie close to the diagonal across the full range of predicted survival. At line~1, however, we observe a systematic upward shift: predicted survival underestimates observed survival with line~2 exhibiting a smaller but qualitatively similar offset. The shift consistent across the four evaluation horizons, indicating a score-level offset.
+
+We attribute this pattern to a distribution-shift effect intrinsic to the shared-encoder design. Patients at line~1 form a healthier subpopulation than those at later lines, since reaching line~$k$ requires having progressed through lines $1, \ldots, k-1$. Because the encoder is shared across all lines, the learned hazard scale reflects an average across line-specific subpopulations and is too pessimistic when applied to the healthier line-1 cohort. The effect attenuates at later lines as their patient distributions move closer to the pooled mean, which matches the gradient observed in Figure~\ref{fig:calibration}.
+
+Well-calibrated absolute probabilities are required for downstream uses of the model, including RMST estimation and clinical reporting. We therefore apply a post-hoc per-line, per-arm isotonic recalibration on a held-out fold; calibration curves after recalibration are reported in \textcolor{red}{isotonic regression appendix}. The recalibration is monotone by construction and therefore preserves all rank-based metrics like C-index.
 
 \begin{figure}[h]
 \centering
-\textcolor{red}{[Figure: calibration curves at 2--3 evaluation horizons. x-axis: predicted survival probability (decile midpoints). y-axis: observed Kaplan--Meier survival probability in each decile. Diagonal reference line. One panel per horizon, or all on one plot with different markers. Optionally faceted by treatment arm to expose treatment-specific miscalibration.]}
-\caption{Calibration of the full model at evaluation horizons \textcolor{red}{$t = ?$}. Each point is a decile of predicted survival; the y-coordinate is the observed Kaplan--Meier estimate within the decile. Perfect calibration corresponds to the diagonal.}
+\includegraphics[width=\linewidth]{figs/output.png}
+\caption{Calibration of the full model at evaluation horizons $t \in \{6, 12, 18, 24\}$ months, stratified by treatment line. Each point is a \textcolor{red}{ventile (code dependant)} of predicted survival on the test set; the $y$-coordinate is the observed Kaplan-Meier estimate within the decile. The diagonal corresponds to perfect calibration.}
+
+% Line~1 exhibits a systematic underestimation of survival; calibration improves with line index, reflecting reduced distribution shift from the pooled training population. Curves before post-hoc recalibration.}
+
 \label{fig:calibration}
 \end{figure}
 
-\paragraph{Summary.} \textcolor{red}{[Two-three sentences. The model achieves [headline performance]. The ablation pattern shows that [which components matter most]. Calibration confirms that probabilistic outputs are reliable enough to support the recommendation analysis in Section~\ref{sec:recommendation}.]}
+% \paragraph{Summary.} \textcolor{red}{[Two-three sentences. The model achieves [headline performance]. The ablation pattern shows that [which components matter most]. Calibration confirms that probabilistic outputs are reliable enough to support the recommendation analysis in Section~\ref{sec:recommendation}.]}
 
 
 
+
+\section{Counterfactual validation}
 
 
 
@@ -383,7 +413,7 @@ Ours, $-$ LSTM          & \textcolor{red}{.} & \textcolor{red}{.} \\
 % \begin{equation}
 %     \widehat{\text{BS}}(t) = \frac{1}{n} \sum_{i=1}^{n} \left[ \frac{\hat{S}^O_{A_{i,k}}(t \mid h_{i,k})^2 \, \mathbf{1}\{O_{i,k} \leq t,\, \delta^O_{i,k} = 1\}}{\hat{G}(O_{i,k})} + \frac{(1 - \hat{S}^O_{A_{i,k}}(t \mid h_{i,k}))^2 \, \mathbf{1}\{O_{i,k} > t\}}{\hat{G}(t)} \right],
 % \end{equation}
-% where $\hat{G}$ is the Kaplan--Meier estimator of the censoring distribution. Lower is better. Reporting the Brier score across a grid of evaluation times $t$ yields a curve that captures prediction quality over the full follow-up horizon; we also report the integrated Brier score (IBS) as a single summary.
+% where $\hat{G}$ is the Kaplan-Meier estimator of the censoring distribution. Lower is better. Reporting the Brier score across a grid of evaluation times $t$ yields a curve that captures prediction quality over the full follow-up horizon; we also report the integrated Brier score (IBS) as a single summary.
 
 % \paragraph{Time-dependent concordance index.} The C-index evaluates discriminative performance: the proportion of comparable patient pairs whose predicted risk ordering agrees with the observed event ordering. We use the time-dependent variant of \textcolor{red}{[Antolini et al., 2005]}, which accounts for the fact that risk rankings can change over time in non-proportional-hazard models:
 % \begin{equation}
@@ -391,7 +421,7 @@ Ours, $-$ LSTM          & \textcolor{red}{.} & \textcolor{red}{.} \\
 % \end{equation}
 % A value of $0.5$ corresponds to random ordering, and $1.0$ to perfect concordance.
 
-% \paragraph{Calibration curves.} The Brier score and C-index are summary statistics; calibration curves visualize whether predicted survival probabilities are well-aligned with observed frequencies across the risk distribution. At a fixed evaluation time $t$, patients are stratified into deciles of predicted survival $\hat{S}^O_{A_{i,k}}(t \mid h_{i,k})$, and within each decile we compare the mean predicted survival to the Kaplan--Meier estimate of the observed survival probability. A perfectly calibrated model lies on the diagonal; deviations above or below indicate systematic over- or under-prediction.
+% \paragraph{Calibration curves.} The Brier score and C-index are summary statistics; calibration curves visualize whether predicted survival probabilities are well-aligned with observed frequencies across the risk distribution. At a fixed evaluation time $t$, patients are stratified into deciles of predicted survival $\hat{S}^O_{A_{i,k}}(t \mid h_{i,k})$, and within each decile we compare the mean predicted survival to the Kaplan-Meier estimate of the observed survival probability. A perfectly calibrated model lies on the diagonal; deviations above or below indicate systematic over- or under-prediction.
 
 % All three metrics are computed on a held-out test set, separately at each treatment line $k$ and pooled across lines, to evaluate whether prediction quality is uniform across decision points or degrades at later lines where data are sparser.
 

@@ -44,3 +44,5 @@ latex/*.synctex.gz
 
 # Optionally ignore PDFs (or track at milestones)
 latex/*.pdf
+latex/figs/
+CLAUDE.md
