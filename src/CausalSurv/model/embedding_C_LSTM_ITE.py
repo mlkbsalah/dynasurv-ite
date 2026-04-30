@@ -25,6 +25,7 @@ class embed_LSTM_ITE(nn.Module):
         mlpp_dropout: float,
         mlpsa_dropout: float,
         attention: bool = False,
+        num_layers: int = 1,
     ):
         """Class constructor
 
@@ -123,6 +124,12 @@ class embed_LSTM_ITE(nn.Module):
 
         # Final hidden activation
         self.activation_final = nn.Tanh()
+
+        # Extra layer projections: h (hidden_length) → x_embed_dim so gate weights are reused
+        self.num_layers = num_layers
+        self.layer_projections = nn.ModuleList(
+            [nn.Linear(hidden_length, x_embed_dim) for _ in range(num_layers - 1)]
+        )
 
         # Output MLP (sa)
         self.mlpsa_hidden_units = mlpsa_hidden_units
@@ -244,6 +251,14 @@ class embed_LSTM_ITE(nn.Module):
         c = self._cell_memory_gate(i, f, x, h_prev, c_prev)
         o = self._out_gate(x, h_prev)
         h = o * self.activation_final(c)
+
+        for proj in self.layer_projections:
+            x = proj(h)
+            i = self._input_gate(x, h)
+            f = self._forget_gate(x, d, h, p)
+            c = self._cell_memory_gate(i, f, x, h, c)
+            o = self._out_gate(x, h)
+            h = o * self.activation_final(c)
 
         sa = self.MLPsa(h)
         return sa, h, c, p

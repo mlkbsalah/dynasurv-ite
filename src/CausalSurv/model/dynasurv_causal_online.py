@@ -39,6 +39,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         output_length: int,
         interval_bounds: torch.Tensor,
         lstm_hidden_length: int = 128,
+        lstm_num_layers: int = 4,
         x_embed_dim: int = 64,
         p_embed_dim: int = 16,
         init_h_hidden: list[int] = [32],
@@ -87,6 +88,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             p_input_dim=self.p_input_dim,
             output_length=self.output_length,
             hidden_length=lstm_hidden_length,
+            num_layers=lstm_num_layers,
             x_embed_dim=x_embed_dim,
             p_embed_dim=p_embed_dim,
             mlpx_hidden_units=mlpx_hidden_units,
@@ -159,8 +161,10 @@ class DynaSurvCausalOnline(L.LightningModule):
         h, c, p = self._init_lstm_states(X_static, XPd.device)
         hazards_logit = []
         latent_state = []
+        x_static, p_static = X_static
 
         for t in range(XPd.shape[1]):
+            # XPd_aug = torch
             logit_t, (h, c, p) = self._step(XPd[:, t, :], (h, c, p))
             hazards_logit.append(logit_t)
             latent_state.append(h)
@@ -186,9 +190,14 @@ class DynaSurvCausalOnline(L.LightningModule):
         """Initialize LSTM hidden, cell, and treatment embedding states."""
         x_static_general, x_static_treatment = X_static
         batch_size = x_static_general.shape[0]
-        h0 = self.init_h_mlp(x_static_general)
+        # h0 = self.init_h_mlp(x_static_general)
+        # c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
+        # p0 = self.init_p_mlp(x_static_treatment)
+
+        h0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
         c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
-        p0 = self.init_p_mlp(x_static_treatment)
+        p0 = torch.zeros(batch_size, self.lstm.p_embed_dim, device=device)
+
         return h0, c0, p0
 
     def forward_factual(
@@ -226,6 +235,14 @@ class DynaSurvCausalOnline(L.LightningModule):
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
+        # (
+        #     XPd, X_static,
+        #     interval_idx, _,
+        #     treatment_idx,
+        #     time, event,
+        #     _, _,
+        #     mask, _,
+        # ) = batch
         if self.current_epoch == 0:
             self._accumulate_data(time, event, mask)
 
@@ -275,6 +292,14 @@ class DynaSurvCausalOnline(L.LightningModule):
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
+        # (
+        #     XPd, X_static,
+        #     interval_idx, _,
+        #     treatment_idx,
+        #     time, event,
+        #     _, _,
+        #     mask, _,
+        # ) = batch
         N_lines = time.shape[1]
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
@@ -561,6 +586,15 @@ class DynaSurvCausalOnline(L.LightningModule):
                 mask,
                 patient_id,
             ) = batch
+
+            # (
+            #     XPd, X_static,
+            #     interval_idx, _,
+            #     treatment_idx,
+            #     time, event,
+            #     _, _,
+            #     mask, _,
+            # ) = batch
             N_lines = time.shape[1]
 
             for line in range(N_lines):
@@ -812,9 +846,9 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         # ic(interval_idx.shape)
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
-            print(
-                "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
-            )
+            # print(
+            #     "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
+            # )
             interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
 
         batch_size = discrete_cumhazards.shape[0]
@@ -849,10 +883,9 @@ class DynaSurvCausalOnline(L.LightningModule):
             torch.bucketize(eval_time, interval_bounds, right=True) - 1
         )  # (n_eval_points,)
         if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
-            print(interval_idx)
-            print(
-                "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
-            )
+            # print(
+            #     "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
+            # )
             interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
 
         batch_size = discrete_survival.shape[0]
