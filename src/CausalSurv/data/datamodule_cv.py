@@ -15,7 +15,7 @@ FULL_ESME_COLUMN_SCHEME = {
     "x_static_prefix": "X_",
     "p_cols": ["T_treatment_category"],
     "p_static_prefix": "T_",
-    "d_cols": ["X_buffer_time"],
+    "d_cols": ["X_time_between_onsets"],
     "time_col": "Y_onset_to_death",
     "event_col": "Y_global_death_status",
     "pat_id": ["usubjid"],
@@ -41,6 +41,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         fold_idx: int | None = None,
         holdout_size: float = 0.2,
         num_workers: int = 4,
+        standardize_continuous: bool = True,
+        binary_threshold: int = 2,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -60,6 +62,11 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.final_training = final_training
 
         self.min_samples_per_treatment = min_samples_per_treatment
+
+        self.standardize_continuous = standardize_continuous
+        self.binary_threshold = binary_threshold
+        self.continuous_cols: list[str] = []
+        self.scaler: Dict[str, pd.Series] | None = None
 
         self.ESMEDataset = None
         self.interval_bounds = None
@@ -137,6 +144,9 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             "pat_id": self.column_scheme["pat_id"],
             "lineid": self.column_scheme["lineid"],
         }
+
+        # ic(column_map)
+
         return column_map
 
     def _load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -149,6 +159,36 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         )
 
         return df_dynamic, df_static
+
+    def _detect_continuous_columns(
+        self, df: pd.DataFrame, candidate_cols: list[str]
+    ) -> list[str]:
+        """Pick columns with more than `binary_threshold` unique values.
+
+        Columns at or below the threshold (typically binary indicators) are
+        treated as categorical/binary and left unscaled — z-scoring rare flags
+        creates asymmetric spikes that hurt training (see CLAUDE.md notes).
+        """
+        return [
+            col
+            for col in candidate_cols
+            if df[col].nunique(dropna=True) > self.binary_threshold
+        ]
+
+    def _fit_standardizer(
+        self, df: pd.DataFrame, cols: list[str]
+    ) -> Dict[str, pd.Series]:
+        """Compute per-column mean/std on df[cols]. Constant columns get std=1."""
+        means = df[cols].mean()
+        stds = df[cols].std().replace(0.0, 1.0)
+        return {"mean": means, "std": stds}
+
+    def _apply_standardizer(
+        self, df: pd.DataFrame, cols: list[str], scaler: Dict[str, pd.Series]
+    ) -> pd.DataFrame:
+        df = df.copy()
+        df[cols] = (df[cols] - scaler["mean"]) / scaler["std"]
+        return df
 
     def _merge_and_filter(
         self, df_dynamic: pd.DataFrame, df_static: pd.DataFrame
@@ -308,6 +348,26 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         self.column_map = self._build_column_map(self.df_dynamic, self.df_static)
         df_merge = self._merge_and_filter(self.df_dynamic, self.df_static)
+
+        if self.standardize_continuous:
+            # Scaling is restricted to X (dynamic) and X_static. We skip:
+            #   - P / P_static: treatment one-hots and history flags (binary by construction)
+            #   - d_cols: time-decay input is fed into 1/log(e + d); z-scoring can make
+            #     it negative and produce NaNs
+            #   - time/event/lineid/pat_id: survival targets and identifiers
+            # Caveat: scaler is fit on the full merged frame (including the 20% holdout).
+            # Z-score means/stds are robust to that, but if you ever need strict no-leak,
+            # move the fit into setup() once train indices are known.
+            scaling_candidates = list(
+                dict.fromkeys(self.column_map["x"] + self.column_map["x_static"])
+            )
+            self.continuous_cols = self._detect_continuous_columns(
+                df_merge, scaling_candidates
+            )
+            self.scaler = self._fit_standardizer(df_merge, self.continuous_cols)
+            df_merge = self._apply_standardizer(
+                df_merge, self.continuous_cols, self.scaler
+            )
 
         padded_tensor_data, self.interval_bounds, self.valid_treatments_per_line = (
             self._transform_to_tensor(df_merge)
