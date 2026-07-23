@@ -12,9 +12,11 @@ from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
 from ..metrics.emd_loss import EMDLoss
+from ..metrics.ipm import pairwise_ipm
 from ..metrics.mmd_loss import MMDLoss
 from ..metrics.survival_loss import NLLogisticHazard
 from ..model.embedding_C_LSTM_ITE import embed_LSTM_ITE
+from ..model.gradient_reversal import gradient_reversal
 from ..model.mlp import MLP
 
 
@@ -63,6 +65,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         lambda_prop_loss: float = 0,
         lambda_ipm_mmd: float = 0,
         lambda_ipm_emd2: float = 0,
+        min_ipm_group_size: int = 16,
         evaluation_horizon_times: list[float] = [100, 75, 50, 30],
         brier_integration_step: int = 6,
     ):
@@ -88,7 +91,15 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.evaluation_horizon_times = evaluation_horizon_times
         self.brier_integration_step = brier_integration_step
 
-        self.min_mmd_samples = lstm_hidden_length / 2
+        # Minimum per-batch samples in EACH treatment group for a pair to contribute to the
+        # IPM penalty. Deliberately not derived from lstm_hidden_length: that coupling made
+        # the threshold (128) equal the batch size, so no pair could ever qualify and both
+        # IPM terms returned 0.0 at every lambda.
+        self.min_ipm_group_size = int(min_ipm_group_size)
+
+        # Dedicated stream for IPM group subsampling, so computing the balance diagnostic
+        # never perturbs the training trajectory (weight init, dropout, shuffling).
+        self._ipm_generator = torch.Generator().manual_seed(0)
 
         self.lstm = embed_LSTM_ITE(
             x_input_dim=self.x_input_dim,
@@ -260,19 +271,35 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
-        prop_loss = self._compute_propensity_loss(latent_state, treatment_idx, mask)
+        prop_loss, prop_stats = self._compute_propensity_loss(
+            latent_state, treatment_idx, mask, return_stats=True
+        )
         surv_loss = self._compute_sruvival_loss(
             hazard_logits, interval_idx, event, mask
         )
-        ipm_mmd_reg = self._compute_ipm_mmd(latent_state, treatment_idx, mask)
-        loss = (
-            surv_loss
-            - self.lambda_prop_loss * prop_loss
-            + self.lambda_ipm_mmd * ipm_mmd_reg
+        ipm_mmd_reg, mmd_stats = self._compute_ipm_mmd(
+            latent_state, treatment_idx, mask, return_stats=True
         )
-        # ipm_wass_reg = self.compute_ipm_w2(latent_state, treatment_idx, mask)
+        ipm_emd2_reg, emd_stats = self._compute_ipm_emd2(
+            latent_state, treatment_idx, mask, return_stats=True
+        )
+
+        # `objective` is the part comparable with val_loss. The propensity CE is added, not
+        # subtracted: the adversarial sign lives in the gradient reversal inside
+        # _compute_propensity_loss, so the head minimises this term while the encoder
+        # maximises it. Subtracting it here would make the head maximise its own loss too and
+        # drive its logits to infinity.
+        objective = (
+            surv_loss
+            + self.lambda_ipm_mmd * ipm_mmd_reg
+            + self.lambda_ipm_emd2 * ipm_emd2_reg
+        )
+        loss = objective + prop_loss
 
         # ========= logging =========
+        self._log_ipm_stats("train", ipm_mmd_reg, mmd_stats, ipm_emd2_reg, emd_stats)
+        self._log_propensity_stats("train", prop_loss, prop_stats)
+        self.log("train/objective", objective, on_step=False, on_epoch=True)
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
             "train/survival_loss",
@@ -315,18 +342,30 @@ class DynaSurvCausalOnline(L.LightningModule):
         N_lines = time.shape[1]
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
-        prop_loss = self._compute_propensity_loss(latent_state, treatment_idx, mask)
+        prop_loss, prop_stats = self._compute_propensity_loss(
+            latent_state, treatment_idx, mask, return_stats=True
+        )
         surv_loss = self._compute_sruvival_loss(
             hazard_logits, interval_idx, event, mask
         )
-        ipm_mmd_reg = self._compute_ipm_mmd(latent_state, treatment_idx, mask)
-        imp_emd2_reg = self._compute_ipm_emd2(latent_state, treatment_idx, mask)
+        ipm_mmd_reg, mmd_stats = self._compute_ipm_mmd(
+            latent_state, treatment_idx, mask, return_stats=True
+        )
+        imp_emd2_reg, emd_stats = self._compute_ipm_emd2(
+            latent_state, treatment_idx, mask, return_stats=True
+        )
+
+        # The propensity CE is logged but deliberately excluded from the monitored loss. It is
+        # one player's payoff in a minimax game: a low value means the encoder failed to
+        # balance, a high value means either good balancing or an undertrained head. Selecting
+        # a checkpoint on it would prefer the run where balancing failed.
         loss = (
             surv_loss
-            - self.lambda_prop_loss * prop_loss
             + self.lambda_ipm_mmd * ipm_mmd_reg
             + self.lambda_ipm_emd2 * imp_emd2_reg
         )
+        self._log_ipm_stats("val", ipm_mmd_reg, mmd_stats, imp_emd2_reg, emd_stats)
+        self._log_propensity_stats("val", prop_loss, prop_stats)
 
         if dataloader_idx == 0:
             self.log(
@@ -555,12 +594,188 @@ class DynaSurvCausalOnline(L.LightningModule):
             self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
             dim=-1,
         )
-        prop_loss = self.propensity_loss_fn(
-            treatment_prediction, treatment_idx.view(-1)
-        ).view(batch_size, n_lines)
-        masked_prop_loss = (prop_loss * mask).sum() / mask.sum()
 
-        return masked_prop_loss
+    def _log_epoch_metrics(self):
+        """Score C-index and IBS once per epoch over the pooled predictions."""
+        for dataloader_idx, buffers in sorted(self._eval_buffers.items()):
+            if not buffers:
+                continue
+
+            prefix = "val" if dataloader_idx == 0 else "early_stop"
+            ci, ibs, n_per_line = [], [], []
+
+            for line in sorted(buffers):
+                reference = self._train_surv_reference(line)
+                if reference is None:
+                    raise ValueError(
+                        "IPCW weights cannot be computed before training epoch 0 is completed."
+                    )
+                train_events, train_times = reference
+
+                line_buffer = buffers[line]
+                t_line = torch.cat(line_buffer["time"])  # (n_line,)
+                e_line = torch.cat(line_buffer["event"]).bool()  # (n_line,)
+                line_discrete_survival = torch.cat(
+                    line_buffer["survival"]
+                )  # (n_line, n_intervals + 1)
+                line_discrete_cumhazards = torch.cat(
+                    line_buffer["cumhazard"]
+                )  # (n_line, n_intervals + 1)
+
+                c_index_td, _ = self.eval_cindex_ipcw(
+                    train_events=train_events,
+                    train_times=train_times,
+                    test_events=e_line,
+                    test_times=t_line,
+                    discrete_cumhazards=line_discrete_cumhazards,
+                    device="cpu",
+                )
+                ibs_line, _, _ = self.eval_brier_score_ipcw(
+                    train_events=train_events,
+                    train_times=train_times,
+                    test_events=e_line,
+                    test_times=t_line,
+                    discrete_survival=line_discrete_survival,
+                    tmax=self.evaluation_horizon_times[line],
+                    device=torch.device("cpu"),
+                )
+
+                ci.append(c_index_td)
+                ibs.append(float(ibs_line))
+                n_per_line.append(t_line.shape[0])
+
+                self.log(
+                    f"{prefix}/ci_time_step_{line + 1}",
+                    c_index_td,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    f"{prefix}/ibs_time_step_{line + 1}",
+                    ibs_line,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+
+            if not ci:
+                continue
+
+            # Inverse-frequency weighting over the lines actually observed, so a line
+            # missing from the split cannot introduce a division by zero.
+            w = 1.0 / np.asarray(n_per_line, dtype=np.float64)
+            w = w / w.sum()
+            weighted_ibs = float(np.sum(np.asarray(ibs) * w))
+            average_ci = float(np.mean(ci))
+
+            if dataloader_idx == 0:
+                self.log(
+                    "average_ci",
+                    average_ci,
+                    prog_bar=True,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    "average_ibs",
+                    weighted_ibs,
+                    prog_bar=True,
+                    on_step=False,
+                    on_epoch=True,
+                )
+            else:
+                self.log(
+                    "early_stop_average_ci",
+                    average_ci,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    "early_stop_average_ibs",
+                    weighted_ibs,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+
+    def _valid_arm_mask(self, treatment_idx):
+        """(batch, n_lines) float mask, 1 where the observed arm has dataset-level support.
+
+        Arms outside `valid_treatments_per_line` carry a handful of patients; making the
+        encoder hide them is adversarial pressure fitted to noise.
+        """
+        valid = torch.zeros_like(treatment_idx, dtype=torch.float32)
+        for line in range(treatment_idx.shape[1]):
+            arms = self.valid_treatments_per_line.get(line, [])
+            if not arms:
+                continue
+            arms_t = torch.tensor(arms, device=treatment_idx.device)
+            valid[:, line] = torch.isin(treatment_idx[:, line], arms_t).float()
+        return valid
+
+    def _propensity_base_rate(self, treatment_idx, eff_mask):
+        """Accuracy a majority-class predictor would reach, computed per line then pooled.
+
+        Per line rather than pooled-then-mode: arm composition shifts sharply between line 1
+        and line 4, so a single global mode understates the floor and flatters the head.
+        """
+        correct = 0.0
+        total = 0.0
+        for line in range(treatment_idx.shape[1]):
+            m = eff_mask[:, line].bool()
+            if not m.any():
+                continue
+            t = treatment_idx[m, line]
+            counts = torch.bincount(t)
+            correct += float(counts.max())
+            total += float(t.numel())
+        return correct / total if total > 0 else 0.0
+
+    def _compute_propensity_loss(
+        self, latent_state, treatment_idx, mask, return_stats=False
+    ):
+        """Masked cross-entropy of the propensity head, with gradient reversal.
+
+        Forward is the identity; on the backward pass the head minimises CE while the encoder
+        receives `-lambda_prop_loss` times the gradient and therefore maximises it. That is
+        what strips treatment information out of the representation (Bica et al., CRN).
+
+        `lambda_prop_loss` scales the reversal rather than the loss term, so at lambda=0 the
+        encoder is untouched -- bitwise equal to detaching -- while the head still trains at
+        full strength and stays usable for propensity diagnostics and trimming.
+        """
+        batch_size, n_lines, latent_dim = latent_state.shape
+
+        z = gradient_reversal(
+            latent_state.reshape(-1, latent_dim), self.lambda_prop_loss
+        )
+        logits = self.propensityhead(
+            z
+        )  # raw logits: CrossEntropyLoss log-softmaxes itself
+        ce = self.propensity_loss_fn(logits, treatment_idx.reshape(-1)).view(
+            batch_size, n_lines
+        )
+
+        eff_mask = mask * self._valid_arm_mask(treatment_idx)
+        denom = eff_mask.sum().clamp(min=1)
+        loss = (ce * eff_mask).sum() / denom
+
+        if not return_stats:
+            return loss
+
+        with torch.no_grad():
+            pred = logits.argmax(dim=-1).view(batch_size, n_lines)
+            acc = float(((pred == treatment_idx).float() * eff_mask).sum() / denom)
+            base = self._propensity_base_rate(treatment_idx, eff_mask)
+        stats = {
+            "accuracy": acc,
+            "base_rate": base,
+            "excess_accuracy": acc - base,
+            "n_scored": float(denom),
+        }
+        return loss, stats
 
     def _compute_sruvival_loss(self, hazard_logits, interval_idx, event, mask):
         batch_size, n_lines, _ = hazard_logits.shape
@@ -590,63 +805,102 @@ class DynaSurvCausalOnline(L.LightningModule):
         w = w / w_sum
         return (per_line_mean * w).sum()
 
-    def _compute_ipm_mmd(self, latent_state, treatment_idx, mask):
-        pairwise_mmd = torch.tensor(
-            0.0, dtype=torch.float32, device=latent_state.device
+        n_per_line = mask.sum(dim=0)  # (n_lines,)
+        valid = n_per_line > 0
+        per_line_sum = (surv_loss * mask).sum(dim=0)  # (n_lines,)
+        per_line_mean = torch.where(
+            valid,
+            per_line_sum / n_per_line.clamp(min=1),
+            torch.zeros_like(per_line_sum),
         )
-        n_pairs = 0
+        # Inverse-frequency weighting across lines (matches validation IBS weighting).
+        w = torch.where(
+            valid,
+            1.0 / n_per_line.clamp(min=1).to(per_line_sum.dtype),
+            torch.zeros_like(per_line_sum),
+        )
+        w_sum = w.sum()
+        if w_sum <= 0:
+            return per_line_sum.sum() * 0.0
+        w = w / w_sum
+        return (per_line_mean * w).sum()
 
-        for line in range(latent_state.shape[1]):
-            valid_mask = mask[:, line].bool()
-            if not valid_mask.any():
-                continue
+    def _log_ipm_stats(self, prefix, mmd_value, mmd_stats, emd_value, emd_stats):
+        """Log balance values and the pair counters.
 
-            z_line = latent_state[valid_mask, line, :]
-            t_line = treatment_idx[valid_mask, line]
+        `pairs_used` summed over an epoch is the number that separates a dead regulariser
+        from a weak one -- a zero here means no gradient ever flowed, whatever lambda says.
+        """
+        self.log(f"{prefix}/ipm_mmd", mmd_value, on_step=False, on_epoch=True)
+        self.log(f"{prefix}/ipm_emd2", emd_value, on_step=False, on_epoch=True)
+        for name, stats in (("mmd", mmd_stats), ("emd2", emd_stats)):
+            for key in ("pairs_used", "pairs_skipped"):
+                self.log(
+                    f"{prefix}/ipm_{name}_{key}",
+                    stats[key],
+                    on_step=False,
+                    on_epoch=True,
+                    reduce_fx="sum",
+                )
 
-            valid_treatments = self.valid_treatments_per_line[line]
-            z_groups = {k: z_line[t_line == k] for k in valid_treatments}
+    def _log_propensity_stats(self, prefix, prop_loss, stats):
+        """Log the adversary's CE and how far it beats a majority-class predictor.
 
-            for i, k_i in enumerate(valid_treatments):
-                for k_j in valid_treatments[i:]:
-                    n_i = z_groups[k_i].shape[0]
-                    n_j = z_groups[k_j].shape[0]
+        `excess_accuracy` is the signal: positive at lambda=0 measures how much treatment
+        information the representation carries, and it should decay toward 0 as lambda rises.
+        """
+        self.log(f"{prefix}/propensity_ce", prop_loss, on_step=False, on_epoch=True)
+        for key in ("accuracy", "base_rate", "excess_accuracy"):
+            self.log(
+                f"{prefix}/propensity_{key}", stats[key], on_step=False, on_epoch=True
+            )
 
-                    if n_i < self.min_mmd_samples or n_j < self.min_mmd_samples:
-                        continue
+    def _compute_ipm_mmd(self, latent_state, treatment_idx, mask, return_stats=False):
+        """Mean MMD across treatment pairs. Always computed -- it is cheap, and keeping it
+        live at lambda=0 is what makes "is the regulariser dead?" answerable from the logs.
 
-                    pairwise_mmd += self.mmd_loss(z_groups[k_i], z_groups[k_j])
-                    n_pairs += 1
+        Returns a scalar tensor by default; `return_stats` additionally yields the pair
+        counters. The default keeps the signature subclasses in scripts/calibration_fix rely on.
+        """
+        value, stats = pairwise_ipm(
+            latent_state,
+            treatment_idx,
+            mask,
+            self.valid_treatments_per_line,
+            self.mmd_loss,
+            self.min_ipm_group_size,
+            generator=self._ipm_generator,
+        )
+        return (value, stats) if return_stats else value
 
-        return pairwise_mmd / n_pairs if n_pairs > 0 else pairwise_mmd
+    def _compute_ipm_emd2(self, latent_state, treatment_idx, mask, return_stats=False):
+        """Mean squared Wasserstein distance across treatment pairs.
 
-    def _compute_ipm_emd2(self, latent_state, treatment_idx, mask):
-        pairwise_w2 = torch.tensor(0.0, dtype=torch.float32, device=latent_state.device)
-        n_pairs = 0
+        Unlike MMD this is a CPU linear program per pair, so it is skipped entirely when its
+        weight is zero. `computed` in the stats separates "not evaluated" from "evaluated, no
+        pair qualified" -- both give 0.0 but mean very different things.
+        """
+        if self.lambda_ipm_emd2 <= 0:
+            zero = torch.zeros((), dtype=latent_state.dtype, device=latent_state.device)
+            stats = {
+                "pairs_used": 0.0,
+                "pairs_skipped": 0.0,
+                "lines_contributing": 0.0,
+                "computed": 0.0,
+            }
+            return (zero, stats) if return_stats else zero
 
-        for line in range(latent_state.shape[1]):
-            valid_mask = mask[:, line].bool()
-            if not valid_mask.any():
-                continue
-
-            z_line = latent_state[valid_mask, line, :]
-            t_line = treatment_idx[valid_mask, line]
-
-            valid_treatments = self.valid_treatments_per_line[line]
-            z_groups = {k: z_line[t_line == k] for k in valid_treatments}
-
-            for i, k_i in enumerate(valid_treatments):
-                for k_j in valid_treatments[i:]:
-                    n_i = z_groups[k_i].shape[0]
-                    n_j = z_groups[k_j].shape[0]
-
-                    if n_i < self.min_mmd_samples or n_j < self.min_mmd_samples:
-                        continue
-
-                    pairwise_w2 += self.emd2_loss(z_groups[k_i], z_groups[k_j])
-                    n_pairs += 1
-
-        return pairwise_w2 / n_pairs if n_pairs > 0 else pairwise_w2
+        value, stats = pairwise_ipm(
+            latent_state,
+            treatment_idx,
+            mask,
+            self.valid_treatments_per_line,
+            self.emd2_loss,
+            self.min_ipm_group_size,
+            generator=self._ipm_generator,
+        )
+        stats["computed"] = 1.0
+        return (value, stats) if return_stats else value
 
     def fit_censoring_estimator(self, train_loader):
         """

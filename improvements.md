@@ -195,17 +195,6 @@ the proportional-hazards assumption (which the era-varying treatment mix makes
 particularly untrustworthy), it is a natural quantity to compare across arms for a
 recommender, and a line-4 treatment decision does not turn on 100-month survival.
 
-> **Correction (found during implementation, 2026-07-22).** The horizons above were
-> derived from the *whole* 2018+ cohort, but §5 evaluates on the latest entrants,
-> who by construction have the least follow-up. Measured on the actual holdout,
-> `[36, 30, 24, 24]` turned out to be entirely unsupported: with a 2022 cutoff,
-> **0%** of line-2 holdout records reach 24 months and 0% of line-4 records reach
-> 18. Every RMST figure would have been extrapolation past the last observation.
-> Horizons must be set by what the **holdout** supports, not the cohort. The
-> shipped configuration is `[24, 18, 12, 12]` with a 2021 cutoff, where 37.5% /
-> 19.2% / 20.1% / 10.4% of holdout records per line actually reach their horizon.
-> See §5 for the coupled change.
-
 > **References.** Royston P, Parmar MKB. "Restricted mean survival time: an alternative
 > to the hazard ratio for the design and analysis of randomized trials with a
 > time-to-event outcome." *BMC Medical Research Methodology* 2013;13:152.
@@ -221,19 +210,8 @@ recommender, and a line-4 treatment decision does not turn on 100-month survival
 
 ## 5. Validate on a temporal split, not a random one
 
-**Recommendation.** ~~Train on 2018–2021, test on 2022–2023.~~ **Revised: train on
-2018–2020, test on 2021–2023** (`temporal_split_year = 2021`). Report this as the
-primary validation; keep random K-fold CV only as a secondary, clearly-labelled
-optimistic bound.
-
-**Why the cutoff moved.** A 2022 cutoff holds out only 12.4% of patients and leaves
-them ~26 months of administrative follow-up — less than any horizon worth reporting
-(see the correction in §4). It also makes the holdout so event-poor that the metrics
-flatter the model: the first training run scored IBS 0.080 at line 1 against a 2022
-holdout, versus 0.123 against the 2021 holdout, because most of the integration range
-contained no events at all. 2021 gives a 68/32 split with 546 line-1 events instead of
-166. **Choosing the split year and the horizons is one decision, not two** — the later
-the cutoff, the shorter every horizon must be.
+**Recommendation.** Train on 2018–2021, test on 2022–2023. Report this as the primary
+validation; keep random K-fold CV only as a secondary, clearly-labelled optimistic bound.
 
 **Motivation.** Random cross-validation across calendar time leaks the treatment-policy
 era: a 2019 record in the training fold tells the model what the 2019 policy looked like,
@@ -386,25 +364,16 @@ bounded rather than merely asserted.
 
 ## Implementation checklist
 
-| # | Change | Where | Status |
-|---|---|---|---|
-| 1 | Cohort filter, patient-entry based | `datamodule_cv.py::_restrict_to_cohort`, `cohort_start_year` | done |
-| 2 | Calendar-time feature | `datamodule_cv.py::_add_calendar_feature` (`X_calendar_months`) | done |
-| 3 | Per-line recommendable action mask | `datamodule_cv.py::_compute_recommendable_treatments_per_line`, `model::recommend_treatment` | done |
-| 4 | Horizons `[24, 18, 12, 12]` + RMST | `configs/config.toml`, `model::compute_rmst` | done (horizons revised) |
-| 5 | Temporal split at 2021 | `datamodule_cv.py::_temporal_split` | done (cutoff revised) |
-| 6 | Exclude `OTHER`, `ET+TT` from action set | `DEFAULT_EXCLUDED_ARMS` | done (records kept) |
-| 7 | Exclude `NO TREATMENT` arm | `DEFAULT_EXCLUDED_ARMS` | done |
-| 8 | Resolve HER2 labelling question | data provenance — external | open |
-
-**Implementation note on §1, §6 and §7.** The cohort filter is applied at the
-**patient** level (keep patients whose *first* line is 2018+), not the record level:
-a record-level cut severs 31% of retained patients mid-trajectory, handing the
-sequence encoder a history that begins at line 3. And §6/§7 are implemented as
-*action-set* exclusions rather than row deletions — records for `OTHER`, `ET+TT` and
-`NO TREATMENT` stay in the data, where they legitimately inform patient history and
-the shared encoder; only their eligibility to be recommended is withdrawn. This is
-the "modify the target intervention" response, not "drop the data".
+| # | Change | Where |
+|---|---|---|
+| 1 | Cohort filter `line_start_date >= 2018` | `src/CausalSurv/data/datamodule_cv.py`, new config key |
+| 2 | Calendar-time feature | dataset feature construction |
+| 3 | Per-(era, line) action mask | model heads + recommendation logic |
+| 4 | `horizon_times = [36, 24]`, RMST metric | `configs/config.toml:17`, `evaluation/evaluator.py` |
+| 5 | Temporal train/test split | `datamodule_cv.py` split logic |
+| 6 | Re-group or exclude `OTHER`, `ET+TT` | preprocessing; `first_draft.tex:169` |
+| 7 | Exclude `NO TREATMENT` arm | preprocessing |
+| 8 | Resolve HER2 labelling question | data provenance — external |
 
 ---
 
