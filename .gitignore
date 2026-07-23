@@ -44,3 +44,6 @@ latex/*.synctex.gz
 
 # Optionally ignore PDFs (or track at milestones)
 latex/*.pdf
+
+# Generated analysis figures (regenerate with Analysis/confounding_adjusted.py)
+Analysis/figures/
