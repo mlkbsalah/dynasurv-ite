@@ -76,6 +76,7 @@ class DynasurvEvaluator:
         table = PrettyTable()
         table.field_names = ["Line", "IBS", "Max BS", "Min BS"]
         table.float_format = ".3"
+        ibs_dict = {}
         bs_val_dict = {}
         ipcw_weights = {}
         if plot:
@@ -96,16 +97,19 @@ class DynasurvEvaluator:
                 discrete_survival=disc_surv[mask_line, line],
                 tmax=brier_score_tmax[line],
             )
+            ibs_dict[line] = ibs.item()
             bs_val_dict[line] = bs_val.cpu().numpy()
             ipcw_weights[line] = bs_ipcw
 
-            table.add_row([line, ibs.item(), bs_val.max().item(), bs_val.min().item()])
+            table.add_row(
+                [line + 1, ibs.item(), bs_val.max().item(), bs_val.min().item()]
+            )
 
             if plot:
                 ax[line].plot(torch.linspace(0, brier_score_tmax[line], 100), bs_val)
                 ax[line].set_xticks(torch.arange(0, brier_score_tmax[line], 6))
         print(table)
-        return ibs, bs_val_dict, ipcw_weights
+        return ibs_dict, bs_val_dict, ipcw_weights
 
     def line_calibration_error(
         self, eval_time: List[float] | float | int, n_bins: int = 20, plot=False
@@ -162,13 +166,13 @@ class DynasurvEvaluator:
                 )
                 row[f"t={t_val}"] = err
 
-                ax[line].plot(
-                    calib_pred,
-                    calib_obs,
-                    ".-",
-                    label=f"t={t_val}",
-                )
                 if plot:
+                    ax[line].plot(
+                        calib_pred,
+                        calib_obs,
+                        ".-",
+                        label=f"t={t_val}",
+                    )
                     ax[line].set_xlabel("Predicted Survival")
             if plot:
                 ax[line].plot([0, 1], [0, 1], "k--")
@@ -225,6 +229,7 @@ class DynasurvEvaluator:
                 nrows=len(eval_time),
                 ncols=N_LINES,
                 figsize=(7 * N_LINES, 6 * len(eval_time)),
+                squeeze=False,
             )
 
         for i, t_eval in enumerate(eval_time):
@@ -265,30 +270,31 @@ class DynasurvEvaluator:
                             * np.abs(calib_obs - calib_pred)
                         )
                         col.append(err)
+
+                        if plot:
+                            ax[i, line].plot(
+                                calib_pred,
+                                calib_obs,
+                                ".-",
+                                label=f"{self._datamodule.treatment_dict[treatment_k]}",
+                            )
                     else:
                         col.append("*")
 
-                    if plot:
-                        ax[i, line].plot(
-                            calib_pred,
-                            calib_obs,
-                            ".-",
-                            label=f"{self._datamodule.treatment_dict[treatment_k]}",
-                        )
-
-                        ax[i, line].set_xlabel("Predicted Survival")
-                        ax[i, line].plot([0, 1], [0, 1], "k--")
-                        ax[i, line].set_ylabel("Observed Survival (KM)")
-                        ax[i, line].legend()
-                        ax[i, line].set_title(f"Calibration Plot - Line {line + 1}")
-                        ax[i, line].grid(True, alpha=0.3)
+                if plot:
+                    ax[i, line].plot([0, 1], [0, 1], "k--")
+                    ax[i, line].set_xlabel("Predicted Survival")
+                    ax[i, line].set_ylabel("Observed Survival (KM)")
+                    ax[i, line].legend()
+                    ax[i, line].set_title(f"Calibration Plot - Line {line + 1}")
+                    ax[i, line].grid(True, alpha=0.3)
                 table.add_column(f"Line {line + 1}", col)
             if plot:
                 plt.tight_layout()
             table.float_format = ".3"
             print(table)
         print(
-            f"***: Not valid due to very counts (<{self._datamodule.min_samples_per_treatment})"
+            f"*: Not valid due to low counts (<{self._datamodule.min_samples_per_treatment})"
         )
         if plot:
             plt.show()
