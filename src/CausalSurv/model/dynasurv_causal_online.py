@@ -38,6 +38,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         n_treatments: int,
         output_length: int,
         interval_bounds: torch.Tensor,
+        n_lines: int = 4,
         lstm_hidden_length: int = 128,
         lstm_num_layers: int = 4,
         x_embed_dim: int = 64,
@@ -73,7 +74,13 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.p_input_dim = p_input_dim
         self.p_static_dim = p_static_dim
         self.n_treatments = n_treatments
+        self.n_lines = n_lines
         self.output_length = output_length
+
+        if len(evaluation_horizon_times) != n_lines:
+            raise ValueError(
+                f"evaluation_horizon_times has length {len(evaluation_horizon_times)} but n_lines={n_lines}"
+            )
 
         self.register_buffer("interval_bounds", interval_bounds)
         self.interval_bounds: torch.Tensor
@@ -100,25 +107,15 @@ class DynaSurvCausalOnline(L.LightningModule):
             attention=attention,
         )
 
-        self.init_h_mlp = MLP(
-            input_dim=x_static_dim,
-            n_units=init_h_hidden,
-            output_dim=self.lstm.hidden_length,
-            dropout=init_h_dropout,
-        )
-        self.init_p_mlp = MLP(
-            input_dim=p_static_dim,
-            n_units=init_p_hidden,
-            output_dim=self.lstm.p_embed_dim,
-            dropout=init_p_dropout,
-        )
-
         self.treatment_head = MLP(
             input_dim=self.lstm.hidden_length,
             output_dim=output_length * n_treatments,
             n_units=mlpsa_hidden_units,
             dropout=mlpsa_dropout,
         )
+
+        self.hazard_line_log_temperature = torch.nn.Parameter(torch.zeros(n_lines))
+        self.hazard_line_bias = torch.nn.Parameter(torch.zeros(n_lines))
 
         self.propensityhead = MLP(
             input_dim=self.lstm.hidden_length,
@@ -145,9 +142,15 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.train_times = None
         self.train_events = None
 
+        # Per-epoch evaluation buffers, keyed [dataloader_idx][line][field]
+        self._eval_buffers: dict[int, dict[int, dict[str, list]]] = {}
+
     # ====================== Core model logic =============================
     def forward(
-        self, XPd: torch.Tensor, X_static: Tuple[torch.Tensor, torch.Tensor]
+        self,
+        XPd: torch.Tensor,
+        X_static: Tuple[torch.Tensor, torch.Tensor],
+        treatment_idx: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """forward pass to retreive all hazards and propensity scores for all treatments and all time steps
 
@@ -165,19 +168,28 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         for t in range(XPd.shape[1]):
             # XPd_aug = torch
-            logit_t, (h, c, p) = self._step(XPd[:, t, :], (h, c, p))
+            logit_t, (h, c, p) = self._step(
+                XPd[:, t, :], (h, c, p), treatment_idx[:, t]
+            )
             hazards_logit.append(logit_t)
             latent_state.append(h)
         hazards_logit = torch.stack(hazards_logit, dim=1)
         latent_state = torch.stack(latent_state, dim=1)
 
+        n_lines_obs = hazards_logit.shape[1]
+        temperature = torch.exp(self.hazard_line_log_temperature[:n_lines_obs]).view(
+            1, -1, 1, 1
+        )
+        bias = self.hazard_line_bias[:n_lines_obs].view(1, -1, 1, 1)
+        hazards_logit = hazards_logit / temperature + bias
+
         return hazards_logit, latent_state
 
     def _step(
-        self, XPd_t, tuple_in
+        self, XPd_t, tuple_in, treatment_idx_t
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """Forward pass for one time step."""
-        _, h, c, p = self.lstm(XPd_t, tuple_in)
+        _, h, c, p = self.lstm(XPd_t, tuple_in, treatment_idx_t)
         logit_t = self.treatment_head(h).view(
             -1, self.n_treatments, self.output_length
         )  # (batch, n_treatments, n_intervals)
@@ -217,7 +229,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         """
 
         hazards_logit, latent_state = self.forward(
-            XPd, X_static
+            XPd, X_static, treatment_idx
         )  # (batch, n_lines, n_treatments, n_intervals) / (batch, n_lines, lstm_hidden_length)
         gather_idx = (
             treatment_idx.unsqueeze(-1)
@@ -269,21 +281,21 @@ class DynaSurvCausalOnline(L.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        self.log(
-            "train/propensity_loss",
-            prop_loss,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        # self.log(
+        #     "train/propensity_loss",
+        #     prop_loss,
+        #     prog_bar=True,
+        #     on_step=False,
+        #     on_epoch=True,
+        # )
 
-        self.log(
-            "train/ipm_reg",
-            ipm_mmd_reg,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        # self.log(
+        #     "train/ipm_reg",
+        #     ipm_mmd_reg,
+        #     prog_bar=True,
+        #     on_step=False,
+        #     on_epoch=True,
+        # )
 
         return loss
 
@@ -340,29 +352,29 @@ class DynaSurvCausalOnline(L.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        self.log(
-            "val/propensity_loss",
-            prop_loss,
-            prog_bar=False,
-            on_step=False,
-            on_epoch=True,
-        )
+        # self.log(
+        #     "val/propensity_loss",
+        #     prop_loss,
+        #     prog_bar=False,
+        #     on_step=False,
+        #     on_epoch=True,
+        # )
 
-        self.log(
-            "val/ipm_mmd",
-            ipm_mmd_reg,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        # self.log(
+        #     "val/ipm_mmd",
+        #     ipm_mmd_reg,
+        #     prog_bar=True,
+        #     on_step=False,
+        #     on_epoch=True,
+        # )
 
-        self.log(
-            "val/ipm_emd2",
-            imp_emd2_reg,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
+        # self.log(
+        #     "val/ipm_emd2",
+        #     imp_emd2_reg,
+        #     prog_bar=True,
+        #     on_step=False,
+        #     on_epoch=True,
+        # )
         if self.trainer.sanity_checking:
             return loss
 
@@ -378,112 +390,164 @@ class DynaSurvCausalOnline(L.LightningModule):
             dim=2,
         )  # (batch, n_lines, n_intervals + 1) to account for H(0)=0
 
-        ci = []
-        ibs = []
+        # C-index ranks all comparable pairs and IPCW weights are estimated from the
+        # pooled sample, so neither can be averaged across batches. Stash the per-line
+        # predictions and score them once in `_log_epoch_metrics`.
+        buffers = self._eval_buffers.setdefault(dataloader_idx, {})
         for line in range(N_lines):
             valid_mask = mask[:, line].bool()
             if not valid_mask.any():
                 continue
 
-            t_line = time[valid_mask, line]  # (valid_batch, 1)
-            e_line = event[valid_mask, line].bool()  # (valid_batch, 1)
-            line_discrete_survival = discrete_survival[
-                valid_mask, line, :
-            ]  # (valid_batch, n_intervals + 1)
-            line_discrete_cumhazards = discrete_cumhazards[
-                valid_mask, line, :
-            ]  # (valid_batch, n_intervals + 1)
+            line_buffer = buffers.setdefault(
+                line, {"time": [], "event": [], "survival": [], "cumhazard": []}
+            )
+            line_buffer["time"].append(time[valid_mask, line].detach().cpu())
+            line_buffer["event"].append(event[valid_mask, line].detach().cpu())
+            line_buffer["survival"].append(
+                discrete_survival[valid_mask, line, :].detach().cpu()
+            )
+            line_buffer["cumhazard"].append(
+                discrete_cumhazards[valid_mask, line, :].detach().cpu()
+            )
 
-            if self.train_events is None or self.train_times is None:
-                raise ValueError(
-                    "IPCW weights cannot be computed before training epoch 0 is completed."
+        return loss
+
+    def _train_surv_reference(self, line):
+        """Training times/events for `line` as tensors, or None if unavailable.
+
+        Accepts both the list-of-lists built by `_accumulate_data` and the dict of
+        arrays built by `fit_censoring_estimator`.
+        """
+        if self.train_events is None or self.train_times is None:
+            return None
+        try:
+            events, times = self.train_events[line], self.train_times[line]
+        except (KeyError, IndexError):
+            return None
+        if len(events) == 0:
+            return None
+        return (
+            torch.tensor(events, dtype=torch.bool, device="cpu"),
+            torch.tensor(times, dtype=torch.float32, device="cpu"),
+        )
+
+    def _log_epoch_metrics(self):
+        """Score C-index and IBS once per epoch over the pooled predictions."""
+        for dataloader_idx, buffers in sorted(self._eval_buffers.items()):
+            if not buffers:
+                continue
+
+            prefix = "val" if dataloader_idx == 0 else "early_stop"
+            ci, ibs, n_per_line = [], [], []
+
+            for line in sorted(buffers):
+                reference = self._train_surv_reference(line)
+                if reference is None:
+                    raise ValueError(
+                        "IPCW weights cannot be computed before training epoch 0 is completed."
+                    )
+                train_events, train_times = reference
+
+                line_buffer = buffers[line]
+                t_line = torch.cat(line_buffer["time"])  # (n_line,)
+                e_line = torch.cat(line_buffer["event"]).bool()  # (n_line,)
+                line_discrete_survival = torch.cat(
+                    line_buffer["survival"]
+                )  # (n_line, n_intervals + 1)
+                line_discrete_cumhazards = torch.cat(
+                    line_buffer["cumhazard"]
+                )  # (n_line, n_intervals + 1)
+
+                c_index_td, _ = self.eval_cindex_ipcw(
+                    train_events=train_events,
+                    train_times=train_times,
+                    test_events=e_line,
+                    test_times=t_line,
+                    discrete_cumhazards=line_discrete_cumhazards,
+                    device="cpu",
                 )
-            c_index_td, _ = self.eval_cindex_ipcw(
-                train_events=torch.tensor(
-                    self.train_events[line], dtype=torch.bool, device="cpu"
-                ),
-                train_times=torch.tensor(
-                    self.train_times[line], dtype=torch.float32, device="cpu"
-                ),
-                test_events=e_line.cpu(),
-                test_times=t_line.cpu(),
-                discrete_cumhazards=line_discrete_cumhazards.cpu(),
-                device="cpu",
-            )
-            ci.append(c_index_td)
+                ibs_line, _, _ = self.eval_brier_score_ipcw(
+                    train_events=train_events,
+                    train_times=train_times,
+                    test_events=e_line,
+                    test_times=t_line,
+                    discrete_survival=line_discrete_survival,
+                    tmax=self.evaluation_horizon_times[line],
+                    device=torch.device("cpu"),
+                )
 
-            # ic(t_line)
+                ci.append(c_index_td)
+                ibs.append(float(ibs_line))
+                n_per_line.append(t_line.shape[0])
 
-            ibs_line, bs_val_line, bs_ipcw_weights = self.eval_brier_score_ipcw(
-                train_events=torch.tensor(
-                    self.train_events[line], dtype=torch.bool, device="cpu"
-                ),
-                train_times=torch.tensor(
-                    self.train_times[line], dtype=torch.float32, device="cpu"
-                ),
-                test_events=e_line.cpu(),
-                test_times=t_line.cpu(),
-                discrete_survival=line_discrete_survival.cpu(),
-                tmax=self.evaluation_horizon_times[line],
-                device=torch.device("cpu"),
-            )
-            ibs.append(ibs_line)
+                self.log(
+                    f"{prefix}/ci_time_step_{line + 1}",
+                    c_index_td,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    f"{prefix}/ibs_time_step_{line + 1}",
+                    ibs_line,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                # Mean predicted RMST at this line's horizon. Reported next to
+                # the observed Kaplan-Meier RMST it should track, so a model
+                # that discriminates well but is calibrated badly in absolute
+                # months is visible rather than hidden behind C-index.
+                tau = self.evaluation_horizon_times[line]
+                self.log(
+                    f"{prefix}/rmst_pred_time_step_{line + 1}",
+                    float(self.compute_rmst(line_discrete_survival, tau).mean()),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
-            self.log(
-                f"val/ci_time_step_{line + 1}",
-                c_index_td,
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
-            self.log(
-                f"val/ibs_time_step_{line + 1}",
-                ibs_line,
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
+            if not ci:
+                continue
 
-        # ic(ibs, (np.sum(mask.cpu().numpy(), axis = 0) / np.sum(mask.cpu().numpy())) )
+            # Inverse-frequency weighting over the lines actually observed, so a line
+            # missing from the split cannot introduce a division by zero.
+            w = 1.0 / np.asarray(n_per_line, dtype=np.float64)
+            w = w / w.sum()
+            weighted_ibs = float(np.sum(np.asarray(ibs) * w))
+            average_ci = float(np.mean(ci))
 
-        n_t = np.sum(mask.cpu().numpy(), axis=0)
-        w = 1 / n_t
-        w = w / w.sum()
-
-        weighted_ibs = np.sum(ibs * w)
-
-        if dataloader_idx == 0:
-            self.log(
-                "average_ci",
-                float(np.mean(ci)),
-                prog_bar=True,
-                on_step=False,
-                on_epoch=True,
-            )
-            self.log(
-                "average_ibs",
-                float(weighted_ibs),
-                prog_bar=True,
-                on_step=False,
-                on_epoch=True,
-            )
-        elif dataloader_idx == 1:
-            self.log(
-                "early_stop_average_ci",
-                float(np.mean(ci)),
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
-            self.log(
-                "early_stop_average_ibs",
-                float(weighted_ibs),
-                prog_bar=False,
-                on_step=False,
-                on_epoch=True,
-            )
-
-        return loss, np.mean(ci), weighted_ibs
+            if dataloader_idx == 0:
+                self.log(
+                    "average_ci",
+                    average_ci,
+                    prog_bar=True,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    "average_ibs",
+                    weighted_ibs,
+                    prog_bar=True,
+                    on_step=False,
+                    on_epoch=True,
+                )
+            else:
+                self.log(
+                    "early_stop_average_ci",
+                    average_ci,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    "early_stop_average_ibs",
+                    weighted_ibs,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
     def _compute_propensity_loss(self, latent_state, treatment_idx, mask):
         batch_size, n_lines, _ = latent_state.shape
@@ -505,8 +569,26 @@ class DynaSurvCausalOnline(L.LightningModule):
             interval_idx.view(-1),
             event.view(-1),
         ).view(batch_size, n_lines)
-        masked_surv_loss = (surv_loss * mask).sum() / mask.sum()
-        return masked_surv_loss
+
+        n_per_line = mask.sum(dim=0)  # (n_lines,)
+        valid = n_per_line > 0
+        per_line_sum = (surv_loss * mask).sum(dim=0)  # (n_lines,)
+        per_line_mean = torch.where(
+            valid,
+            per_line_sum / n_per_line.clamp(min=1),
+            torch.zeros_like(per_line_sum),
+        )
+        # Inverse-frequency weighting across lines (matches validation IBS weighting).
+        w = torch.where(
+            valid,
+            1.0 / n_per_line.clamp(min=1).to(per_line_sum.dtype),
+            torch.zeros_like(per_line_sum),
+        )
+        w_sum = w.sum()
+        if w_sum <= 0:
+            return per_line_sum.sum() * 0.0
+        w = w / w_sum
+        return (per_line_mean * w).sum()
 
     def _compute_ipm_mmd(self, latent_state, treatment_idx, mask):
         pairwise_mmd = torch.tensor(
@@ -749,13 +831,16 @@ class DynaSurvCausalOnline(L.LightningModule):
                 hazards: (batch, n_lines, n_treatments, n_intervals)
                 survivals: (batch, n_lines, n_treatments, n_intervals)
         """
-        kwargs = {"XPd": XPd, "X_static": X_static}
-        if gather:
-            if factual_idx is None:
-                raise RuntimeError(
-                    "Setting gather to True requires factual index but None was given"
-                )
-            kwargs.update({"gather": gather, "factual_idx": factual_idx})
+        if factual_idx is None:
+            raise RuntimeError(
+                "factual_idx is required: the encoder is conditioned on the factual treatment sequence"
+            )
+        kwargs = {
+            "XPd": XPd,
+            "X_static": X_static,
+            "gather": gather,
+            "factual_idx": factual_idx,
+        }
         return (
             self.predict_discrete_hazard(**kwargs),
             self.predict_discrete_survival(**kwargs),
@@ -769,17 +854,18 @@ class DynaSurvCausalOnline(L.LightningModule):
         factual_idx: None = None,
         cum: bool = False,
     ) -> torch.Tensor:
+        if factual_idx is None:
+            raise RuntimeError(
+                "factual_idx is required: the encoder is conditioned on the factual treatment sequence"
+            )
         if gather:
-            if factual_idx is None:
-                raise RuntimeError("gather set to true with no treatment idx")
-
             discrete_hazards = torch.sigmoid(
                 self.forward_factual(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_intervals)
 
         else:
             discrete_hazards = torch.sigmoid(
-                self.forward(XPd, X_static)[0]
+                self.forward(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_treatments, n_intervals)
 
         discrete_hazards = torch.cat(
@@ -797,17 +883,18 @@ class DynaSurvCausalOnline(L.LightningModule):
     def predict_discrete_survival(
         self, XPd, X_static, gather: bool = False, factual_idx: None = None
     ):
+        if factual_idx is None:
+            raise RuntimeError(
+                "factual_idx is required: the encoder is conditioned on the factual treatment sequence"
+            )
         if gather:
-            if factual_idx is None:
-                raise RuntimeError("gather set to true with no treatment idx")
-
             discrete_hazards = torch.sigmoid(
                 self.forward_factual(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_intervals)
 
         else:
             discrete_hazards = torch.sigmoid(
-                self.forward(XPd, X_static)[0]
+                self.forward(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_treatments, n_intervals)
 
         discrete_survival = torch.cumprod(1 - discrete_hazards, dim=-1)
@@ -816,6 +903,99 @@ class DynaSurvCausalOnline(L.LightningModule):
         )  # (batch, n_lines, n_intervals + 1)/ (batch, n_lines, n_treatments, n_intervals + 1)to account for S(0)=1
 
         return discrete_survival
+
+    # ====================== RMST and recommendation ======================
+    def compute_rmst(self, discrete_survival: torch.Tensor, tau: float) -> torch.Tensor:
+        """Restricted mean survival time up to `tau`.
+
+        RMST(tau) = the area under S(t) on [0, tau]. Preferred over survival at
+        a single distant time point here for two reasons: it stays interpretable
+        without proportional hazards (which the era-varying treatment mix makes
+        hard to defend), and it is the natural scale on which to compare arms
+        for a recommendation -- months of life gained, not a probability at an
+        arbitrary landmark.
+
+        Args:
+            discrete_survival: (..., n_intervals + 1) survival on interval_bounds.
+            tau: horizon, in the same units as interval_bounds (months).
+
+        Returns:
+            Tensor of shape (...) holding RMST for each leading index.
+        """
+        bounds = self.interval_bounds.to(discrete_survival.device)
+        tau_t = torch.as_tensor(
+            float(tau), device=discrete_survival.device, dtype=bounds.dtype
+        )
+        tau_t = torch.clamp(tau_t, max=bounds[-1])
+
+        # Trapezoid over each interval, truncated at tau. Segments beyond tau
+        # contribute nothing; the segment containing tau is clipped and its
+        # survival linearly interpolated at the cut point.
+        left, right = bounds[:-1], bounds[1:]
+        seg_lo = torch.clamp(left, max=tau_t)
+        seg_hi = torch.clamp(right, max=tau_t)
+        width = seg_hi - seg_lo  # (n_intervals,)
+
+        full_width = (right - left).clamp(min=1e-12)
+        frac = ((seg_hi - left) / full_width).clamp(0.0, 1.0)
+
+        s_left = discrete_survival[..., :-1]
+        s_right = discrete_survival[..., 1:]
+        s_at_hi = s_left + (s_right - s_left) * frac
+        return (0.5 * (s_left + s_at_hi) * width).sum(dim=-1)
+
+    def recommendable_mask(self, device: torch.device | None = None) -> torch.Tensor:
+        """(n_lines, n_treatments) boolean mask of arms eligible per line.
+
+        Defaults to all-true when no mask has been supplied, so the model still
+        behaves sensibly outside a Lightning fit/test loop.
+        """
+        mask = torch.zeros(
+            self.n_lines, self.n_treatments, dtype=torch.bool, device=device
+        )
+        per_line = getattr(self, "recommendable_treatments_per_line", None)
+        if not per_line:
+            return torch.ones_like(mask)
+        for line, arms in per_line.items():
+            if line < self.n_lines:
+                for k in arms:
+                    mask[line, k] = True
+        return mask
+
+    def recommend_treatment(
+        self,
+        XPd,
+        X_static,
+        factual_idx,
+        horizon_times: list[float] | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Rank arms by RMST and return the best *supported* arm per line.
+
+        Non-recommendable arms are set to -inf before the argmax rather than
+        merely being reported alongside the rest: an arm with no empirical
+        support at that line has a counterfactual the data cannot identify, and
+        letting it win the comparison would surface an extrapolation as advice.
+
+        Returns:
+            best_idx: (batch, n_lines) index of the recommended arm.
+            rmst: (batch, n_lines, n_treatments) RMST per arm, -inf where masked.
+        """
+        survival = self.predict_discrete_survival(
+            XPd=XPd, X_static=X_static, gather=False, factual_idx=factual_idx
+        )  # (batch, n_lines, n_treatments, n_intervals + 1)
+
+        horizons = horizon_times or self.evaluation_horizon_times
+        rmst = torch.stack(
+            [
+                self.compute_rmst(survival[:, line], horizons[line])
+                for line in range(survival.shape[1])
+            ],
+            dim=1,
+        )  # (batch, n_lines, n_treatments)
+
+        mask = self.recommendable_mask(device=rmst.device)[: rmst.shape[1]]
+        rmst = rmst.masked_fill(~mask.unsqueeze(0), float("-inf"))
+        return rmst.argmax(dim=-1), rmst
 
     def eval_factual_cumhazard(
         self,
@@ -918,9 +1098,31 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.valid_treatments_per_line = (
             self.trainer.datamodule.valid_treatments_per_line
         )
+        # Arms eligible to be recommended (support + well-definedness). Falls
+        # back to the IPM-support set when the datamodule predates the mask.
+        self.recommendable_treatments_per_line = getattr(
+            self.trainer.datamodule,
+            "recommendable_treatments_per_line",
+            self.valid_treatments_per_line,
+        )
 
     def on_fit_start(self) -> None:
         self._setup_valid_treatments()
 
     def on_test_start(self) -> None:
         self._setup_valid_treatments()
+
+    def on_validation_epoch_start(self) -> None:
+        self._eval_buffers = {}
+
+    def on_validation_epoch_end(self) -> None:
+        if not self.trainer.sanity_checking:
+            self._log_epoch_metrics()
+        self._eval_buffers = {}
+
+    def on_test_epoch_start(self) -> None:
+        self._eval_buffers = {}
+
+    def on_test_epoch_end(self) -> None:
+        self._log_epoch_metrics()
+        self._eval_buffers = {}

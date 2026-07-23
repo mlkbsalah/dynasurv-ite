@@ -15,7 +15,7 @@ FULL_ESME_COLUMN_SCHEME = {
     "x_static_prefix": "X_",
     "p_cols": ["T_treatment_category"],
     "p_static_prefix": "T_",
-    "d_cols": ["X_buffer_time"],
+    "d_cols": ["X_time_between_onsets"],
     "time_col": "Y_onset_to_death",
     "event_col": "Y_global_death_status",
     "progression_time_col": ["Y_onset_to_progression"],

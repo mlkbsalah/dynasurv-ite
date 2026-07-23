@@ -23,7 +23,7 @@ class FeatureAttention(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, input_dim),
-            nn.Softmax(dim=-1),
+            nn.Sigmoid(),
         )
 
     def forward(self, x: torch.Tensor):

@@ -341,35 +341,35 @@ All models are trained on the same training split, evaluated on the same held-ou
 \hline
 \textbf{Line} & \textbf{Model} & \textbf{C-index $\uparrow$} & \textbf{IBS $\downarrow$} & \textbf{ECE $\downarrow$} \\
 \hline
-\multirow{7}{*}{1}
- & Cox PH                  & 0.578 [0.570, 0.588] & 0.144 [0.142, 0.146] & 0.003 [0.003, 0.020] \\
- & DeepSurv                & 0.670 [0.660, 0.680] & 0.131 [0.127, 0.134] & 0.043 [0.031, 0.062] \\
- 
- & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
- & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\multirow{3.5}{*}{1}
+ & Cox PH                  & 0.752 & 0.106 & 0.024 \\
+ & DeepSurv                & \textbf{0.754} & \textbf{0.100} & 0.052 \\
+ & RSF                     & 0.749 & 0.111 & \textcolor{red}{.} \\
+ & Ours    & 0.731 & 0.135 & 0.124 \\
 \hline
-\multirow{7}{*}{2}
- & Cox PH                  & 0.558 [0.544, 0.570] & 0.139 [0.135, 0.142] & 0.005 [0.002, 0.019] \\
- & DeepSurv                & 0.652 [0.641, 0.662] & 0.129 [0.123, 0.134] & 0.072 [0.060, 0.086] \\
- & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
- & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\multirow{3.5}{*}{2}
+ & Cox PH                  & 0.721 & 0.109 & 0.014 \\
+ & DeepSurv                & 0.728 & \textbf{0.105} & 0.039 \\
+ & RSF                     & 0.723 & 0.112 & \textcolor{red}{.} \\
+ & Ours    & \textbf{0.736} & 0.116 & 0.094 \\
 \hline
-\multirow{7}{*}{3}
- & Cox PH                  & 0.624 [0.612, 0.637] & 0.149 [0.145, 0.153] & 0.022 [0.012, 0.037] \\
- & DeepSurv                & 0.652 [0.641, 0.665] & 0.148 [0.141, 0.153] & 0.089 [0.077, 0.106] \\
- & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
- & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\multirow{3.5}{*}{3}
+ & Cox PH                  & 0.726 & 0.123 & 0.012 \\
+ & DeepSurv                & \textbf{0.731} & \textbf{0.116} & 0.041 \\
+ & RSF                     & 0.724 & 0.126 & \textcolor{red}{.} \\
+ & Ours    & 0.730 & 0.119 & 0.050 \\
 \hline
-\multirow{7}{*}{4}
- & Cox PH                  & 0.478 [0.464, 0.499] & 0.177 [0.173, 0.181] & 0.005 [0.000, 0.028] \\
- & DeepSurv                & 0.627 [0.609, 0.643] & 0.182 [0.174, 0.190] & 0.156 [0.137, 0.175] \\
- & RSF                     & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
- & \textbf{Ours}    & \textcolor{red}{.} & \textcolor{red}{.} & \textcolor{red}{.} \\
+\multirow{3.5}{*}{4}
+ & Cox PH                  & 0.719 & 0.141 & 0.024 \\
+ & DeepSurv                & 0.710 & 0.144 & 0.089 \\
+ & RSF                     & 0.709 & 0.147 & \textcolor{red}{.} \\
+ & Ours    & \textbf{0.722} & \textbf{0.130} & 0.034 \\
 \hline
 \end{tabular}
-\caption{Factual prediction quality by treatment line. Values are mean [95\% CI] over bootstrap resamples of the test set.}
+\caption{Factual prediction quality by treatment line.}
 \label{tab:factual-perline}
 \end{table}
+
 
 Table~\ref{tab:factual-perline} reports the C-index, IBS and ECE as a function of treatment line for each model. \textcolor{red}{[One sentence on the trend: e.g., performance is highest at line 1 where the patient population is most homogeneous, and decreases at later lines as data become sparser and patient heterogeneity increases. The relative ordering of models is consistent across lines / changes at later lines, suggesting that ...].}
 

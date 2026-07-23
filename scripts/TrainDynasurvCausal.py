@@ -6,13 +6,11 @@ import tomllib
 from lightning.pytorch.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
-    # ModelCheckpoint,
+    ModelCheckpoint,
 )
 from lightning.pytorch.loggers import WandbLogger
 
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
-
-# from CausalSurv.data import ESMEProgressionOnlineDataModuleCV
 from CausalSurv.model import DynaSurvCausalOnline
 
 
@@ -34,7 +32,6 @@ def main(
     if fast_dev_run:
         train_config["trainer"]["max_epochs"] = 3
 
-    # data_module = ESMEOnlineDataModuleCV(
     data_module = ESMEOnlineDataModuleCV(
         data_dir=data_config["data_dir"],
         subtype=data_config["subtype"],
@@ -44,9 +41,15 @@ def main(
         split_seed=split_seed,
         num_workers=4,
         final_training=True,
+        cohort_start_year=data_config.get("cohort_start_year"),
+        temporal_split_year=data_config.get("temporal_split_year"),
+        add_calendar_feature=data_config.get("add_calendar_feature", False),
+        excluded_treatment_arms=data_config.get("excluded_treatment_arms"),
+        min_samples_per_treatment=data_config.get("min_samples_per_treatment", 200),
     )
 
     data_module.prepare_data()
+    data_module.describe_cohort()
     data_dims = data_module.get_data_dimensions()
 
     model = DynaSurvCausalOnline(
@@ -58,6 +61,7 @@ def main(
         interval_bounds=data_dims["time_bins"],
         # interval_bounds=data_dims["time_bins"],
         n_treatments=data_dims["p_input_dim"],
+        n_lines=data_config["n_lines"],
         lstm_hidden_length=model_config["lstm_hidden_length"],
         x_embed_dim=model_config["x_embed_dim"],
         p_embed_dim=model_config["p_embed_dim"],
@@ -80,36 +84,40 @@ def main(
     )
 
     callbacks = [
-        #     LearningRateMonitor(logging_interval="epoch"),
-        EarlyStopping(
-            monitor="val_loss",
-            mode=train_config["early_stopping"]["mode"],
-            patience=train_config["early_stopping"]["patience"],
-            verbose=True,
-        ),
         LearningRateMonitor(logging_interval="epoch"),
-        #     ModelCheckpoint(
-        #         monitor="val_loss",
-        #         mode="min",
-        #         save_top_k=1,
-        #         dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
-        #         filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
-        #     ),
-        #     ModelCheckpoint(
-        #         monitor="average_ci",
-        #         mode="max",
-        #         save_top_k=1,
-        #         dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
-        #         filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
-        #     ),
-        #     ModelCheckpoint(
-        #         monitor="average_ibs",
-        #         mode="min",
-        #         save_top_k=1,
-        #         dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
-        #         filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
-        #     ),
+        ModelCheckpoint(
+            monitor="val_loss",
+            mode="min",
+            save_top_k=1,
+            save_last=True,
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
+        ),
+        ModelCheckpoint(
+            monitor="average_ci",
+            mode="max",
+            save_top_k=1,
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
+        ),
+        ModelCheckpoint(
+            monitor="average_ibs",
+            mode="min",
+            save_top_k=1,
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
+        ),
     ]
+
+    if train_config["early_stopping"].get("enabled", True):
+        callbacks.append(
+            EarlyStopping(
+                monitor="val_loss",
+                mode=train_config["early_stopping"]["mode"],
+                patience=train_config["early_stopping"]["patience"],
+                verbose=True,
+            )
+        )
 
     logger = WandbLogger(
         project=f"DynaSurvCausalOnline_{data_config['subtype']}_{data_config['n_lines']}lines_new_inline_outcome",
@@ -119,10 +127,11 @@ def main(
 
     trainer = L.Trainer(
         max_epochs=train_config["trainer"]["max_epochs"],
-        accelerator="cpu",
+        accelerator=train_config["trainer"].get("accelerator", "cpu"),
         devices=1,
         logger=logger,
         callbacks=callbacks,
+        gradient_clip_val=train_config["trainer"].get("gradient_clip_val", 0.0),
         enable_checkpointing=True,
         enable_progress_bar=True,
         check_val_every_n_epoch=1,
@@ -154,7 +163,7 @@ if __name__ == "__main__":
     train_config = config["train"]
     eval_config = config["eval"]
 
-    model_config_dir = "/Users/malek/TheLAB/DynaSurv/configs/config_default_train_.toml"
+    model_config_dir = "/Users/malek/TheLAB/DynaSurv/configs/optuna_best.toml"
     model_config = load_config(model_config_dir)
 
     main(

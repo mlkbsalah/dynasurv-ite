@@ -14,7 +14,7 @@ FULL_ESME_COLUMN_SCHEME = {
     "x_static_prefix": "X_",
     "p_cols": ["T_treatment_category"],
     "p_static_prefix": "T_",
-    "d_cols": ["X_buffer_time"],
+    "d_cols": ["X_time_between_onsets"],
     "time_col": "Y_onset_to_death",
     "event_col": "Y_global_death_status",
     "pat_id": ["usubjid"],
@@ -140,6 +140,10 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"
         )
 
+        constant_cols = df_dynamic.nunique()[df_dynamic.nunique() == 1].index.tolist()
+        if constant_cols:
+            df_dynamic = df_dynamic.drop(columns=constant_cols)
+
         return df_dynamic, df_static
 
     def _merge_and_filter(
@@ -159,6 +163,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             .reset_index(drop=True)
             .copy()
         )
+
         return df_merge
 
     def _split_and_pad(

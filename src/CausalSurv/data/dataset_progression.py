@@ -28,7 +28,7 @@ class ESMEProgressionOnlineDataset(TorchData.Dataset):
             X_static (torch.Tensor): Static features of shape (n_patients, n_features_static)
             P (torch.Tensor): Treatment assignments of shape (n_patients, n_lines, n_treatments)
             P_static (torch.Tensor): Static treatment features of shape (n_patients, n_treatments_static)
-            d (torch.Tensor): Buffer duration between lines of shape (n_patients, n_lines, 1)
+            d (torch.Tensor): duration between lines of shape (n_patients, n_lines, 1)
             death_time (torch.Tensor): Time-to-death of shape (n_patients, n_lines, 1)
             death_event (torch.Tensor): Death event indicators of shape (n_patients, n_lines, 1)
             death_interval (torch.Tensor): Death interval indices of shape (n_patients, n_lines, 1)

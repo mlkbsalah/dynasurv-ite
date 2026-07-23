@@ -36,6 +36,8 @@ def objective(
     data_config: dict,
     eval_config: dict,
     data_dims: dict,
+    data_dir: str = "../../data/",
+    gradient_clip_val: float = 0.0,
 ) -> float:
     # ---- architecture -------------------------------------------------------
     lstm_hidden = trial.suggest_categorical("lstm_hidden_length", [64, 128, 256])
@@ -61,7 +63,7 @@ def objective(
 
     # ---- data ---------------------------------------------------------------
     data_module = ESMEOnlineDataModuleCV(
-        data_dir="../../data/",
+        data_dir=data_dir,
         subtype=data_config["subtype"],
         n_lines=data_config["n_lines"],
         n_intervals=HPO_N_INTERVALS,
@@ -81,6 +83,7 @@ def objective(
         output_length=data_dims["output_dim"],
         interval_bounds=data_dims["time_bins"],
         n_treatments=data_dims["p_input_dim"],
+        n_lines=data_config["n_lines"],
         lstm_hidden_length=lstm_hidden,
         lstm_num_layers=lstm_num_layers,
         x_embed_dim=x_embed_dim,
@@ -122,6 +125,7 @@ def objective(
         enable_checkpointing=False,
         enable_progress_bar=True,
         enable_model_summary=False,
+        gradient_clip_val=gradient_clip_val,
         callbacks=callbacks,
     )
 
@@ -180,6 +184,14 @@ def main():
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument("--n-jobs", type=int, default=1)
     parser.add_argument("--study-name", type=str, default="dynasurv_hpo")
+    parser.add_argument("--data-dir", type=str, default="../../data/")
+    parser.add_argument("--config", type=str, default=str(CONFIG_PATH))
+    parser.add_argument("--gradient-clip-val", type=float, default=0.0)
+    parser.add_argument(
+        "--out",
+        type=str,
+        default=str(Path(__file__).resolve().parent / "best_config.toml"),
+    )
     parser.add_argument(
         "--storage",
         type=str,
@@ -187,13 +199,13 @@ def main():
     )
     args = parser.parse_args()
 
-    config = load_toml(CONFIG_PATH)
+    config = load_toml(Path(args.config))
     data_config = config["data"]
     eval_config = config["eval"]
 
     # Pre-load data dims once — shared across all trials
     probe_dm = ESMEOnlineDataModuleCV(
-        data_dir="../../data/",
+        data_dir=args.data_dir,
         subtype=data_config["subtype"],
         n_lines=data_config["n_lines"],
         n_intervals=HPO_N_INTERVALS,
@@ -223,7 +235,14 @@ def main():
 
     optuna.logging.set_verbosity(optuna.logging.INFO)
     study.optimize(
-        lambda trial: objective(trial, data_config, eval_config, data_dims),
+        lambda trial: objective(
+            trial,
+            data_config,
+            eval_config,
+            data_dims,
+            data_dir=args.data_dir,
+            gradient_clip_val=args.gradient_clip_val,
+        ),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
         gc_after_trial=True,
@@ -235,7 +254,7 @@ def main():
     for k, v in study.best_params.items():
         print(f"  {k}: {v}")
 
-    out_path = Path(__file__).resolve().parent / "best_config.toml"
+    out_path = Path(args.out)
     _write_best_config(study, out_path)
 
 

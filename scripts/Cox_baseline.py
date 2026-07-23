@@ -25,13 +25,13 @@ LINE_ID_COL = "lineid"
 TIME_COL = "Y_onset_to_death"
 EVENT_COL = "Y_global_death_status"
 
-# Must match DynaSurv configs/config.toml evaluation_horizon_times and brier_integration_step
 EVALUATION_HORIZON_TIMES = [100.0, 75.0, 50.0, 30.0]
 BRIER_INTEGRATION_STEPS = 6
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 N_BOOTSTRAP = 100
 CI_ALPHA = 0.95
+ECE_TIMES = [6.0, 12.0, 18.0, 24.0]
 
 
 def make_data():
@@ -47,8 +47,6 @@ def make_data():
         .copy()
     )
 
-    # One-hot encode categorical columns (e.g. T_treatment_category) to match
-    # the pd.get_dummies encoding done in ESMEOnlineDataModuleCV._transform_to_tensor
     feature_prefixes = ("X_", "T_")
     cat_cols = [
         c
@@ -57,14 +55,14 @@ def make_data():
         and df_merge[c].dtype in ("object", "category")
     ]
     if cat_cols:
-        # ic(f"One-hot encoding categorical columns: {cat_cols}")
         df_merge = pd.get_dummies(df_merge, columns=cat_cols, dtype=float)
 
     Y_col = [TIME_COL, EVENT_COL]
     X_col = [
-        col for col in df_merge.columns if col.startswith("X_") or col.startswith("T_")
+        col
+        for col in df_merge.columns
+        if col.startswith("X_") or col.startswith("T_treatment")
     ] + [PAT_ID_COL]
-    # ic(f"Total features (after encoding): {len(X_col)}")
 
     XY_list = [
         (
@@ -199,9 +197,7 @@ def fit_cox(X: pd.DataFrame, Y: pd.DataFrame):
     return cox, feature_cols
 
 
-def evaluate_cox(
-    cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax, eval_time
-):
+def evaluate_cox(cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax):
     """Evaluate a fitted Cox model with the same IPCW C-index and IBS as DynaSurv.
 
     C-index: time-dependent, IPCW-weighted (matches eval_cindex_ipcw).
@@ -256,17 +252,22 @@ def evaluate_cox(
     )
     ibs = bs_fun.integral().item()
 
-    # ---- ECE ---------------------------------------------------------------
+    # ---- ECE (mean over ECE_TIMES) -----------------------------------------
     surv_fns_ece = cox.predict_survival_function(X_test_f)
-    pred_surv_at_t = _eval_step_fns(
-        surv_fns_ece, np.array([eval_time]), fill_before=1.0
-    )[:, 0]
-    ece = compute_ece(
-        pred_surv_at_t,
-        y_test_struct["time"].copy(),
-        y_test_struct["event"].copy(),
-        eval_time,
-    )
+    ece_vals = []
+    for t in ECE_TIMES:
+        pred_surv_at_t = _eval_step_fns(surv_fns_ece, np.array([t]), fill_before=1.0)[
+            :, 0
+        ]
+        ece_vals.append(
+            compute_ece(
+                pred_surv_at_t,
+                y_test_struct["time"].copy(),
+                y_test_struct["event"].copy(),
+                t,
+            )
+        )
+    ece = float(np.nanmean(ece_vals))
 
     return c_index, ibs, ece
 
@@ -312,7 +313,7 @@ if __name__ == "__main__":
 
         # Point estimates on the full test set
         c_index, ibs, ece = evaluate_cox(
-            cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax, tmax
+            cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax
         )
 
         # Bootstrap CIs (resample test set only, model is fixed)
@@ -330,7 +331,6 @@ if __name__ == "__main__":
                 _ytr,
                 _Xte.iloc[idx].reset_index(drop=True),
                 _yte[idx],
-                tmax,
                 tmax,
             )
 

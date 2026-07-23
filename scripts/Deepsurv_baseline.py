@@ -35,6 +35,7 @@ TEST_SIZE = 0.2
 RANDOM_STATE = 2691820962
 N_BOOTSTRAP = 100
 CI_ALPHA = 0.95
+ECE_TIMES = [6.0, 12.0, 18.0, 24.0]
 
 # DeepSurv hyperparameters
 HIDDEN_DIMS = [64, 64]
@@ -353,7 +354,6 @@ def evaluate_deepsurv(
     X_test,
     y_test_struct,
     tmax,
-    eval_time,
 ):
     """Evaluate DeepSurv with the same IPCW C-index and IBS as DynaSurv."""
     train_events = torch.tensor(y_train_struct["event"].copy(), dtype=torch.bool)
@@ -406,16 +406,21 @@ def evaluate_deepsurv(
     )
     ibs = bs_fun.integral().item()
 
-    # ---- ECE ---------------------------------------------------------------
-    pred_surv_at_t = predict_survival_matrix(
-        log_risks_test, event_times, H0, np.array([eval_time])
-    )[:, 0]
-    ece = compute_ece(
-        pred_surv_at_t,
-        y_test_struct["time"].copy(),
-        y_test_struct["event"].copy(),
-        eval_time,
-    )
+    # ---- ECE (mean over ECE_TIMES) -----------------------------------------
+    ece_vals = []
+    for t in ECE_TIMES:
+        pred_surv_at_t = predict_survival_matrix(
+            log_risks_test, event_times, H0, np.array([t])
+        )[:, 0]
+        ece_vals.append(
+            compute_ece(
+                pred_surv_at_t,
+                y_test_struct["time"].copy(),
+                y_test_struct["event"].copy(),
+                t,
+            )
+        )
+    ece = float(np.nanmean(ece_vals))
 
     return c_index, ibs, ece
 
@@ -474,7 +479,6 @@ if __name__ == "__main__":
             X_test,
             y_test_struct,
             tmax,
-            tmax,
         )
 
         # Bootstrap CIs (resample test set only, model is fixed)
@@ -498,7 +502,6 @@ if __name__ == "__main__":
                 _ytr,
                 _Xte.iloc[idx].reset_index(drop=True),
                 _yte[idx],
-                tmax,
                 tmax,
             )
 

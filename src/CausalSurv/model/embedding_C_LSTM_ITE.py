@@ -59,13 +59,6 @@ class embed_LSTM_ITE(nn.Module):
             if attention
             else None
         )
-        self.attention_P = (
-            FeatureAttention(
-                input_dim=self.p_input_dim, hidden_dim=self.p_input_dim // 2
-            )
-            if attention
-            else None
-        )
 
         # MLPs
         self.MLPx = MLP(
@@ -74,12 +67,8 @@ class embed_LSTM_ITE(nn.Module):
             n_units=self.mlpx_hidden_units,
             dropout=self.mlpx_dropout,
         )
-        self.MLPp = MLP(
-            input_dim=self.p_input_dim,
-            output_dim=self.p_embed_dim,
-            n_units=self.mlpp_hidden_units,
-            dropout=self.mlpp_dropout,
-        )
+
+        self.treatment_embedding = nn.Embedding(self.p_input_dim, self.p_embed_dim)
 
         # Forget gate
         self.linear_forget_Wxf = nn.Linear(
@@ -219,11 +208,12 @@ class embed_LSTM_ITE(nn.Module):
         """
         return self.sigmoid_out(self.linear_out_Wxo(x) + self.linear_out_Who(h_prev))
 
-    def forward(self, XPd, tuple_in):
+    def forward(self, XPd, tuple_in, treatment_idx_t):
         """Forward pass of the LSTM cell.
         Args:
             XPd (torch.Tensor): shape (batch, 1, features) or (batch, features)
             tuple_in (tuple): (h_prev, c_prev, p_prev)
+            treatment_idx_t (torch.Tensor): shape (batch,) - indices for treatment embedding
 
         Returns:
             tuple: (sa, h, c, p)
@@ -233,18 +223,15 @@ class embed_LSTM_ITE(nn.Module):
         if XPd.ndim == 3:
             XPd = XPd[:, 0, :]
         X = XPd[:, : self.x_input_dim]
-        P = XPd[:, self.x_input_dim : -1]
+        # P = XPd[:, self.x_input_dim : -1]
         d = XPd[:, -1:]
 
         weighted_X, wX = (
             self.attention_X(X) if self.attention_X is not None else (X, None)
         )
-        weighted_P, wP = (
-            self.attention_P(P) if self.attention_P is not None else (P, None)
-        )
 
+        p = self.treatment_embedding(treatment_idx_t)
         x = self.MLPx(weighted_X)
-        p = self.MLPp(weighted_P)
 
         i = self._input_gate(x, h_prev)
         f = self._forget_gate(x, d, h_prev, p_prev)
@@ -255,62 +242,13 @@ class embed_LSTM_ITE(nn.Module):
         for proj in self.layer_projections:
             x = proj(h)
             i = self._input_gate(x, h)
-            f = self._forget_gate(x, d, h, p)
+            # p_prev, not p: the returned state must stay invariant to the treatment
+            # decided at this line, or the per-treatment heads read a representation
+            # that already encodes the factual arm and their counterfactuals are void.
+            f = self._forget_gate(x, d, h, p_prev)
             c = self._cell_memory_gate(i, f, x, h, c)
             o = self._out_gate(x, h)
             h = o * self.activation_final(c)
 
         sa = self.MLPsa(h)
         return sa, h, c, p
-
-
-if __name__ == "__main__":
-    batch_size = 1
-    x_input_dim, p_input_dim = 6, 12
-    output_sa_length = 7
-
-    model = embed_LSTM_ITE(
-        x_input_dim=x_input_dim,
-        p_input_dim=p_input_dim,
-        hidden_length=16,
-        output_length=output_sa_length,
-        x_embed_dim=8,
-        p_embed_dim=8,
-        mlpx_hidden_units=[16, 16],
-        mlpp_hidden_units=[16, 16],
-        mlpsa_hidden_units=[16, 16],
-        mlpx_dropout=0.1,
-        mlpp_dropout=0.1,
-        mlpsa_dropout=0.1,
-        attention=True,
-    )
-
-    time_steps = 19
-    features = x_input_dim + p_input_dim + 1
-    XPd = torch.randn(batch_size, time_steps, features)
-
-    h_0 = torch.zeros(batch_size, model.hidden_length)
-    c_0 = torch.zeros(batch_size, model.hidden_length)
-    p_0 = torch.zeros(batch_size, model.p_embed_dim)
-    states = (h_0, c_0, p_0)
-
-    import logging
-
-    logging.basicConfig(level=logging.INFO)
-
-    for t in range(time_steps):
-        sa, h_0, c_0, p_0 = model(XPd[:, t, :], states)
-        states = (h_0, c_0, p_0)
-
-    logging.info(
-        f"Output sa shape: {sa.shape}, should be ({batch_size}, {output_sa_length})"
-    )
-    logging.info(
-        f"Final hidden state h shape: {h_0.shape}, should be ({batch_size}, {model.hidden_length})"
-    )
-    logging.info(
-        f"Final cell state c shape: {c_0.shape}, should be ({batch_size}, {model.hidden_length})"
-    )
-    logging.info(
-        f"Final p state shape: {p_0.shape}, should be ({batch_size}, {model.p_embed_dim})"
-    )
