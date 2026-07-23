@@ -50,3 +50,4 @@ CLAUDE.md
 *.pdf
 *.csv
 *.db
+lightning_logs/*
