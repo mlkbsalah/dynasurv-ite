@@ -10,8 +10,9 @@ figure(s) into `plots/`.
   ```bash
   python data_analysis/<script>.py
   ```
-- Figures are written to `data_analysis/plots/` (git-ignored `*.png`; regenerate by
-  re-running the script).
+- Figures are written to `data_analysis/plots/` (git-ignored; regenerate by
+  re-running the script). Interactive figures are self-contained HTML — open them
+  in any browser and hover for the underlying counts.
 - Scripts resolve the repo root relative to their own location, so they work whether
   run from the repo root or elsewhere.
 
@@ -19,4 +20,4 @@ figure(s) into `plots/`.
 
 | Script | What it produces |
 |--------|------------------|
-| `treatment_category_repeats.py` | Consecutive repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−): repeat blocks per patient, and repeats per category broken down by run length. → `plots/treatment_category_repeats.png` |
+| `treatment_category_repeats.py` | Interactive Plotly figure: consecutive repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−) — repeat blocks per patient, and repeats per category broken down by run length. Hover any bar/segment for counts and percentages. → `plots/treatment_category_repeats.html` |

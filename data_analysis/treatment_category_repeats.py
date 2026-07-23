@@ -8,17 +8,20 @@ in adjacent lines, length >= 2):
   * how many repeat blocks a patient has (0 / 1 / 2), and
   * how long those blocks are (2 / 3 / 4 lines), broken down by category.
 
+Renders an interactive two-panel Plotly figure: hover any bar/segment for the
+underlying counts and percentages.
+
 Run:  python data_analysis/treatment_category_repeats.py
-Figure -> data_analysis/plots/treatment_category_repeats.png
+Figure -> data_analysis/plots/treatment_category_repeats.html
 """
 
 from collections import Counter
 from itertools import groupby
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
-from matplotlib.patches import Patch
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = (
@@ -79,142 +82,168 @@ def load_repeats():
 
 
 def make_figure(n_pat, nrep, rep_by_cat, cat_total, len_pool):
-    plt.rcParams.update(
-        {
-            "font.family": "sans-serif",
-            "font.sans-serif": ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"],
-            "figure.facecolor": SURFACE,
-            "axes.facecolor": SURFACE,
-            "text.color": INK,
-            "axes.edgecolor": BASE,
-            "axes.labelcolor": SEC,
-            "xtick.color": MUTED,
-            "ytick.color": MUTED,
-        }
+    """Build the interactive two-panel figure and write it to an HTML file."""
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        column_widths=[0.34, 0.66],
+        horizontal_spacing=0.13,
+        subplot_titles=(
+            "<b>How often patients repeat a category</b>",
+            "<b>Which categories are repeated — and for how long</b>",
+        ),
     )
-    fig, (axA, axB) = plt.subplots(
-        1, 2, figsize=(13, 5.6), gridspec_kw={"width_ratios": [1, 1.55]}
-    )
-    fig.subplots_adjust(left=0.055, right=0.985, top=0.80, bottom=0.11, wspace=0.28)
 
     # --- Panel A: repeat blocks per patient ---
     xs = [0, 1, 2]
-    pct = [100 * nrep.get(k, 0) / n_pat for k in xs]
-    bars = axA.bar(xs, pct, width=0.62, color=BLUE, zorder=3)
-    axA.set_xticks(xs)
-    axA.set_xlabel("consecutive-repeat blocks per patient", fontsize=10.5)
-    axA.set_ylabel("% of patients", fontsize=10.5)
-    axA.set_ylim(0, max(pct) * 1.18)
-    for b, p, k in zip(bars, pct, xs):
-        axA.text(
-            b.get_x() + b.get_width() / 2,
-            p + max(pct) * 0.02,
-            f"{p:.1f}%\n({nrep.get(k, 0):,})",
-            ha="center",
-            va="bottom",
-            fontsize=9.5,
-            color=INK,
-            linespacing=1.25,
-        )
-    axA.set_title(
-        "How often patients repeat a category",
-        fontsize=12,
-        color=INK,
-        fontweight="bold",
-        loc="left",
-        pad=8,
+    counts = [nrep.get(k, 0) for k in xs]
+    pct = [100 * c / n_pat for c in counts]
+    fig.add_trace(
+        go.Bar(
+            x=[str(k) for k in xs],
+            y=pct,
+            marker_color=BLUE,
+            width=0.62,
+            text=[f"{p:.1f}%" for p in pct],
+            textposition="outside",
+            textfont=dict(color=INK, size=12),
+            customdata=[[c] for c in counts],
+            hovertemplate=(
+                "<b>%{x} repeat block(s)</b><br>"
+                "%{customdata[0]:,} patients<br>"
+                "%{y:.1f}% of patients"
+                "<extra></extra>"
+            ),
+            showlegend=False,
+        ),
+        row=1,
+        col=1,
     )
-    axA.yaxis.grid(True, color=GRID, lw=0.8, zorder=0)
-    axA.set_axisbelow(True)
-    for s in ("top", "right"):
-        axA.spines[s].set_visible(False)
 
-    # --- Panel B: repeats by category x run length ---
-    cats = [c for c, _ in cat_total.most_common()][::-1]  # largest on top
-    y = list(range(len(cats)))
-    left = [0] * len(cats)
+    # --- Panel B: repeats by category x run length (stacked horizontal) ---
+    # ascending by total so the largest category ends up on top
+    cats = [c for c, _ in cat_total.most_common()][::-1]
     for length in (2, 3, 4):
         vals = [rep_by_cat.get((c, length), 0) for c in cats]
-        axB.barh(
-            y,
-            vals,
-            left=left,
-            color=LEN_COLORS[length],
-            height=0.66,
-            edgecolor=SURFACE,
-            linewidth=1.4,
-            zorder=3,
+        cust = [[100 * v / cat_total[c], cat_total[c]] for v, c in zip(vals, cats)]
+        fig.add_trace(
+            go.Bar(
+                y=cats,
+                x=vals,
+                orientation="h",
+                name=f"{length} lines",
+                marker_color=LEN_COLORS[length],
+                marker_line=dict(color=SURFACE, width=1.2),
+                customdata=cust,
+                hovertemplate=(
+                    "<b>%{y}</b><br>"
+                    "repeat length: %{fullData.name}<br>"
+                    "%{x:,} blocks (%{customdata[0]:.1f}% of this category)<br>"
+                    "category total: %{customdata[1]:,} blocks"
+                    "<extra></extra>"
+                ),
+            ),
+            row=1,
+            col=2,
         )
-        left = [base + v for base, v in zip(left, vals)]
-    for yi, c in zip(y, cats):
-        axB.text(
-            cat_total[c] + max(cat_total.values()) * 0.01,
-            yi,
-            f"{cat_total[c]:,}",
-            va="center",
-            ha="left",
-            fontsize=9,
-            color=INK,
+
+    # category-total labels at the end of each stacked bar
+    xmax = max(cat_total.values())
+    for c in cats:
+        fig.add_annotation(
+            x=cat_total[c] + xmax * 0.01,
+            y=c,
+            text=f"{cat_total[c]:,}",
+            xref="x2",
+            yref="y2",
+            xanchor="left",
+            yanchor="middle",
+            showarrow=False,
+            font=dict(color=INK, size=11),
         )
-    axB.set_yticks(y)
-    axB.set_yticklabels(cats, fontsize=9.5, color=INK)
-    axB.set_xlabel("number of consecutive-repeat blocks", fontsize=10.5)
-    axB.set_xlim(0, max(cat_total.values()) * 1.10)
-    axB.set_title(
-        "Which categories are repeated — and for how long",
-        fontsize=12,
-        color=INK,
-        fontweight="bold",
-        loc="left",
-        pad=8,
-    )
-    axB.xaxis.grid(True, color=GRID, lw=0.8, zorder=0)
-    axB.set_axisbelow(True)
-    for s in ("top", "right", "left"):
-        axB.spines[s].set_visible(False)
-    axB.tick_params(axis="y", length=0)
 
-    handles = [
-        Patch(facecolor=LEN_COLORS[length], label=f"{length} lines")
-        for length in (2, 3, 4)
-    ]
-    leg = axB.legend(
-        handles=handles,
-        title="repeat length",
-        loc="lower right",
-        frameon=False,
-        fontsize=9.5,
-        title_fontsize=9.5,
-        handlelength=1.1,
-        borderaxespad=0.4,
-    )
-    leg.get_title().set_color(SEC)
-
-    fig.suptitle(
-        "Consecutive repetition of treatment category over the first 4 lines",
-        x=0.055,
-        y=0.955,
-        ha="left",
-        fontsize=14.5,
-        fontweight="bold",
-        color=INK,
-    )
+    # --- layout ---
     pct_any = 100 * (1 - nrep.get(0, 0) / n_pat)
-    fig.text(
-        0.055,
-        0.885,
-        f"HR+HER2− cohort · patients with ≥ 4 treatment lines "
-        f"(n = {n_pat:,}) · a repeat = same category in consecutive lines "
-        f"· {pct_any:.0f}% repeat ≥ 1 category · "
-        f"{sum(len_pool.values()):,} repeat blocks total",
-        ha="left",
-        fontsize=10,
-        color=SEC,
+    fig.update_layout(
+        barmode="stack",
+        bargap=0.35,
+        template="plotly_white",
+        paper_bgcolor=SURFACE,
+        plot_bgcolor=SURFACE,
+        font=dict(
+            family="Helvetica Neue, Helvetica, Arial, sans-serif",
+            color=INK,
+            size=12,
+        ),
+        title=dict(
+            text=(
+                "Consecutive repetition of treatment category over the first 4 lines"
+                "<br><span style='font-size:13px;color:" + SEC + "'>"
+                f"HR+HER2− cohort · patients with ≥ 4 treatment lines (n = {n_pat:,}) · "
+                "a repeat = same category in consecutive lines · "
+                f"{pct_any:.0f}% repeat ≥ 1 category · "
+                f"{sum(len_pool.values()):,} repeat blocks total</span>"
+            ),
+            x=0.012,
+            xanchor="left",
+            font=dict(size=19),
+        ),
+        legend=dict(
+            title_text="repeat length",
+            title_font_color=SEC,
+            orientation="v",
+            x=0.995,
+            xanchor="right",
+            y=0.02,
+            yanchor="bottom",
+            bgcolor="rgba(252,252,251,0.85)",
+            bordercolor=BASE,
+            borderwidth=1,
+        ),
+        margin=dict(l=10, r=20, t=120, b=60),
+        height=560,
+        hoverlabel=dict(
+            bgcolor="#ffffff",
+            bordercolor=BASE,
+            font=dict(color=INK, size=12),
+        ),
+    )
+
+    # axes
+    fig.update_yaxes(
+        title_text="% of patients", gridcolor=GRID, zeroline=False, row=1, col=1
+    )
+    fig.update_xaxes(
+        title_text="consecutive-repeat blocks per patient",
+        type="category",
+        gridcolor=GRID,
+        row=1,
+        col=1,
+    )
+    fig.update_xaxes(
+        title_text="number of consecutive-repeat blocks",
+        gridcolor=GRID,
+        zeroline=False,
+        range=[0, xmax * 1.12],
+        row=1,
+        col=2,
+    )
+    fig.update_yaxes(
+        categoryorder="array",
+        categoryarray=cats,
+        gridcolor="rgba(0,0,0,0)",
+        row=1,
+        col=2,
     )
 
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = PLOTS_DIR / "treatment_category_repeats.png"
-    fig.savefig(out, dpi=170, facecolor=SURFACE)
+    out = PLOTS_DIR / "treatment_category_repeats.html"
+    fig.write_html(
+        out,
+        include_plotlyjs=True,  # self-contained (works offline / in sandboxes)
+        full_html=True,
+        config={"displayModeBar": True, "responsive": True},
+    )
     return out
 
 
