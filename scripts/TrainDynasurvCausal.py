@@ -41,9 +41,15 @@ def main(
         split_seed=split_seed,
         num_workers=4,
         final_training=True,
+        cohort_start_year=data_config.get("cohort_start_year"),
+        temporal_split_year=data_config.get("temporal_split_year"),
+        add_calendar_feature=data_config.get("add_calendar_feature", False),
+        excluded_treatment_arms=data_config.get("excluded_treatment_arms"),
+        min_samples_per_treatment=data_config.get("min_samples_per_treatment", 200),
     )
 
     data_module.prepare_data()
+    data_module.describe_cohort()
     data_dims = data_module.get_data_dimensions()
 
     model = DynaSurvCausalOnline(

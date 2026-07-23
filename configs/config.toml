@@ -13,6 +13,48 @@ subtype = "HR+HER2-"
 n_lines = 4
 batch_size = 128
 
+# --- Identifiability controls (see improvements.md) ---
+# Keep only patients whose FIRST line starts in/after this year, so every arm in
+# the action set was available across the whole window. CDK4/6 inhibitors did
+# not exist before ~2014 and bevacizumab-based CT+ANTI-ANGIO all but vanished
+# after 2016; pooling those eras makes the propensity model assign a 2010
+# patient a sizeable probability of a drug that did not yet exist.
+cohort_start_year = 2018
+
+# Hold out the latest entry years rather than a random subset, so validation
+# measures generalisation across treatment-policy eras.
+#
+# 2021 rather than 2022: the holdout is by construction the least-followed part
+# of the cohort, and a 2022 cutoff leaves it with ~26 months of administrative
+# follow-up at most. At that cutoff NO line has a usable horizon (0% of line-2
+# holdout records reach 24 months, 0% of line-4 records reach 18), so every
+# RMST figure would be extrapolation past the last observation. 2021 keeps
+# 67% of line-1 holdout records to 24 months and gives a 68/32 split.
+temporal_split_year = 2021
+
+# Expose calendar time to the encoder. Safe only inside the restricted window,
+# where it is an ordinary confounder rather than a determinant of availability.
+add_calendar_feature = true
+
+# Arms excluded from the recommendable action set. Records are retained (they
+# inform patient history); only their eligibility to be recommended is removed.
+# NO TREATMENT: 207/0/0/1 across lines - a line-1 coding artefact, not a therapy.
+# OTHER / ET+TT: 736 and 344 distinct regimens, modal share 0.16 - not a single
+# well-defined intervention.
+excluded_treatment_arms = ["NO TREATMENT", "OTHER", "ET+TT"]
+
+# An arm must clear this many observations at a line to be recommendable there.
+min_samples_per_treatment = 200
+
 [eval]
-horizon_times = [100, 75, 50, 30] # in months
+# Per-line horizons in months. These are set by what the HOLDOUT can support,
+# not the cohort as a whole: the holdout is the latest-entering patients, so it
+# always has the least follow-up, and a horizon the full cohort supports can be
+# pure extrapolation there. Share of holdout records (entry 2021+, DB lock
+# 2024-02) whose administrative follow-up reaches each horizon:
+#   line 1, tau=24: 67.1%    line 2, tau=18: 46.2%
+#   line 3, tau=12: ~50%     line 4, tau=12: ~40%
+# The original [100, 75, 50, 30] was not estimable at all here; even [36,30,24,24]
+# was unsupported once the temporal holdout was taken into account.
+horizon_times = [24, 18, 12, 12]
 integration_step = 100 # the dx in the trapezoidal rule for integrating Brier score over time

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import lightning as L
+import numpy as np
 import pandas as pd
 import torch
 import torch.utils.data as TorchData
@@ -20,7 +21,22 @@ FULL_ESME_COLUMN_SCHEME = {
     "event_col": "Y_global_death_status",
     "pat_id": ["usubjid"],
     "lineid": ["lineid"],
+    "line_start_col": "line_start_date",
 }
+
+# Arms excluded from the *recommendable* action set (they remain in the data so
+# that patient histories stay intact and still inform the encoder).
+#
+#   NO TREATMENT  - counts across lines 1-4 are 207/0/0/1: a line-1 coding
+#                   artefact, not a therapeutic option. Structural
+#                   non-positivity at every later line.
+#   OTHER         - 736 distinct drug-flag combinations, modal share 0.16.
+#                   "Set A_k = OTHER" is not a well-defined intervention
+#                   (multiple versions of treatment).
+#   ET+TT         - 344 distinct combinations, modal share 0.16; same problem.
+#
+# See improvements.md sections 3, 6 and 7 for the supporting counts.
+DEFAULT_EXCLUDED_ARMS = ["NO TREATMENT", "OTHER", "ET+TT"]
 
 
 class ESMEOnlineDataModuleCV(L.LightningDataModule):
@@ -43,11 +59,36 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         num_workers: int = 4,
         standardize_continuous: bool = True,
         binary_threshold: int = 2,
+        cohort_start_year: int | None = None,
+        temporal_split_year: int | None = None,
+        add_calendar_feature: bool = False,
+        excluded_treatment_arms: list[str] | None = None,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.column_scheme = columns_scheme
         self._subtype = subtype
+
+        # --- Identifiability controls (see improvements.md) ---
+        # cohort_start_year: keep only patients whose FIRST line starts in or
+        #   after this year, so every arm in the action set was available for
+        #   the whole window (positivity by restriction, section 1).
+        # temporal_split_year: patients entering in or after this year form the
+        #   holdout, so validation measures generalisation across policy eras
+        #   rather than across a random shuffle (section 5).
+        # add_calendar_feature: expose calendar time to the encoder as a
+        #   covariate, which is safe once availability is stable (section 2).
+        self.cohort_start_year = cohort_start_year
+        self.temporal_split_year = temporal_split_year
+        self.add_calendar_feature = add_calendar_feature
+        self.excluded_treatment_arms = (
+            DEFAULT_EXCLUDED_ARMS
+            if excluded_treatment_arms is None
+            else excluded_treatment_arms
+        )
+        self.patient_entry_years: pd.Series | None = None
+        self.recommendable_treatments_per_line: dict[int, list[int]] = {}
+        self.cohort_summary: Dict[str, object] = {}
 
         self.n_lines = n_lines
         self.n_intervals = n_intervals
@@ -158,7 +199,67 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             self.data_dir / "model_entry_imputes_data_STATIC_no_staging.parquet"
         )
 
+        # The cohort restriction and the calendar covariate are applied here
+        # rather than in prepare_data() because get_data_dimensions() re-loads
+        # the frames independently; doing it later would report a feature count
+        # that disagrees with the tensors actually built.
+        df_dynamic = self._restrict_to_cohort(df_dynamic)
+        df_dynamic = self._add_calendar_feature(df_dynamic)
+
         return df_dynamic, df_static
+
+    def _entry_years(self, df_dynamic: pd.DataFrame) -> pd.Series:
+        """Calendar year of each patient's FIRST treatment line."""
+        pat_id = self.column_scheme["pat_id"][0]
+        start_col = self.column_scheme["line_start_col"]
+        return df_dynamic.groupby(pat_id)[start_col].min().dt.year.rename("entry_year")
+
+    def _restrict_to_cohort(self, df_dynamic: pd.DataFrame) -> pd.DataFrame:
+        """Keep patients whose first line starts at/after `cohort_start_year`.
+
+        The filter is applied at the PATIENT level, not the record level. A
+        record-level cut would keep a patient's line 3 while dropping lines 1-2,
+        handing the sequence encoder a history that starts mid-trajectory; on
+        this cohort that severs 31% of retained patients. Entry-based selection
+        keeps every trajectory whole, which is also what a target trial
+        emulation enrolling patients at metastatic diagnosis would do.
+        """
+        if self.cohort_start_year is None:
+            return df_dynamic
+
+        pat_id = self.column_scheme["pat_id"][0]
+        entry = self._entry_years(df_dynamic)
+        keep = entry[entry >= self.cohort_start_year].index
+        restricted = df_dynamic[df_dynamic[pat_id].isin(keep)].copy()
+
+        self.cohort_summary = {
+            "cohort_start_year": self.cohort_start_year,
+            "patients_before": int(df_dynamic[pat_id].nunique()),
+            "patients_after": int(restricted[pat_id].nunique()),
+            "records_before": int(len(df_dynamic)),
+            "records_after": int(len(restricted)),
+        }
+        return restricted
+
+    def _add_calendar_feature(self, df_dynamic: pd.DataFrame) -> pd.DataFrame:
+        """Add months-since-cohort-start as a dynamic covariate.
+
+        Safe only inside an availability-stable window: there calendar time is
+        an ordinary confounder (secular drift in supportive care and in the
+        treatment policy) rather than a determinant of which arms exist, so
+        conditioning on it removes bias instead of licensing extrapolation.
+        """
+        if not self.add_calendar_feature:
+            return df_dynamic
+
+        start_col = self.column_scheme["line_start_col"]
+        df_dynamic = df_dynamic.copy()
+        origin_year = self.cohort_start_year or int(df_dynamic[start_col].dt.year.min())
+        origin = pd.Timestamp(year=origin_year, month=1, day=1)
+        df_dynamic["X_calendar_months"] = (
+            df_dynamic[start_col] - origin
+        ).dt.days / 30.44
+        return df_dynamic
 
     def _detect_continuous_columns(
         self, df: pd.DataFrame, candidate_cols: list[str]
@@ -248,6 +349,46 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
 
         return valid_treatments
 
+    def _compute_recommendable_treatments_per_line(
+        self, valid_treatments_per_line: dict[int, list[int]]
+    ) -> dict[int, list[int]]:
+        """Arms the model is allowed to *recommend*, per line.
+
+        Two filters compose here:
+
+        1. Empirical support -- an arm must clear `min_samples_per_treatment` at
+           that line. Below that the counterfactual is extrapolation rather than
+           identification, and the viable set genuinely differs by line (at
+           line 4 endocrine therapy alone all but disappears while mono-chemo
+           dominates), so a single global action space is wrong in both
+           directions.
+        2. Well-definedness -- arms in `excluded_treatment_arms` are dropped
+           regardless of support, either because they are not an intervention
+           at all (NO TREATMENT) or because the label pools too many distinct
+           regimens to be a single intervention (OTHER, ET+TT).
+
+        Records for excluded arms are deliberately NOT removed from the
+        dataset: they are real treatment events that inform the patient history
+        and the shared encoder. Only their eligibility to be *recommended* is
+        withdrawn.
+
+        Caveat: support is counted on the full cohort, holdout included, so the
+        holdout's arm composition informs which arms are eligible. This is an
+        eligibility decision rather than a fitted parameter -- at deployment you
+        would likewise use all history to decide what may be offered -- but if
+        you need a strictly clean split, recompute this from the train indices
+        inside setup() and re-read it in the model's on_fit_start.
+        """
+        excluded_idx = {
+            idx
+            for idx, name in self.treatment_dict.items()
+            if name in self.excluded_treatment_arms
+        }
+        return {
+            line: [k for k in valid if k not in excluded_idx]
+            for line, valid in valid_treatments_per_line.items()
+        }
+
     def _transform_to_tensor(self, df_merge: pd.DataFrame):
         p_encoded = pd.get_dummies(
             df_merge[
@@ -322,6 +463,9 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         valid_treatments_per_line = self._compute_valid_treatments_per_line(
             treatment_indices, mask, self.min_samples_per_treatment
         )
+        self.recommendable_treatments_per_line = (
+            self._compute_recommendable_treatments_per_line(valid_treatments_per_line)
+        )
 
         return (
             {
@@ -373,11 +517,102 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             self._transform_to_tensor(df_merge)
         )
 
+        # Entry year per patient, ordered to match padded_tensor_data["patient_ids"],
+        # so the temporal split in setup() can index the dataset directly.
+        entry = self._entry_years(df_merge)
+        self.patient_entry_years = entry.reindex(padded_tensor_data["patient_ids"])
+
         self.ESMEDataset = ESMEOnlineDataset(
             **padded_tensor_data,
         )
 
+    def describe_cohort(self) -> None:
+        """Print the cohort restriction, action mask and split composition.
+
+        Every run states the population it was actually fit on, so a checkpoint
+        can never be read as covering more patients or more arms than it does.
+        """
+        print("\n" + "=" * 72)
+        print("COHORT / IDENTIFIABILITY SUMMARY")
+        print("=" * 72)
+
+        if self.cohort_summary:
+            s = self.cohort_summary
+            print(
+                f"Cohort restriction: first line >= {s['cohort_start_year']}\n"
+                f"  patients {s['patients_before']} -> {s['patients_after']}"
+                f"   records {s['records_before']} -> {s['records_after']}"
+            )
+        else:
+            print("Cohort restriction: none (full calendar range)")
+
+        print(
+            f"Calendar covariate: {'X_calendar_months' if self.add_calendar_feature else 'none'}"
+        )
+
+        if self.patient_entry_years is not None:
+            counts = self.patient_entry_years.value_counts().sort_index()
+            print(f"Entry years: {dict(counts)}")
+
+        if (
+            self.temporal_split_year is not None
+            and self.patient_entry_years is not None
+        ):
+            years = self.patient_entry_years.to_numpy()
+            n_tr = int((years < self.temporal_split_year).sum())
+            n_ho = int((years >= self.temporal_split_year).sum())
+            print(
+                f"Temporal split at {self.temporal_split_year}: "
+                f"train {n_tr} patients / holdout {n_ho} patients "
+                f"({n_ho / (n_tr + n_ho):.1%} held out)"
+            )
+        else:
+            print(f"Split: random, holdout_size={self.holdout_size}")
+
+        print(f"Excluded from action set: {self.excluded_treatment_arms}")
+        print(
+            f"Recommendable arms per line (min {self.min_samples_per_treatment} obs):"
+        )
+        for line in sorted(self.recommendable_treatments_per_line):
+            names = [
+                self.treatment_dict[k]
+                for k in self.recommendable_treatments_per_line[line]
+            ]
+            print(f"  line {line + 1}: {len(names)} arms -> {names}")
+        print("=" * 72 + "\n")
+
     # ========= Data splitting ==========
+
+    def _temporal_split(self) -> Tuple[TorchData.Subset, TorchData.Subset]:
+        """Split by patient entry year instead of at random.
+
+        A random split lets a 2019 patient sit in train while another 2019
+        patient is scored in validation, so the model is told what the 2019
+        treatment policy looked like before being asked to predict on it. Since
+        the policy is the thing that drifts, that inflates apparent performance
+        in a way deployment will not reproduce. Holding out the latest entry
+        years instead measures exactly the generalisation the single-line
+        estimand assumes: that the future-treatment policy at deployment stays
+        close to the one seen in training.
+        """
+        assert self.patient_entry_years is not None, (
+            "prepare_data() must run before a temporal split can be built."
+        )
+        years = self.patient_entry_years.to_numpy()
+        train_idx = np.flatnonzero(years < self.temporal_split_year).tolist()
+        holdout_idx = np.flatnonzero(years >= self.temporal_split_year).tolist()
+
+        if not train_idx or not holdout_idx:
+            raise ValueError(
+                f"temporal_split_year={self.temporal_split_year} leaves an empty split "
+                f"(train={len(train_idx)}, holdout={len(holdout_idx)}). "
+                "Pick a year inside the cohort's entry range."
+            )
+
+        return (
+            TorchData.Subset(self.ESMEDataset, train_idx),
+            TorchData.Subset(self.ESMEDataset, holdout_idx),
+        )
 
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
@@ -387,13 +622,16 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         dataset_length = len(self.ESMEDataset)
         holdout_length = int(self.holdout_size * dataset_length)
 
-        # train/finetuning - RealTest (holdout)
-        generator = torch.Generator().manual_seed(self.split_seed)
-        self.cv_dataset, self.holdout_dataset = TorchData.random_split(
-            self.ESMEDataset,
-            [dataset_length - holdout_length, holdout_length],
-            generator=generator,
-        )
+        if self.temporal_split_year is not None:
+            self.cv_dataset, self.holdout_dataset = self._temporal_split()
+        else:
+            # train/finetuning - RealTest (holdout)
+            generator = torch.Generator().manual_seed(self.split_seed)
+            self.cv_dataset, self.holdout_dataset = TorchData.random_split(
+                self.ESMEDataset,
+                [dataset_length - holdout_length, holdout_length],
+                generator=generator,
+            )
 
         if self.final_training:
             if stage == "fit" or stage is None:
