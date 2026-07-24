@@ -1,26 +1,34 @@
-"""Overall survival from line-1 onset, per treatment category, by year of onset.
+"""Overall survival from line-1 onset, crossed by treatment category and onset year.
 
 For the HR+HER2- cohort, takes each patient's first treatment line and builds
-Kaplan-Meier overall-survival curves measured from the line-1 start date. Within
-each treatment category, one curve per calendar year of line-1 onset, so a shift
-of the curves with calendar year is directly visible.
+Kaplan-Meier overall-survival curves measured from the line-1 start date. The same
+(category x year) cells are shown three ways:
 
-Two interactive Plotly figures are written:
+  * ``km_line1_panel_per_year.html``     - one panel per calendar year of line-1
+    onset, stratified inside the year by treatment category. Answers "in a given
+    year, how did the treatments compare?".
+  * ``km_line1_panel_per_category.html`` - one panel per treatment category, one
+    curve per onset year (light = early, dark = recent). Answers "did this
+    treatment's survival shift over the years?".
+  * ``km_line1_24mo_trend.html``         - both collapsed to 24-month OS by year,
+    one line per category, with 95% CIs.
 
-  * ``km_line1_by_year.html``     - small multiples, one panel per treatment
-    category, one KM curve per onset year (light = early years, dark = recent).
-    Clicking a year in the legend toggles it in every panel at once.
-  * ``km_line1_24mo_trend.html``  - the same information collapsed to a single
-    milestone: 24-month OS by onset year, one line per treatment category,
-    with 95% CIs.
+Clicking a series in any legend isolates it across every panel at once.
+
+All 11 treatment categories are in scope. A curve is only drawn for a (category,
+year) cell with at least ``MIN_N`` patients, because a Kaplan-Meier curve on a
+handful of patients is noise rather than signal; ``main`` prints the full
+coverage table so the suppressed cells stay visible. Three categories
+(CT+ANTI-HER2, CT+IT, CT+TT) never reach ``MIN_N`` in any single year -- they are
+only estimable pooled across years, which ``km_line1_adjusted.py`` does.
 
 Caveats the figures are annotated with:
   * follow-up is administratively censored at the database lock (2024-03), so
     recent-year cohorts have short, noisier tails; curves stop at each cohort's
     own last follow-up rather than being extrapolated flat.
-  * the treatment mix itself moves over calendar time (ET+ANTI-CDK only appears
-    from 2017, CT+ANTI-ANGIO collapses after 2015), so a within-category shift
-    over years is partly case-mix, not only a change in efficacy.
+  * these are crude, unadjusted curves -- within a year the treatment groups are
+    not exchangeable (confounding by indication). See ``km_line1_adjusted.py``
+    for IPTW/IPCW-adjusted curves.
 
 Run:  python data_analysis/km_line1_by_year.py
 Figures -> data_analysis/plots/
@@ -42,11 +50,10 @@ DATA_PATH = (
 )
 PLOTS_DIR = Path(__file__).resolve().parent / "plots"
 
-MIN_N = 40  # smallest year-cohort we will draw a curve for
+MIN_N = 20  # smallest (category, year) cell we will draw a curve for
 HORIZON = 60.0  # months of follow-up shown on the x-axis
 GRID = np.arange(0.0, HORIZON + 0.5, 0.5)
 MILESTONE = 24.0  # months, for the trend figure
-N_PANELS = 6  # treatment categories shown (largest by line-1 volume)
 
 # ---- palette / chrome (dataviz reference palette, light mode) ----
 SURFACE, INK, SEC, MUTED, GRID_C, BASE = (
@@ -57,6 +64,20 @@ SURFACE, INK, SEC, MUTED, GRID_C, BASE = (
     "#e1e0d9",
     "#c3c2b7",
 )
+# categorical slots 1-8, validated: adjacent CVD dE 9.1, normal-vision dE 19.6
+CAT_COLORS = [
+    "#2a78d6",
+    "#eb6834",
+    "#1baf7a",
+    "#eda100",
+    "#e87ba4",
+    "#008300",
+    "#4a3aa7",
+    "#e34948",
+]
+# past slot 8 the palette is out of validated hues: fall back to muted + dashed
+# (secondary encoding) rather than inventing a 9th competing colour.
+OVERFLOW_COLOR = MUTED
 # blue ordinal ramp, steps 250->700 (light-mode ordinal floor is step 250)
 BLUE_RAMP = [
     "#86b6ef",
@@ -70,8 +91,6 @@ BLUE_RAMP = [
     "#104281",
     "#0d366b",
 ]
-# categorical slots 1-6 (validated: adjacent CVD dE 9.1, normal-vision 19.6)
-CAT_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 
 
 def ramp_color(frac):
@@ -112,7 +131,7 @@ def load_line1():
 
 
 def km_curve(times, events):
-    """Step-evaluate KM survival + 95% CI + at-risk on GRID, truncated at last follow-up."""
+    """Step-evaluate KM survival + 95% CI + at-risk on GRID, cut at last follow-up."""
     kmf = KaplanMeierFitter().fit(times, events)
     timeline = kmf.survival_function_.index.values
     surv = kmf.survival_function_.iloc[:, 0].values
@@ -153,90 +172,35 @@ def milestone_os(times, events, t_star=MILESTONE):
     return float(kmf.survival_function_.iloc[i, 0]), float(ci[i, 0]), float(ci[i, 1])
 
 
-def cells(df):
-    """(category, year) cohorts with at least MIN_N patients, largest categories first."""
-    order = [c for c, _ in df["category"].value_counts().items()][:N_PANELS]
-    out = {}
-    for cat in order:
-        sub = df[df["category"] == cat]
-        years = sorted(y for y, n in sub["year"].value_counts().items() if n >= MIN_N)
-        if years:
-            out[cat] = {y: sub[sub["year"] == y] for y in years}
-    return out
+def category_order(df):
+    """All treatment categories, largest line-1 volume first (a stable colour key)."""
+    return list(df["category"].value_counts().index)
 
 
-def make_km_grid(df, by_cat):
-    """Small multiples: one panel per category, one KM curve per onset year."""
-    cats = list(by_cat)
-    n_col = 3
-    n_row = int(np.ceil(len(cats) / n_col))
-    all_years = sorted({y for cells_ in by_cat.values() for y in cells_})
-    span = max(all_years) - min(all_years)
-    color = {y: ramp_color((y - min(all_years)) / span) for y in all_years}
-
-    titles = [
-        f"<b>{cat}</b><span style='color:{SEC};font-weight:400'>"
-        f"  n = {sum(len(g) for g in by_cat[cat].values()):,}</span>"
-        for cat in cats
-    ]
-    fig = make_subplots(
-        rows=n_row,
-        cols=n_col,
-        subplot_titles=titles,
-        horizontal_spacing=0.055,
-        vertical_spacing=0.13,
-        shared_yaxes=False,
-    )
-
-    seen = set()
+def cat_style(cats):
+    """Colour + dash per category; past the 8 validated slots use muted + dotted."""
+    style = {}
     for i, cat in enumerate(cats):
-        row, col = i // n_col + 1, i % n_col + 1
-        for year, grp in by_cat[cat].items():
-            curve = km_curve(grp["time"].values, grp["event"].values)
-            if curve is None:
-                continue
-            med = curve["median"]
-            med_txt = "not reached" if not np.isfinite(med) else f"{med:.0f} mo"
-            cust = np.column_stack(
-                [
-                    curve["lo"] * 100,
-                    curve["hi"] * 100,
-                    curve["at_risk"],
-                    np.full(len(curve["t"]), len(grp)),
-                ]
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=curve["t"],
-                    y=curve["s"] * 100,
-                    mode="lines",
-                    line=dict(color=color[year], width=2, shape="hv"),
-                    name=str(year),
-                    legendgroup=str(year),
-                    showlegend=year not in seen,
-                    customdata=cust,
-                    hovertemplate=(
-                        f"<b>{cat} · {year}</b><br>"
-                        "%{x:.0f} months from line-1 onset<br>"
-                        "OS %{y:.1f}%  (95% CI %{customdata[0]:.1f}–%{customdata[1]:.1f})<br>"
-                        "at risk: %{customdata[2]:,} of %{customdata[3]:,}<br>"
-                        f"median OS: {med_txt}"
-                        "<extra></extra>"
-                    ),
-                ),
-                row=row,
-                col=col,
-            )
-            seen.add(year)
+        if i < len(CAT_COLORS):
+            style[cat] = (CAT_COLORS[i], "solid")
+        else:
+            style[cat] = (OVERFLOW_COLOR, "dot")
+    return style
 
-        fig.add_hline(
-            y=50,
-            line=dict(color=BASE, width=1, dash="dot"),
-            row=row,
-            col=col,
-        )
 
-    n_pat = sum(len(g) for cells_ in by_cat.values() for g in cells_.values())
+def coverage(df, cats):
+    """(category, year) -> patient frame, keeping only cells of at least MIN_N."""
+    counts = pd.crosstab(df["category"], df["year"]).reindex(cats).fillna(0).astype(int)
+    kept = {}
+    for cat in cats:
+        sub = df[df["category"] == cat]
+        for year, n in counts.loc[cat].items():
+            if n >= MIN_N:
+                kept[(cat, year)] = sub[sub["year"] == year]
+    return counts, kept
+
+
+def apply_chrome(fig, title, subtitle, legend_title, height, legend_y):
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor=SURFACE,
@@ -245,24 +209,18 @@ def make_km_grid(df, by_cat):
             family="Helvetica Neue, Helvetica, Arial, sans-serif", color=INK, size=12
         ),
         title=dict(
-            text=(
-                "Overall survival from line-1 onset, by treatment category and year of onset"
-                "<br><span style='font-size:13px;color:" + SEC + "'>"
-                f"HR+HER2− cohort · {n_pat:,} patients in year-cohorts of ≥ {MIN_N} · "
-                "light = early years, dark = recent · dotted line = median · "
-                "click a year in the legend to isolate it in every panel</span>"
-            ),
+            text=f"{title}<br><span style='font-size:13px;color:{SEC}'>{subtitle}</span>",
             x=0.008,
             xanchor="left",
             font=dict(size=19),
         ),
         legend=dict(
-            title_text="year of line-1 onset",
+            title_text=legend_title,
             title_font_color=SEC,
             orientation="h",
             x=0.5,
             xanchor="center",
-            y=-0.09,
+            y=legend_y,
             yanchor="top",
             bgcolor="rgba(252,252,251,0.85)",
             bordercolor=BASE,
@@ -272,15 +230,15 @@ def make_km_grid(df, by_cat):
         hoverlabel=dict(
             bgcolor="#ffffff", bordercolor=BASE, font=dict(color=INK, size=12)
         ),
-        margin=dict(l=60, r=24, t=118, b=118),
-        height=300 * n_row + 190,
+        height=height,
     )
-    fig.update_xaxes(range=[0, HORIZON], gridcolor=GRID_C, zeroline=False, dtick=12)
-    fig.update_yaxes(range=[0, 100], gridcolor=GRID_C, zeroline=False, ticksuffix="%")
-    # axis titles only on the outer edge of the grid
-    for i in range(len(cats)):
+
+
+def _outer_axis_titles(fig, n_panels, n_col):
+    """x title only on the bottom edge of the grid, y title only on the left edge."""
+    for i in range(n_panels):
         row, col = i // n_col + 1, i % n_col + 1
-        if i + n_col >= len(cats):
+        if i + n_col >= n_panels:
             fig.update_xaxes(
                 title_text="months since line-1 onset",
                 title_font=dict(size=11, color=SEC),
@@ -294,8 +252,10 @@ def make_km_grid(df, by_cat):
                 row=row,
                 col=col,
             )
-    # left-align each panel title over its own panel
-    for i, ann in enumerate(fig.layout.annotations[: len(cats)]):
+
+
+def _left_align_titles(fig, n_panels):
+    for i, ann in enumerate(fig.layout.annotations[:n_panels]):
         axis_key = "xaxis" if i == 0 else f"xaxis{i + 1}"
         ann.update(
             x=fig.layout[axis_key].domain[0],
@@ -303,8 +263,45 @@ def make_km_grid(df, by_cat):
             font=dict(size=13, color=INK),
         )
 
+
+def _add_km(fig, curve, grp, label, hover_head, color, dash, group, show, row, col):
+    med = curve["median"]
+    med_txt = "not reached" if not np.isfinite(med) else f"{med:.0f} mo"
+    cust = np.column_stack(
+        [
+            curve["lo"] * 100,
+            curve["hi"] * 100,
+            curve["at_risk"],
+            np.full(len(curve["t"]), len(grp)),
+        ]
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=curve["t"],
+            y=curve["s"] * 100,
+            mode="lines",
+            line=dict(color=color, width=2, shape="hv", dash=dash),
+            name=label,
+            legendgroup=group,
+            showlegend=show,
+            customdata=cust,
+            hovertemplate=(
+                f"<b>{hover_head}</b><br>"
+                "%{x:.0f} months from line-1 onset<br>"
+                "OS %{y:.1f}%  (95% CI %{customdata[0]:.1f}–%{customdata[1]:.1f})<br>"
+                "at risk: %{customdata[2]:,} of %{customdata[3]:,}<br>"
+                f"median OS: {med_txt}"
+                "<extra></extra>"
+            ),
+        ),
+        row=row,
+        col=col,
+    )
+
+
+def write_html(fig, name):
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = PLOTS_DIR / "km_line1_by_year.html"
+    out = PLOTS_DIR / name
     fig.write_html(
         out,
         include_plotlyjs=True,
@@ -314,13 +311,159 @@ def make_km_grid(df, by_cat):
     return out
 
 
-def make_trend(by_cat):
+def make_year_panels(cats, kept, counts):
+    """One panel per onset year, stratified inside the year by treatment category."""
+    style = cat_style(cats)
+    years = sorted({y for _, y in kept})
+    n_col = 5
+    n_row = int(np.ceil(len(years) / n_col))
+
+    titles = []
+    for year in years:
+        n = sum(len(g) for (_, y), g in kept.items() if y == year)
+        titles.append(
+            f"<b>{year}</b><span style='color:{SEC};font-weight:400'>  n = {n:,}</span>"
+        )
+    fig = make_subplots(
+        rows=n_row,
+        cols=n_col,
+        subplot_titles=titles,
+        horizontal_spacing=0.035,
+        vertical_spacing=0.10,
+    )
+
+    seen = set()
+    for i, year in enumerate(years):
+        row, col = i // n_col + 1, i % n_col + 1
+        for cat in cats:  # global order keeps colours and legend stable
+            grp = kept.get((cat, year))
+            if grp is None:
+                continue
+            curve = km_curve(grp["time"].values, grp["event"].values)
+            if curve is None:
+                continue
+            color, dash = style[cat]
+            _add_km(
+                fig,
+                curve,
+                grp,
+                cat,
+                f"{cat} · {year}",
+                color,
+                dash,
+                cat,
+                cat not in seen,
+                row,
+                col,
+            )
+            seen.add(cat)
+        fig.add_hline(
+            y=50, line=dict(color=BASE, width=1, dash="dot"), row=row, col=col
+        )
+
+    n_pat = sum(len(g) for g in kept.values())
+    never = [c for c in cats if not any(k[0] == c for k in kept)]
+    never_txt = (
+        f" · never ≥ {MIN_N} in a single year, so not drawn here: "
+        + ", ".join(f"{c} ({counts.loc[c].sum():,} in total)" for c in never)
+        if never
+        else ""
+    )
+    apply_chrome(
+        fig,
+        "Overall survival from line-1 onset — one panel per year, stratified by treatment",
+        f"HR+HER2− cohort · {n_pat:,} patients in (treatment × year) cells of ≥ {MIN_N} · "
+        "dotted line = median · click a treatment in the legend to isolate it in every "
+        f"year{never_txt}",
+        "treatment category at line 1",
+        260 * n_row + 210,
+        -0.055 if n_row > 2 else -0.10,
+    )
+    fig.update_xaxes(range=[0, HORIZON], gridcolor=GRID_C, zeroline=False, dtick=24)
+    fig.update_yaxes(range=[0, 100], gridcolor=GRID_C, zeroline=False, ticksuffix="%")
+    _outer_axis_titles(fig, len(years), n_col)
+    _left_align_titles(fig, len(years))
+    return write_html(fig, "km_line1_panel_per_year.html")
+
+
+def make_category_panels(cats, kept):
+    """One panel per treatment category, one curve per onset year (light -> dark)."""
+    drawn = [c for c in cats if any(k[0] == c for k in kept)]
+    n_col = 4
+    n_row = int(np.ceil(len(drawn) / n_col))
+    all_years = sorted({y for _, y in kept})
+    span = max(max(all_years) - min(all_years), 1)
+    color = {y: ramp_color((y - min(all_years)) / span) for y in all_years}
+
+    titles = [
+        f"<b>{cat}</b><span style='color:{SEC};font-weight:400'>"
+        f"  n = {sum(len(g) for (c, _), g in kept.items() if c == cat):,}</span>"
+        for cat in drawn
+    ]
+    fig = make_subplots(
+        rows=n_row,
+        cols=n_col,
+        subplot_titles=titles,
+        horizontal_spacing=0.045,
+        vertical_spacing=0.13,
+    )
+
+    seen = set()
+    for i, cat in enumerate(drawn):
+        row, col = i // n_col + 1, i % n_col + 1
+        for year in all_years:
+            grp = kept.get((cat, year))
+            if grp is None:
+                continue
+            curve = km_curve(grp["time"].values, grp["event"].values)
+            if curve is None:
+                continue
+            _add_km(
+                fig,
+                curve,
+                grp,
+                str(year),
+                f"{cat} · {year}",
+                color[year],
+                "solid",
+                str(year),
+                year not in seen,
+                row,
+                col,
+            )
+            seen.add(year)
+        fig.add_hline(
+            y=50, line=dict(color=BASE, width=1, dash="dot"), row=row, col=col
+        )
+
+    n_pat = sum(len(g) for g in kept.values())
+    apply_chrome(
+        fig,
+        "Overall survival from line-1 onset — one panel per treatment, stratified by year",
+        f"HR+HER2− cohort · {n_pat:,} patients in (treatment × year) cells of ≥ {MIN_N} · "
+        "light = early years, dark = recent · dotted line = median · "
+        "click a year in the legend to isolate it in every panel",
+        "year of line-1 onset",
+        300 * n_row + 200,
+        -0.09 if n_row > 1 else -0.16,
+    )
+    fig.update_xaxes(range=[0, HORIZON], gridcolor=GRID_C, zeroline=False, dtick=12)
+    fig.update_yaxes(range=[0, 100], gridcolor=GRID_C, zeroline=False, ticksuffix="%")
+    _outer_axis_titles(fig, len(drawn), n_col)
+    _left_align_titles(fig, len(drawn))
+    return write_html(fig, "km_line1_panel_per_category.html")
+
+
+def make_trend(cats, kept):
     """24-month OS by onset year, one line per treatment category, with 95% CIs."""
+    style = cat_style(cats)
     fig = go.Figure()
     rows = []
-    for i, (cat, cells_) in enumerate(by_cat.items()):
+    for cat in cats:
+        years = sorted(y for c, y in kept if c == cat)
         xs, ys, lo, hi, ns = [], [], [], [], []
-        for year, grp in cells_.items():
+        for year in years:
+            grp = kept[(cat, year)]
             est = milestone_os(grp["time"].values, grp["event"].values)
             if est is None:
                 continue
@@ -333,14 +476,14 @@ def make_trend(by_cat):
             rows.append((cat, year, len(grp), s, cl, ch))
         if not xs:
             continue
-        color = CAT_COLORS[i % len(CAT_COLORS)]
+        color, dash = style[cat]
         fig.add_trace(
             go.Scatter(
                 x=xs,
                 y=ys,
                 mode="lines+markers",
                 name=cat,
-                line=dict(color=color, width=2),
+                line=dict(color=color, width=2, dash=dash),
                 marker=dict(color=color, size=8, line=dict(color=SURFACE, width=1.5)),
                 error_y=dict(
                     type="data",
@@ -365,43 +508,17 @@ def make_trend(by_cat):
             )
         )
 
-    fig.update_layout(
-        template="plotly_white",
-        paper_bgcolor=SURFACE,
-        plot_bgcolor=SURFACE,
-        font=dict(
-            family="Helvetica Neue, Helvetica, Arial, sans-serif", color=INK, size=12
-        ),
-        title=dict(
-            text=(
-                f"{MILESTONE:.0f}-month overall survival from line-1 onset, by year of onset"
-                "<br><span style='font-size:13px;color:" + SEC + "'>"
-                f"HR+HER2− cohort · year-cohorts of ≥ {MIN_N} patients with ≥ {MILESTONE:.0f} "
-                "months of potential follow-up · whiskers = 95% CI</span>"
-            ),
-            x=0.008,
-            xanchor="left",
-            font=dict(size=19),
-        ),
-        legend=dict(
-            title_text="treatment category at line 1",
-            title_font_color=SEC,
-            orientation="h",
-            x=0.5,
-            xanchor="center",
-            y=-0.16,
-            yanchor="top",
-            bgcolor="rgba(252,252,251,0.85)",
-            bordercolor=BASE,
-            borderwidth=1,
-        ),
-        hovermode="closest",
-        hoverlabel=dict(
-            bgcolor="#ffffff", bordercolor=BASE, font=dict(color=INK, size=12)
-        ),
-        margin=dict(l=64, r=28, t=110, b=110),
-        height=560,
+    apply_chrome(
+        fig,
+        f"{MILESTONE:.0f}-month overall survival from line-1 onset, by year of onset",
+        f"HR+HER2− cohort · (treatment × year) cells of ≥ {MIN_N} patients with ≥ "
+        f"{MILESTONE:.0f} months of potential follow-up · whiskers = 95% CI · "
+        "crude, unadjusted",
+        "treatment category at line 1",
+        560,
+        -0.16,
     )
+    fig.update_layout(margin=dict(l=64, r=28, t=110, b=110))
     fig.update_xaxes(
         title_text="year of line-1 onset", gridcolor=GRID_C, zeroline=False, dtick=1
     )
@@ -411,15 +528,7 @@ def make_trend(by_cat):
         gridcolor=GRID_C,
         zeroline=False,
     )
-
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = PLOTS_DIR / "km_line1_24mo_trend.html"
-    fig.write_html(
-        out,
-        include_plotlyjs=True,
-        full_html=True,
-        config={"displayModeBar": True, "responsive": True},
-    )
+    out = write_html(fig, "km_line1_24mo_trend.html")
     return out, pd.DataFrame(
         rows, columns=["category", "year", "n", "os24", "ci_lo", "ci_hi"]
     )
@@ -427,23 +536,33 @@ def make_trend(by_cat):
 
 def main():
     df = load_line1()
-    by_cat = cells(df)
+    cats = category_order(df)
+    counts, kept = coverage(df, cats)
+
     print(f"line-1 patients: {len(df):,}  ({df['year'].min()}-{df['year'].max()})")
-    for cat, cells_ in by_cat.items():
-        years = list(cells_)
+    print(f"treatment categories: {len(cats)}")
+    print(f"\npatients per (category, year) — cells drawn at MIN_N={MIN_N} marked *")
+    marked = counts.astype(str)
+    for cat in counts.index:
+        for year in counts.columns:
+            if (cat, year) in kept:
+                marked.loc[cat, year] = marked.loc[cat, year] + "*"
+    print(marked.to_string())
+    never = [c for c in cats if not any(k[0] == c for k in kept)]
+    if never:
         print(
-            f"  {cat:<20} {sum(len(g) for g in cells_.values()):>6,} patients "
-            f"in {len(years)} year-cohorts ({years[0]}-{years[-1]})"
+            f"\nnever drawable in a single year (< {MIN_N}/year): " + ", ".join(never)
         )
-    print("saved", make_km_grid(df, by_cat))
-    out, tbl = make_trend(by_cat)
+
+    print("\nsaved", make_year_panels(cats, kept, counts))
+    print("saved", make_category_panels(cats, kept))
+    out, tbl = make_trend(cats, kept)
     print("saved", out)
-    print()
-    print(f"{MILESTONE:.0f}-month OS by category and year (%):")
+    print(f"\n{MILESTONE:.0f}-month OS by category and year (%):")
     piv = tbl.assign(os24=(tbl.os24 * 100).round(1)).pivot(
         index="category", columns="year", values="os24"
     )
-    print(piv.to_string(na_rep="·"))
+    print(piv.reindex([c for c in cats if c in piv.index]).to_string(na_rep="·"))
 
 
 if __name__ == "__main__":
