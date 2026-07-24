@@ -51,3 +51,6 @@ CLAUDE.md
 *.csv
 *.db
 lightning_logs/*
+data_raw/*
+dynasurv.tar
+dynasurv.sif

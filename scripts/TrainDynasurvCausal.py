@@ -63,6 +63,7 @@ def main(
         n_treatments=data_dims["p_input_dim"],
         n_lines=data_config["n_lines"],
         lstm_hidden_length=model_config["lstm_hidden_length"],
+        lstm_num_layers=model_config.get("lstm_num_layers", 4),
         x_embed_dim=model_config["x_embed_dim"],
         p_embed_dim=model_config["p_embed_dim"],
         init_h_hidden=model_config["init_h_hidden"],
@@ -106,6 +107,14 @@ def main(
             save_top_k=1,
             dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
             filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
+        ),
+        # Always keep the final trained epoch (no metric monitored), since the
+        # best-metric checkpoints above tend to land on early epochs (~15).
+        ModelCheckpoint(
+            monitor=None,
+            save_top_k=1,
+            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            filename="dynaSurvCausalOnline-last-{epoch:02d}",
         ),
     ]
 

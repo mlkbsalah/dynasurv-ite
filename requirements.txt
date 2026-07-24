@@ -1,0 +1,54 @@
+# DynaSurv dependencies
+# Versions pinned to the `dynasurv_env` mamba environment (Python 3.12).
+# Requires Python >= 3.11 (stdlib `tomllib` is used for config loading).
+#
+# Note: torch is pinned to the macOS/CPU build used locally. On the HPC cluster
+# install the CUDA wheel matching the node toolkit instead of this pin.
+
+# --- Deep learning / training ---
+torch==2.10.0
+lightning==2.6.1
+torchmetrics==1.8.2
+
+# --- Survival analysis ---
+torchsurv==0.1.6
+scikit-survival==0.25.0
+lifelines==0.30.0
+
+# --- Scientific stack ---
+numpy==2.3.5
+pandas==2.3.3
+scipy==1.16.3
+scikit-learn==1.7.2
+pyarrow==22.0.0          # parquet engine for pd.read_parquet in the datamodules
+joblib==1.5.2
+
+# --- Optimal transport (EMD covariate-balance loss: `import ot`) ---
+POT==0.9.6.post1
+
+# --- Experiment tracking & hyperparameter search ---
+wandb==0.23.0
+optuna==4.7.0
+optuna-integration==4.8.0   # PyTorchLightningPruningCallback
+
+# --- Plotting / reporting ---
+matplotlib==3.10.8
+plotly==6.5.2
+seaborn==0.13.2
+prettytable==3.17.0
+
+# --- Utilities ---
+tqdm==4.67.1
+icecream==2.1.10
+
+# --- Notebooks (notebooks/*.ipynb) ---
+skrub==0.7.2
+ipykernel==7.1.0
+jupyterlab==4.5.2
+
+# --- Dev tooling ---
+ruff==0.14.14            # kept in sync with .pre-commit-config.yaml
+pre-commit==4.5.1
+nbstripout==0.9.0        # git filter configured in .gitattributes
+pytest==9.0.2
+pytest-cov==7.0.0

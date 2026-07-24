@@ -25,6 +25,22 @@ def load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
+def _identifiability_kwargs(data_config: dict) -> dict:
+    """Cohort-construction controls that MUST match the real training pipeline
+    (TrainDynasurvCausal.py). If they diverge, HPO optimises a different cohort:
+    a different set of treatment arms and feature dims (so the tuned widths do
+    not even fit the production model), and a *random* holdout instead of the
+    temporal one — which defeats the whole point of the temporal split, since
+    the objective would no longer measure generalisation across policy eras."""
+    return {
+        "cohort_start_year": data_config.get("cohort_start_year"),
+        "temporal_split_year": data_config.get("temporal_split_year"),
+        "add_calendar_feature": data_config.get("add_calendar_feature", False),
+        "excluded_treatment_arms": data_config.get("excluded_treatment_arms"),
+        "min_samples_per_treatment": data_config.get("min_samples_per_treatment", 200),
+    }
+
+
 def _suggest_mlp(trial: optuna.Trial, name: str, max_depth: int = 3) -> list[int]:
     depth = trial.suggest_int(f"{name}_depth", 1, max_depth)
     width = trial.suggest_categorical(f"{name}_width", [32, 64, 128, 256])
@@ -38,7 +54,12 @@ def objective(
     data_dims: dict,
     data_dir: str = "../../data/",
     gradient_clip_val: float = 0.0,
+    max_epochs: int = HPO_MAX_EPOCHS,
+    patience: int = HPO_PATIENCE,
 ) -> float:
+    """One trial. Objective = ``average_ci``, which under ``final_training=True``
+    with a ``temporal_split_year`` is the C-index on the *temporal holdout*
+    (latest-entering patients) — the generalisation measure we care about."""
     # ---- architecture -------------------------------------------------------
     lstm_hidden = trial.suggest_categorical("lstm_hidden_length", [64, 128, 256])
     lstm_num_layers = trial.suggest_int("lstm_num_layers", 1, 4)
@@ -71,6 +92,7 @@ def objective(
         split_seed=HPO_SPLIT_SEED,
         final_training=True,
         num_workers=2,
+        **_identifiability_kwargs(data_config),
     )
     data_module.prepare_data()
 
@@ -113,12 +135,12 @@ def objective(
 
     # ---- trainer ------------------------------------------------------------
     callbacks: list = [
-        EarlyStopping(monitor="val_loss", mode="min", patience=HPO_PATIENCE),
+        EarlyStopping(monitor="val_loss", mode="min", patience=patience),
         PyTorchLightningPruningCallback(trial, monitor="average_ci"),
     ]
 
     trainer = L.Trainer(
-        max_epochs=HPO_MAX_EPOCHS,
+        max_epochs=max_epochs,
         accelerator="mps" if torch.backends.mps.is_available() else "cpu",
         devices=1,
         logger=False,
@@ -140,7 +162,7 @@ def objective(
     return float(metric)
 
 
-def _write_best_config(study: optuna.Study, out_path: Path) -> None:
+def _write_best_config(study: optuna.Study, out_path: Path, eval_config: dict) -> None:
     p = study.best_params
 
     def _mlp_units(name: str) -> list[int]:
@@ -172,8 +194,10 @@ def _write_best_config(study: optuna.Study, out_path: Path) -> None:
         "lambda_prop_loss = 0",
         "lambda_ipm_mmd = 0",
         "lambda_ipm_emd2 = 0",
-        "evaluation_horizon_times = [100, 75, 50, 30]",
-        "brier_integration_step = 6",
+        # TrainDynasurvCausal.py sources these from config.toml [eval], not from
+        # this file; written here only so the config is self-describing.
+        f"evaluation_horizon_times = {eval_config['horizon_times']}",
+        f"brier_integration_step = {eval_config['integration_step']}",
     ]
     out_path.write_text("\n".join(lines) + "\n")
     print(f"Best config written to {out_path}")
@@ -187,6 +211,8 @@ def main():
     parser.add_argument("--data-dir", type=str, default="../../data/")
     parser.add_argument("--config", type=str, default=str(CONFIG_PATH))
     parser.add_argument("--gradient-clip-val", type=float, default=0.0)
+    parser.add_argument("--max-epochs", type=int, default=HPO_MAX_EPOCHS)
+    parser.add_argument("--patience", type=int, default=HPO_PATIENCE)
     parser.add_argument(
         "--out",
         type=str,
@@ -213,6 +239,7 @@ def main():
         split_seed=HPO_SPLIT_SEED,
         num_workers=0,
         final_training=True,
+        **_identifiability_kwargs(data_config),
     )
     probe_dm.prepare_data()
     data_dims = probe_dm.get_data_dimensions()
@@ -242,6 +269,8 @@ def main():
             data_dims,
             data_dir=args.data_dir,
             gradient_clip_val=args.gradient_clip_val,
+            max_epochs=args.max_epochs,
+            patience=args.patience,
         ),
         n_trials=args.n_trials,
         n_jobs=args.n_jobs,
@@ -255,7 +284,7 @@ def main():
         print(f"  {k}: {v}")
 
     out_path = Path(args.out)
-    _write_best_config(study, out_path)
+    _write_best_config(study, out_path, eval_config)
 
 
 if __name__ == "__main__":
