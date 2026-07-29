@@ -22,6 +22,7 @@ figure(s) into `plots/`.
 |--------|------------------|
 | `treatment_category_repeats.py` | Two interactive Plotly figures on repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−). **Both kinds:** patients by repetition kind, repetitions per category split into **consecutive** (same category in the next line) and **non-consecutive** (the category returns after a switch), and all 15 sequence patterns four lines can take. **Consecutive only:** blocks per patient, category by run length, and where in the sequence each block sits. → `plots/treatment_category_repeats.html`, `plots/treatment_category_repeats_consecutive.html` |
 | `km_line1_by_year.py` | Crude Kaplan-Meier overall survival from line-1 onset, crossed by treatment category and calendar year of onset, shown three ways: one panel per year stratified by treatment; one panel per treatment stratified by year (light = early → dark = recent); and both collapsed to 24-month OS by year. Clicking a series in any legend isolates it across every panel. → `plots/km_line1_panel_per_year.html`, `plots/km_line1_panel_per_category.html`, `plots/km_line1_24mo_trend.html` |
+| `mpps_performance_status_by_year.py` | Evolution of the performance-status distribution (`X_mpps`, ECOG/WHO 0–4) over calendar time: 100% stacked composition per year of line-1 onset, the two ends of the scale (PS 0 and PS ≥ 2) as trend lines with 95% Wilson intervals, and the distribution across treatment lines 1–4. **`X_mpps` is imputed** — see the caveat below. → `plots/mpps_by_year.html` |
 | `km_line1_adjusted.py` | Pooled OS by treatment category, crude vs **IPTW + IPCW adjusted**, so the curves are comparable across treatments — plus a diagnostics figure (covariate balance before/after, effective sample size, calendar-era overlap) that shows where the adjustment succeeds and where it cannot. → `plots/km_line1_adjusted.html`, `plots/km_line1_adjustment_diagnostics.html` |
 
 ## Reading the repetition figure
@@ -46,6 +47,25 @@ read as purely clinical: a block occupying lines 2–3 needs the category to dif
 on *both* sides, while one at lines 1–2 or 3–4 has only one interior boundary to
 satisfy, so the middle position is structurally rarer before any treatment
 behaviour is considered.
+
+## Reading the performance-status figure
+
+- `X_mpps` is the ECOG/WHO performance status, 0 (fully active) to 4 (completely
+  disabled), recorded per treatment line.
+- **The values are imputed.** `X_mpps` has **zero** missing rows in every parquet under
+  `data/` (63,317 rows in the HR+HER2− file alone), and no raw file is available, so the
+  observed-vs-imputed split cannot be recovered and the imputed fraction is unknown.
+  Real-world performance status is rarely complete, so read the year trend as a property
+  of the delivered dataset, not as evidence about observed clinical practice.
+- Supporting diagnostic: **79.9%** of consecutive line-to-line steps show no change in
+  `X_mpps`, and 84.2% of two-line patients have a constant value throughout. That is
+  consistent with a carry-forward-style imputation *and* with genuine stability of a
+  coarse 5-point scale — the two cannot be distinguished from this data.
+- The trend itself is that the distribution **spreads rather than shifts**: comparing
+  2008–2012 with 2018–2022, PS 0 rises 21.9% → 28.5% *and* PS ≥ 2 rises 11.1% → 17.9%,
+  while the mean barely moves (0.93 → 0.96). Any mean-only summary would miss this
+  entirely.
+- 2023 is excluded (only 20 line-1 patients).
 
 ## Reading the line-1 survival figures
 
