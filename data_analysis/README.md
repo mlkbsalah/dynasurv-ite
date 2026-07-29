@@ -20,9 +20,23 @@ figure(s) into `plots/`.
 
 | Script | What it produces |
 |--------|------------------|
-| `treatment_category_repeats.py` | Interactive Plotly figure: consecutive repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−) — repeat blocks per patient, and repeats per category broken down by run length. Hover any bar/segment for counts and percentages. → `plots/treatment_category_repeats.html` |
+| `treatment_category_repeats.py` | Interactive Plotly figure: repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−), counting both **consecutive** repeats (same category in the next line) and **non-consecutive** ones (the category returns after a switch) — patients by repetition kind, repetitions per category split by kind, and all 15 sequence patterns four lines can take. Hover any bar/segment for counts, run lengths and gap lengths. → `plots/treatment_category_repeats.html` |
 | `km_line1_by_year.py` | Crude Kaplan-Meier overall survival from line-1 onset, crossed by treatment category and calendar year of onset, shown three ways: one panel per year stratified by treatment; one panel per treatment stratified by year (light = early → dark = recent); and both collapsed to 24-month OS by year. Clicking a series in any legend isolates it across every panel. → `plots/km_line1_panel_per_year.html`, `plots/km_line1_panel_per_category.html`, `plots/km_line1_24mo_trend.html` |
 | `km_line1_adjusted.py` | Pooled OS by treatment category, crude vs **IPTW + IPCW adjusted**, so the curves are comparable across treatments — plus a diagnostics figure (covariate balance before/after, effective sample size, calendar-era overlap) that shows where the adjustment succeeds and where it cannot. → `plots/km_line1_adjusted.html`, `plots/km_line1_adjustment_diagnostics.html` |
+
+## Reading the repetition figure
+
+- A **repetition** is any line whose category the patient has already had. It is
+  *consecutive* when the previous line was the same category (a continuation) and
+  *non-consecutive* when the patient switched away and came back (a rechallenge).
+  Counting only consecutive repeats understates reuse considerably: 58% of patients
+  repeat a category in adjacent lines, but 75% repeat one somewhere in their first
+  four lines.
+- Panels A and C count **patients** (each patient falls in exactly one of the four
+  kinds, and in exactly one of the 15 sequence patterns); panel B counts
+  **repetition events**, so a patient can contribute more than one.
+- The 15 patterns in panel C are the complete set — four lines admit exactly 15
+  distinct repetition shapes — so the panel is exhaustive, not a top-N.
 
 ## Reading the line-1 survival figures
 
