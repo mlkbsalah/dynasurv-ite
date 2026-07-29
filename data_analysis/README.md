@@ -50,21 +50,26 @@ behaviour is considered.
 
 ## Reading the performance-status figure
 
-- `X_mpps` is the ECOG/WHO performance status, 0 (fully active) to 4 (completely
-  disabled), recorded per treatment line.
-- **The values are imputed.** `X_mpps` has **zero** missing rows in every parquet under
-  `data/` (63,317 rows in the HR+HER2− file alone), and no raw file is available, so the
-  observed-vs-imputed split cannot be recovered and the imputed fraction is unknown.
-  Real-world performance status is rarely complete, so read the year trend as a property
-  of the delivered dataset, not as evidence about observed clinical practice.
-- Supporting diagnostic: **79.9%** of consecutive line-to-line steps show no change in
-  `X_mpps`, and 84.2% of two-line patients have a constant value throughout. That is
-  consistent with a carry-forward-style imputation *and* with genuine stability of a
-  coarse 5-point scale — the two cannot be distinguished from this data.
-- The trend itself is that the distribution **spreads rather than shifts**: comparing
-  2008–2012 with 2018–2022, PS 0 rises 21.9% → 28.5% *and* PS ≥ 2 rises 11.1% → 17.9%,
-  while the mean barely moves (0.93 → 0.96). Any mean-only summary would miss this
-  entirely.
+Performance status is ECOG/WHO 0 (fully active) to 4 (completely disabled). **Two
+sources exist and they disagree in direction — use the observed one.**
+
+- **Observed:** `data_raw/metperf.parquet` (git-ignored), a table of *dated*
+  measurements — `usubjid`, `mpdt`, `mpps`. The script restricts it to the `usubjid`
+  set of the HR+HER2− V2 model-entry file and takes the measurement nearest each
+  patient's line-1 start, within ±90 days.
+- **Imputed:** `X_mpps` in the model-entry parquet, one value per treatment line with
+  zero missing rows.
+- **The observed trend is a modest, monotone deterioration.** 2008–2012 → 2018–2022:
+  PS 0 **falls** 42.0% → 37.1%, PS ≥ 2 rises 18.9% → 22.9%, mean 0.84 → 0.95.
+- **The imputed column reverses the PS 0 trend**, showing it *rising* 21.9% → 28.5%.
+  This is an artefact of coverage, not a finding: only 31% of 2008 line-1 patients have
+  a real measurement within ±90 days, rising to 80% by 2022. The imputation fills the
+  gap toward the mode (PS 1 is 67% of the imputed early era vs 41% observed), so as real
+  data arrives the imputed distribution drifts toward the truth — and that drift looks
+  like a trend.
+- Where an observed value exists the imputation is decent — **93.5% exact agreement** —
+  but it errs toward the mode: 20.0% of observed PS 4 and 12.6% of observed PS 3 are
+  imputed as PS 1. So it compresses the impaired tail specifically.
 - 2023 is excluded (only 20 line-1 patients).
 
 ## Reading the line-1 survival figures
