@@ -20,7 +20,7 @@ figure(s) into `plots/`.
 
 | Script | What it produces |
 |--------|------------------|
-| `treatment_category_repeats.py` | Interactive Plotly figure: repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−), counting both **consecutive** repeats (same category in the next line) and **non-consecutive** ones (the category returns after a switch) — patients by repetition kind, repetitions per category split by kind, and all 15 sequence patterns four lines can take. Hover any bar/segment for counts, run lengths and gap lengths. → `plots/treatment_category_repeats.html` |
+| `treatment_category_repeats.py` | Two interactive Plotly figures on repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−). **Both kinds:** patients by repetition kind, repetitions per category split into **consecutive** (same category in the next line) and **non-consecutive** (the category returns after a switch), and all 15 sequence patterns four lines can take. **Consecutive only:** blocks per patient, category by run length, and where in the sequence each block sits. → `plots/treatment_category_repeats.html`, `plots/treatment_category_repeats_consecutive.html` |
 | `km_line1_by_year.py` | Crude Kaplan-Meier overall survival from line-1 onset, crossed by treatment category and calendar year of onset, shown three ways: one panel per year stratified by treatment; one panel per treatment stratified by year (light = early → dark = recent); and both collapsed to 24-month OS by year. Clicking a series in any legend isolates it across every panel. → `plots/km_line1_panel_per_year.html`, `plots/km_line1_panel_per_category.html`, `plots/km_line1_24mo_trend.html` |
 | `km_line1_adjusted.py` | Pooled OS by treatment category, crude vs **IPTW + IPCW adjusted**, so the curves are comparable across treatments — plus a diagnostics figure (covariate balance before/after, effective sample size, calendar-era overlap) that shows where the adjustment succeeds and where it cannot. → `plots/km_line1_adjusted.html`, `plots/km_line1_adjustment_diagnostics.html` |
 
@@ -37,6 +37,15 @@ figure(s) into `plots/`.
   **repetition events**, so a patient can contribute more than one.
 - The 15 patterns in panel C are the complete set — four lines admit exactly 15
   distinct repetition shapes — so the panel is exhaustive, not a top-N.
+
+The consecutive-only figure counts **blocks** rather than repetition events: one
+block is one uninterrupted run of the same category, so a 3-line block is 2
+repetitions. That is why 4,551 blocks correspond to 5,357 consecutive
+repetitions. Its third panel is subject to an **edge effect** and should not be
+read as purely clinical: a block occupying lines 2–3 needs the category to differ
+on *both* sides, while one at lines 1–2 or 3–4 has only one interior boundary to
+satisfy, so the middle position is structurally rarer before any treatment
+behaviour is considered.
 
 ## Reading the line-1 survival figures
 
