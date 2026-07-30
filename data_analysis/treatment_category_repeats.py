@@ -197,8 +197,12 @@ def _new_figure(titles):
     )
 
 
-def _apply_chrome(fig, title, subtitle, legend_title):
-    """Palette, typography, title block and a legend parked inside panel C."""
+def _apply_chrome(fig, title, subtitle, legend_title, glossary):
+    """Palette, typography, a one-line subtitle, and a glossary along the bottom.
+
+    Anything that merely describes the chart belongs in ``glossary``, not in the
+    panel titles — the panels stay bare so the data reads first.
+    """
     fig.update_layout(
         barmode="stack",
         bargap=0.35,
@@ -229,8 +233,8 @@ def _apply_chrome(fig, title, subtitle, legend_title):
             bordercolor=BASE,
             borderwidth=1,
         ),
-        margin=dict(l=10, r=20, t=164, b=60),
-        height=880,
+        margin=dict(l=10, r=20, t=118, b=52 + 19 * len(glossary)),
+        height=880 + 19 * len(glossary),
         hoverlabel=dict(
             bgcolor="#ffffff",
             bordercolor=BASE,
@@ -241,6 +245,20 @@ def _apply_chrome(fig, title, subtitle, legend_title):
     for i, ann in enumerate(fig.layout.annotations[:3]):
         axis = fig.layout["xaxis" if i == 0 else f"xaxis{i + 1}"]
         ann.update(x=axis.domain[0], xanchor="left")
+
+    body = "<br>".join(f"<b>{term}</b> — {defn}" for term, defn in glossary)
+    fig.add_annotation(
+        text=body,
+        xref="paper",
+        yref="paper",
+        x=0,
+        y=-0.088,
+        xanchor="left",
+        yanchor="top",
+        align="left",
+        showarrow=False,
+        font=dict(color=SEC, size=11),
+    )
 
 
 def _end_labels(fig, cats, totals):
@@ -393,11 +411,9 @@ def make_figure(rep):
     """Build the combined (both kinds) figure and write it to an HTML file."""
     fig = _new_figure(
         (
-            "<b>How patients repeat a category</b>",
-            "<b>Which categories are repeated — and how</b>",
-            "<b>Every sequence four lines can take</b>"
-            f"<span style='font-size:12px;color:{SEC}'>"
-            "   A/B/C/D = distinct categories, in order of first appearance</span>",
+            "<b>Patients</b>",
+            "<b>Categories</b>",
+            "<b>Sequences</b>",
         )
     )
 
@@ -411,17 +427,32 @@ def make_figure(rep):
     pct_any = 100 * (1 - rep.profile.get("none", 0) / rep.n_pat)
     _apply_chrome(
         fig,
-        "Repetition of treatment category over the first 4 lines",
+        "Repeated treatments over the first 4 lines",
         (
-            f"HR+HER2− cohort · patients with ≥ 4 treatment lines (n = {rep.n_pat:,}) · "
-            "a repetition = a category given again, either in the next line "
-            "(<b>consecutive</b>) or after switching away (<b>non-consecutive</b>)"
-            "<br>"
-            f"{pct_any:.0f}% repeat ≥ 1 category · "
-            f"{n_consec + n_non:,} repetitions total "
-            f"({n_consec:,} consecutive, {n_non:,} non-consecutive)"
+            f"HR+HER2− · {rep.n_pat:,} patients with 4 lines · "
+            f"{pct_any:.0f}% repeat a category · {n_consec + n_non:,} repetitions"
         ),
         "kind of repetition",
+        [
+            (
+                "repetition",
+                "a line given a treatment category the patient already had",
+            ),
+            (
+                "consecutive",
+                "the repeat is in the very next line — ET, ET",
+            ),
+            (
+                "non-consecutive",
+                "the category comes back after a switch — ET, MONOCT, ET",
+            ),
+            (
+                "A B C D",
+                "the shape of one patient's 4 lines; each letter is a distinct "
+                "category, lettered in order of first appearance, so A A B C means "
+                "lines 1 and 2 were the same treatment",
+            ),
+        ],
     )
 
     # Panel A
@@ -578,11 +609,9 @@ def make_consecutive_figure(rep):
     """Build the consecutive-only figure and write it to an HTML file."""
     fig = _new_figure(
         (
-            "<b>How many consecutive blocks a patient has</b>",
-            "<b>Which categories are continued — and for how long</b>",
-            "<b>Where the block sits in the sequence</b>"
-            f"<span style='font-size:12px;color:{SEC}'>"
-            "   lines covered by one uninterrupted run of the same category</span>",
+            "<b>Blocks per patient</b>",
+            "<b>Categories</b>",
+            "<b>Position</b>",
         )
     )
 
@@ -599,18 +628,35 @@ def make_consecutive_figure(rep):
         pooled.update(v)
     _apply_chrome(
         fig,
-        "Consecutive repetition of treatment category over the first 4 lines",
+        "Treatments continued into the next line",
         (
-            f"HR+HER2− cohort · patients with ≥ 4 treatment lines (n = {rep.n_pat:,}) · "
-            "a <b>block</b> = one uninterrupted run of the same category in "
-            "adjacent lines"
-            "<br>"
-            f"{pct_any:.0f}% have ≥ 1 block · "
-            f"{n_blocks:,} blocks total "
-            f"({_detail(pooled, lambda k: f'of {k} lines')}) "
-            f"= {n_reps:,} consecutive repetitions"
+            f"HR+HER2− · {rep.n_pat:,} patients with 4 lines · "
+            f"{pct_any:.0f}% have a block · {n_blocks:,} blocks"
         ),
-        "run length",
+        "block length",
+        [
+            (
+                "block",
+                "one unbroken run of the same treatment category in adjacent lines. "
+                "ET, ET is one block; ET, MONOCT, ET is not a block, because the run "
+                "was interrupted",
+            ),
+            (
+                "2 / 3 / 4 lines",
+                "how many lines in a row one block covers. A 4-line block means all "
+                "four lines were the same treatment",
+            ),
+            (
+                "blocks vs repetitions",
+                f"a block of L lines contains L−1 repetitions, so these "
+                f"{n_blocks:,} blocks are {n_reps:,} repetitions",
+            ),
+            (
+                "1–2, 2–3, 3–4 …",
+                "which lines a block covers. 1–2 means the run was in lines 1 and 2. "
+                "A patient can hold at most 2 blocks, since each needs 2 lines",
+            ),
+        ],
     )
 
     # Panel A

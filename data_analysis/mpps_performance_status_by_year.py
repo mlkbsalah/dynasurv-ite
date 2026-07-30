@@ -250,15 +250,9 @@ def make_figure(joined):
         horizontal_spacing=0.10,
         vertical_spacing=0.16,
         subplot_titles=(
-            "<b>Observed performance status at line-1 onset, by year</b>"
-            f"<span style='font-size:12px;color:{SEC}'>"
-            f"   measured within ±{WINDOW_DAYS} days of line-1 start · imputed values "
-            "excluded</span>",
-            "<b>Observed vs imputed — opposite directions</b>"
-            f"<span style='font-size:12px;color:{SEC}'>   dotted = imputed</span>",
-            "<b>Why: measurement coverage</b>"
-            f"<span style='font-size:12px;color:{SEC}'>"
-            "   % of line-1 patients with a real measurement</span>",
+            "<b>Observed</b>",
+            "<b>Observed vs imputed</b>",
+            "<b>Coverage</b>",
         ),
     )
 
@@ -290,20 +284,10 @@ def make_figure(joined):
         ),
         title=dict(
             text=(
-                "Performance status (ECOG/WHO 0–4) at line-1 onset, over time"
+                "Performance status at the start of first-line treatment"
                 f"<br><span style='font-size:13px;color:{SEC}'>"
-                "HR+HER2− cohort · observed measurements from data_raw/metperf.parquet, "
-                "restricted to the V2 file's patient ids"
-                f"<br><b>Observed: performance status gets WORSE.</b> "
-                f"{first}–{first + 4} → {last - 4}–{last}: PS 0 falls "
-                f"{o_e[0]:.1f}%→{o_l[0]:.1f}%, PS ≥ 2 rises {o_e[1]:.1f}%→{o_l[1]:.1f}%, "
-                f"mean {o_e[2]:.2f}→{o_l[2]:.2f}"
-                f"<br><b style='color:{WARN}'>The imputed X_mpps reverses this</b> — it has "
-                f"PS 0 <i>rising</i> {i_e[0]:.1f}%→{i_l[0]:.1f}%. Coverage climbs 31%→80% "
-                "over the period, so early years are mostly"
-                "<br>mode-filled at PS 1; the imputed curve drifts toward the truth as real "
-                "data arrives, and that drift looks like a trend. Use the observed panel."
-                "</span>"
+                f"HR+HER2− · observed measurements · PS 0 falls {o_e[0]:.0f}%→{o_l[0]:.0f}%, "
+                f"PS ≥ 2 rises {o_e[1]:.0f}%→{o_l[1]:.0f}%</span>"
             ),
             x=0.012,
             xanchor="left",
@@ -322,8 +306,8 @@ def make_figure(joined):
             bordercolor=BASE,
             borderwidth=1,
         ),
-        margin=dict(l=10, r=20, t=286, b=56),
-        height=960,
+        margin=dict(l=10, r=20, t=118, b=150),
+        height=1000,
         hoverlabel=dict(
             bgcolor="#ffffff", bordercolor=BASE, font=dict(color=INK, size=12)
         ),
@@ -332,6 +316,48 @@ def make_figure(joined):
     for i, ann in enumerate(fig.layout.annotations[:3]):
         axis = fig.layout["xaxis" if i == 0 else f"xaxis{i + 1}"]
         ann.update(x=axis.domain[0], xanchor="left")
+
+    glossary = [
+        (
+            "performance status",
+            "ECOG/WHO scale — 0 fully active, 1 restricted in strenuous activity, "
+            "2 up more than half the day, 3 limited self-care, 4 completely disabled. "
+            "Higher is worse",
+        ),
+        (
+            "observed",
+            "the real measurement nearest that patient's first-line start date, taken "
+            f"from data_raw/metperf.parquet, within ±{WINDOW_DAYS} days",
+        ),
+        (
+            "imputed (dotted)",
+            "the X_mpps column of the model file, which fills every gap. It disagrees: "
+            f"it has PS 0 rising {i_e[0]:.0f}%→{i_l[0]:.0f}% instead of falling",
+        ),
+        (
+            "coverage",
+            "share of patients who have a real measurement. It climbs from 31% to 80%, "
+            "and that is what makes the imputed line drift",
+        ),
+        (
+            "shaded band",
+            "95% confidence interval around the observed lines — wider means fewer "
+            "patients that year, so less certainty",
+        ),
+    ]
+    body = "<br>".join(f"<b>{t}</b> — {d}" for t, d in glossary)
+    fig.add_annotation(
+        text=body,
+        xref="paper",
+        yref="paper",
+        x=0,
+        y=-0.10,
+        xanchor="left",
+        yanchor="top",
+        align="left",
+        showarrow=False,
+        font=dict(color=SEC, size=11),
+    )
 
     fig.update_yaxes(
         title_text="% of measured patients",

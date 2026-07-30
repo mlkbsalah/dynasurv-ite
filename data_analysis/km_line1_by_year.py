@@ -200,7 +200,17 @@ def coverage(df, cats):
     return counts, kept
 
 
-def apply_chrome(fig, title, subtitle, legend_title, height, legend_y):
+def apply_chrome(
+    fig, title, subtitle, legend_title, height, legend_y, glossary=(), gloss_shift=112
+):
+    """Chrome plus an optional term glossary along the bottom.
+
+    Panel titles stay bare; anything that only describes the chart goes in
+    ``glossary`` as (term, definition) pairs.
+    """
+    gloss_h = 19 * len(glossary)
+    if glossary:
+        height += gloss_h
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor=SURFACE,
@@ -231,7 +241,26 @@ def apply_chrome(fig, title, subtitle, legend_title, height, legend_y):
             bgcolor="#ffffff", bordercolor=BASE, font=dict(color=INK, size=12)
         ),
         height=height,
+        # reserve the strip the glossary will occupy; callers that set their own
+        # margins after this call must budget for it themselves
+        margin=dict(b=gloss_shift + gloss_h + 16) if glossary else None,
     )
+    if glossary:
+        # pinned a fixed number of pixels under the plot area so it clears the
+        # bottom legend, whose offset is a paper fraction and so height-dependent
+        fig.add_annotation(
+            text="<br>".join(f"<b>{t}</b> — {d}" for t, d in glossary),
+            xref="paper",
+            yref="paper",
+            x=0,
+            y=0,
+            yshift=-gloss_shift,
+            xanchor="left",
+            yanchor="top",
+            align="left",
+            showarrow=False,
+            font=dict(color=SEC, size=11),
+        )
 
 
 def _outer_axis_titles(fig, n_panels, n_col):
@@ -371,13 +400,29 @@ def make_year_panels(cats, kept, counts):
     )
     apply_chrome(
         fig,
-        "Overall survival from line-1 onset — one panel per year, stratified by treatment",
-        f"HR+HER2− cohort · {n_pat:,} patients in (treatment × year) cells of ≥ {MIN_N} · "
-        "dotted line = median · click a treatment in the legend to isolate it in every "
-        f"year{never_txt}",
+        "Survival by treatment, one panel per year",
+        f"HR+HER2− · {n_pat:,} patients · click a treatment in the legend to follow it "
+        f"across every year{never_txt}",
         "treatment category at line 1",
         260 * n_row + 210,
         -0.055 if n_row > 2 else -0.10,
+        [
+            (
+                "the curve",
+                "Kaplan-Meier overall survival — the share of that group still alive, "
+                "measured from the day first-line treatment started",
+            ),
+            (
+                "dotted line",
+                "the 50% mark. Where a curve crosses it is that group's median survival — "
+                "the month by which half of them had died",
+            ),
+            (
+                "why curves stop early",
+                "each one ends at its own group's last follow-up rather than being drawn "
+                "flat. Recent years are short because the database closed in March 2024",
+            ),
+        ],
     )
     fig.update_xaxes(range=[0, HORIZON], gridcolor=GRID_C, zeroline=False, dtick=24)
     fig.update_yaxes(range=[0, 100], gridcolor=GRID_C, zeroline=False, ticksuffix="%")
@@ -439,13 +484,33 @@ def make_category_panels(cats, kept):
     n_pat = sum(len(g) for g in kept.values())
     apply_chrome(
         fig,
-        "Overall survival from line-1 onset — one panel per treatment, stratified by year",
-        f"HR+HER2− cohort · {n_pat:,} patients in (treatment × year) cells of ≥ {MIN_N} · "
-        "light = early years, dark = recent · dotted line = median · "
-        "click a year in the legend to isolate it in every panel",
+        "Survival by year, one panel per treatment",
+        f"HR+HER2− · {n_pat:,} patients · click a year in the legend to follow it across "
+        "every treatment",
         "year of line-1 onset",
         300 * n_row + 200,
         -0.09 if n_row > 1 else -0.16,
+        [
+            (
+                "the curve",
+                "Kaplan-Meier overall survival — the share still alive, measured from the "
+                "day first-line treatment started",
+            ),
+            (
+                "colour",
+                "pale = earliest years, dark = most recent. Reading pale to dark shows "
+                "whether that treatment's survival changed over time",
+            ),
+            (
+                "dotted line",
+                "the 50% mark — where a curve crosses it is that year's median survival",
+            ),
+            (
+                "why curves stop early",
+                "each ends at its own year's last follow-up; recent years are short "
+                "because the database closed in March 2024",
+            ),
+        ],
     )
     fig.update_xaxes(range=[0, HORIZON], gridcolor=GRID_C, zeroline=False, dtick=12)
     fig.update_yaxes(range=[0, 100], gridcolor=GRID_C, zeroline=False, ticksuffix="%")
@@ -510,15 +575,30 @@ def make_trend(cats, kept):
 
     apply_chrome(
         fig,
-        f"{MILESTONE:.0f}-month overall survival from line-1 onset, by year of onset",
-        f"HR+HER2− cohort · (treatment × year) cells of ≥ {MIN_N} patients with ≥ "
-        f"{MILESTONE:.0f} months of potential follow-up · whiskers = 95% CI · "
-        "crude, unadjusted",
+        f"Share still alive {MILESTONE:.0f} months after starting treatment",
+        "HR+HER2− · by year of first-line onset",
         "treatment category at line 1",
         560,
         -0.16,
+        [
+            (
+                "each point",
+                f"the share of that year's patients still alive {MILESTONE:.0f} months "
+                "after their first-line start. Higher is better",
+            ),
+            (
+                "whiskers",
+                "95% confidence interval. A year is plotted only if it had enough "
+                f"patients and enough elapsed time to reach {MILESTONE:.0f} months",
+            ),
+            (
+                "crude",
+                "no adjustment — the groups differ in who was in them, so gaps between "
+                "treatments are not treatment effects",
+            ),
+        ],
     )
-    fig.update_layout(margin=dict(l=64, r=28, t=110, b=110))
+    fig.update_layout(margin=dict(l=64, r=28, t=110, b=232))
     fig.update_xaxes(
         title_text="year of line-1 onset", gridcolor=GRID_C, zeroline=False, dtick=1
     )

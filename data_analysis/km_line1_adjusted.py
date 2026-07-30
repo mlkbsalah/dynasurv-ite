@@ -286,17 +286,39 @@ def make_curves_figure(cats, drawn, crude, adjusted, n_by_cat, style, bal):
 
     apply_chrome(
         fig,
-        "Overall survival from line-1 onset by treatment — crude vs adjusted",
-        f"HR+HER2− cohort · {sum(n_by_cat.values()):,} patients · adjusted = stabilised "
-        "IPTW (multinomial propensity over all 11 categories) × IPCW (Cox censoring model),"
-        f" both truncated · each curve stops once its effective risk set falls below "
-        f"{ESS_FLOOR:.0f}<br><b>dashed = weighting failed to balance that group "
-        f"(max |SMD| &gt; {SMD_THRESHOLD}) — those curves are still not comparable</b>",
+        "Survival by treatment — before and after making the groups comparable",
+        f"HR+HER2− · {sum(n_by_cat.values()):,} patients · dashed curves are still not "
+        "comparable",
         "treatment category at line 1",
         660,
         -0.19,
+        gloss_shift=150,
+        glossary=[
+            (
+                "crude",
+                "survival exactly as observed. The groups contain different kinds of "
+                "patient, so a gap between two curves is not a treatment effect",
+            ),
+            (
+                "adjusted",
+                "each group re-weighted to look like the whole cohort on 80 recorded "
+                "characteristics, and corrected for patients leaving follow-up early. "
+                "Gaps here are closer to a like-for-like comparison",
+            ),
+            (
+                "dashed",
+                "the re-weighting did not work for this group — it is only ever given in "
+                "one stretch of calendar years, so there is nobody comparable in the "
+                "other years. Read these as extrapolation, not as an estimate",
+            ),
+            (
+                "why curves stop",
+                "a curve ends once too few patients remain for the weighted estimate to "
+                "mean anything",
+            ),
+        ],
     )
-    fig.update_layout(margin=dict(l=64, r=28, t=162, b=120))
+    fig.update_layout(margin=dict(l=64, r=28, t=118, b=252))
     fig.update_xaxes(
         range=[0, HORIZON],
         gridcolor=GRID_C,
@@ -418,17 +440,35 @@ def make_diagnostics_figure(cats, drawn, bal, ess_tbl, era, style):
 
     apply_chrome(
         fig,
-        "Does the adjustment make the curves comparable?",
-        "left: worst standardised mean difference vs the pooled remainder over "
-        f"{bal[drawn[0]]['n_cov']} covariates — below {SMD_THRESHOLD} is conventionally "
-        "balanced · middle: weighting trades sample size for comparability · right: "
-        "where a treatment's row is confined to one era, no weight can make it "
-        "comparable to a row from another era",
+        "Did the adjustment work?",
+        f"one row per treatment · {sum(bal[c]['after'] <= SMD_THRESHOLD for c in drawn)}"
+        f" of {len(drawn)} groups end up comparable",
         "",
         520,
         -0.22,
+        gloss_shift=126,
+        glossary=[
+            (
+                "balance (left)",
+                f"how different this group still is from everyone else, across "
+                f"{bal[drawn[0]]['n_cov']} recorded characteristics. Orange = before "
+                f"weighting, blue = after. Below {SMD_THRESHOLD} counts as comparable, so "
+                "blue dots left of the line are the groups you can trust",
+            ),
+            (
+                "effective sample size (middle)",
+                "weighting buys comparability by leaning on fewer patients. Grey is how "
+                "many there are; blue is how many they are worth once weighted",
+            ),
+            (
+                "calendar-era overlap (right)",
+                "which years each treatment was actually used. A row concentrated in one "
+                "block of years has no counterpart in other years — that is why "
+                "weighting cannot fix it",
+            ),
+        ],
     )
-    fig.update_layout(barmode="overlay", margin=dict(l=150, r=90, t=120, b=110))
+    fig.update_layout(barmode="overlay", margin=dict(l=150, r=90, t=118, b=212))
     smd_max = max(max(bal[c]["before"], bal[c]["after"]) for c in drawn)
     fig.update_xaxes(
         title_text="max |SMD| vs the pooled remainder",
