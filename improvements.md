@@ -360,6 +360,204 @@ evidential value, and would materially strengthen the paper.
 
 ---
 
+## 11. Enforce positivity per *patient*, not per cohort
+
+**Recommendation.** Estimate e(a | history) for each patient at each line and require it
+to clear a floor before an arm may be recommended **to that patient**. Where no arm
+clears both this gate and the §3 cohort-level mask, the recommender must **abstain**
+rather than return its best guess.
+
+**Motivation.** §1, §3 and §7 enforce positivity as a *design-time, cohort-level*
+property: an arm is recommendable at a line if it was given ≥200 times at that line, to
+anybody. That is **marginal** positivity, and it is not the assumption the estimand
+needs. The identification condition is conditional:
+
+> P(A_t = a | X_t, H_{t-1}) > 0 for every patient to whom arm *a* might be recommended.
+
+The gap between the two is exactly where a recommender does damage. An arm can clear
+200 observations at line 2 while being essentially never given to, say, patients with
+poor performance status and visceral disease — for *those* patients its counterfactual is
+extrapolation, and the cohort-level mask waves it through. This is the more dangerous
+failure mode of the two, because it is invisible in aggregate diagnostics: cohort-level
+overlap looks fine while individual recommendations are unsupported.
+
+The model was already carrying the machinery to fix this and not using it. A
+`propensityhead` MLP existed, but it entered the loss with a **negative** coefficient —
+adversarially, to strip treatment information out of the representation — and
+`lambda_prop_loss` was 0, so it was an untrained appendage whose output was never read.
+Two changes make it usable:
+
+1. **Train it as a predictor.** A separate term, `lambda_prop_head`, on a **detached**
+   latent state. Detaching matters: it means the propensity objective cannot perturb the
+   survival encoder no matter how the coefficient is set, so the two roles the head can
+   play (adversary vs. estimator) stay independent rather than fighting each other
+   through shared gradients.
+2. **Gate on its output at recommendation time**, composing with the §3 mask.
+
+The conditioning set is right by construction. `embed_LSTM_ITE` deliberately feeds
+`p_prev` rather than `p` back into the recurrence, so the hidden state h_t is invariant
+to the arm chosen *at* line t. Predicting A_t from h_t is therefore leakage-free and
+conditions on precisely covariates through t and treatments through t−1 — the
+conditioning set under which sequential positivity is stated.
+
+**Abstention is a feature, not a shortfall.** `argmax` over an all-masked row returns an
+arbitrary index; returning it as advice would be the worst possible behaviour. Reporting
+−1 makes "the data cannot support any recommendation for this patient" an explicit,
+countable output. The abstention rate is itself the headline positivity diagnostic, and
+it is the honest answer for patients outside the region of common support.
+
+> **References.** The trimming floor of 0.1 and the principle of redefining the estimand
+> to the region of overlap rather than extrapolating into its complement:
+> Crump RK, Hotz VJ, Imbens GW, Mitnik OA. "Dealing with limited overlap in estimation
+> of average treatment effects." *Biometrika* 2009;96(1):187–199.
+> [DOI](https://academic.oup.com/biomet/article/96/1/187/235329)
+>
+> On deferral/abstention as the correct output when a learned policy leaves its support:
+> Gottesman O, Johansson F, Komorowski M, Faisal A, Sontag D, Doshi-Velez F, Celi LA.
+> "Guidelines for reinforcement learning in healthcare." *Nature Medicine*
+> 2019;25:16–18. [DOI](https://www.nature.com/articles/s41591-018-0310-5)
+>
+> On why per-patient overlap, not cohort overlap, governs individual-level estimates:
+> Hernán MA, Robins JM. *Causal Inference: What If.* Chapman & Hall/CRC 2020, ch. 12
+> (positivity and structural vs. random violations).
+
+### What the gate actually does on the holdout
+
+Measured on the temporal holdout (entry 2021+, n=1,977 / 841 / 438 / 198 records at
+lines 1–4), with the trained head at `average_ibs` 0.106:
+
+**Share of patients for whom each arm clears the 0.1 floor** — the quantity the
+cohort-level mask cannot see:
+
+| line | arm | observed share | mean e | % of patients with e ≥ 0.1 |
+|---|---|---|---|---|
+| 1 | ET+ANTI-CDK wo CT | 0.643 | 0.731 | 97.4% |
+| 1 | ET alone | 0.140 | 0.145 | **40.6%** |
+| 1 | POLYCT alone | 0.063 | 0.048 | **12.9%** |
+| 1 | MONOCT std alone | 0.079 | 0.028 | **6.6%** |
+| 2 | MONOCT std alone | 0.259 | 0.349 | 91.9% |
+| 2 | ET+ANTI-CDK wo CT | 0.281 | 0.199 | **63.5%** |
+| 2 | ET alone | 0.087 | 0.110 | **40.7%** |
+| 2 | POLYCT alone | 0.099 | 0.079 | **19.9%** |
+| 3 | MONOCT std alone | 0.390 | 0.488 | 98.9% |
+| 3 | POLYCT alone | 0.180 | 0.153 | **56.4%** |
+| 4 | MONOCT std alone | 0.364 | 0.480 | 98.0% |
+| 4 | POLYCT alone | 0.242 | 0.250 | 76.3% |
+
+This is the finding that justifies the whole section. Every arm above **passed** the
+cohort-level ≥200-observation test, yet `MONOCT std alone` at line 1 is identifiable for
+only 6.6% of holdout patients and `POLYCT alone` for 12.9%. The cohort mask rates these
+as fully recommendable. They are not — not for most patients.
+
+**Gate impact.** Mean eligible arms and abstention rate per patient-line:
+
+| floor | line 1 | line 2 | line 3 | line 4 |
+|---|---|---|---|---|
+| 0.00 | 4.00 arms, 0.0% abstain | 4.00, 0.0% | 2.00, 0.0% | 2.00, 0.0% |
+| 0.05 | 1.88, 0.1% | 3.12, 0.0% | 1.84, 0.5% | 1.92, 0.0% |
+| **0.10** | **1.58, 0.1%** | **2.16, 0.0%** | **1.55, 0.7%** | **1.74, 0.0%** |
+| 0.20 | 1.31, 0.4% | 1.30, 1.2% | 1.23, 3.0% | 1.42, 2.5% |
+
+Abstention stays ≤0.7% at the chosen floor, so the gate is not destroying the
+deliverable — it is narrowing *which* arms are comparable per patient (4.00 → 1.58 at
+line 1) while almost always leaving at least one.
+
+**Effect on recommendations.** The gate visibly changes advice at line 2:
+
+| line | ungated (floor 0) | gated (floor 0.1) |
+|---|---|---|
+| 1 | CDK 96.5%, ET 2.0%, POLYCT 1.4%, MONOCT 0.2% | CDK 95.3%, ET 2.1%, POLYCT 1.8%, MONOCT 0.7% |
+| 2 | CDK 83.6%, ET 16.2%, POLYCT 0.1%, MONOCT 0.1% | **CDK 56.0%, MONOCT 25.9%**, ET 15.7%, POLYCT 2.4% |
+| 3 | MONOCT 68.9%, POLYCT 31.1% | MONOCT 85.2%, POLYCT 14.2%, abstain 0.7% |
+| 4 | MONOCT 70.7%, POLYCT 29.3% | MONOCT 76.3%, POLYCT 23.7% |
+
+At line 2 the ungated recommender hands CDK to 83.6% of patients, but CDK clears the
+floor for only 63.5% of them — so for a substantial minority it was recommending into a
+thin region. Under the gate those patients fall back to the far better-supported
+`MONOCT std alone` (0.1% → 25.9%). That shift is the gate doing exactly its job.
+
+### Limitation: the head is not yet a good propensity model
+
+Reported plainly, because it bounds what the gate can currently claim. Top-1 accuracy at
+predicting the received treatment, against a majority-class baseline:
+
+| line | top-1 acc | majority baseline | verdict |
+|---|---|---|---|
+| 1 | 0.609 | 0.643 | **below baseline** |
+| 2 | 0.315 | 0.281 | marginally above |
+| 3 | 0.370 | 0.390 | **below baseline** |
+| 4 | 0.343 | 0.364 | **below baseline** |
+
+The head barely beats — and at three of four lines fails to beat — predicting the modal
+arm. Its *marginal* calibration is reasonable (mean e tracks observed share, though it
+over-concentrates on the dominant arm), and its per-patient spread is wide (line-1
+`ET alone`: p10 0.002, p50 0.063, p90 0.425), so it is varying across patients rather
+than emitting a constant. But varying widely while not beating the base rate means it is
+varying **noisily**. The gate mechanism is correct and tested; the estimates feeding it
+are weak.
+
+`lambda_prop_loss = 0` in the tuned config, so this is *not* the adversarial term
+stripping treatment signal from the encoder — that hypothesis was checked and ruled out.
+Two live explanations remain, and they have opposite implications:
+
+1. **Under-capacity / wrong representation.** The head reads a latent state trained for
+   survival, through a small MLP, on a detached gradient. It may simply lack the capacity
+   or the right features. Fixable: a wider head, a tuned `lambda_prop_head`, or fitting a
+   separate propensity model on the raw covariates rather than the survival latent.
+2. **Treatment assignment genuinely isn't predictable from recorded covariates.** If so,
+   assignment is being driven by factors the data does not contain — physician gestalt,
+   performance status, patient preference — which is *precisely* the unmeasured-confounding
+   problem in "What none of this fixes" below. Under this reading the weak head is not a
+   bug but a **measurement** of how much of the treatment decision is unrecorded, and it
+   is bad news for sequential ignorability rather than for the gate.
+
+Distinguishing these is the next concrete step, and it matters: explanation 1 is an
+engineering fix, explanation 2 is a finding about the cohort that belongs in the paper.
+Fitting a flexible propensity model (gradient boosting on the raw covariates) and
+comparing its accuracy to this head's would separate them — if a well-specified external
+model also fails to beat base rates, explanation 2 holds.
+
+### 11b. Follow-up: propensity as *uncertainty*, not a binary gate
+
+A hard floor is a step function applied to a continuous quantity, which discards
+information in both directions: an arm at e = 0.099 is discarded outright while one at
+e = 0.101 is treated as fully identified. The better formulation makes positivity
+**graded** — the less a patient satisfies positivity for an arm, the wider the
+uncertainty on *that arm's* counterfactual, leaving the well-supported arms sharp.
+
+The reason this is the right shape is that the underlying statistics already behave this
+way. The variance of an IPW-type estimate of the arm-*a* counterfactual scales roughly as
+1/e(a|x), so low propensity does not merely make an estimate untrustworthy in a vague
+sense — it inflates its variance by a computable factor. A binary gate throws that
+structure away; an uncertainty-weighted recommender uses it.
+
+Concretely, this means propagating an arm-and-patient-specific variance into the
+comparison — e.g. widening the RMST interval for arm *a* by a factor increasing in
+1/e(a|x), then ranking arms by a risk-averse criterion (a lower confidence bound rather
+than the point estimate). Under such a rule, a marginally-supported arm has to be
+*clearly* better, not merely nominally better, to be recommended over a well-supported
+one — while a patient with three solidly-supported arms sees no penalty at all. The hard
+floor then becomes the limiting case where uncertainty is treated as infinite below a
+threshold, which is a reasonable safety backstop to retain underneath.
+
+Prerequisite: the head's propensity estimates must be **calibrated**, not merely
+discriminative, since the variance inflation is a function of their numerical value.
+That needs its own validation (reliability curves per arm, and ideally temperature
+scaling on a held-out slice) before the numbers can be trusted as inputs to an
+uncertainty budget rather than as a rank ordering. This is deferred, not done.
+
+> **References.** Variance inflation under weak overlap, and why it is the operative
+> cost of a positivity violation:
+> Petersen ML, Porter KE, Gruber S, Wang Y, van der Laan MJ. "Diagnosing and responding
+> to violations in the positivity assumption." *Statistical Methods in Medical Research*
+> 2012;21(1):31–54. [DOI](https://journals.sagepub.com/doi/10.1177/0962280210386207)
+>
+> On calibration being a distinct property from discrimination for neural predictions:
+> Guo C, Pleiss G, Sun Y, Weinberger KQ. "On Calibration of Modern Neural Networks."
+> *ICML* 2017. [arXiv](https://arxiv.org/abs/1706.04599)
+
+---
+
 ## What none of this fixes
 
 Everything above addresses **positivity** (§1, §3, §7), **consistency** (§6), and the
@@ -396,6 +594,9 @@ bounded rather than merely asserted.
 | 6 | Exclude `OTHER`, `ET+TT` from action set | `DEFAULT_EXCLUDED_ARMS` | done (records kept) |
 | 7 | Exclude `NO TREATMENT` arm | `DEFAULT_EXCLUDED_ARMS` | done |
 | 8 | Resolve HER2 labelling question | data provenance — external | open |
+| 11 | Patient-level positivity gate + abstention | `model::propensity_scores`, `model::recommend_treatment`, `propensity_floor` | done (mechanism); head quality weak |
+| 11b | Propensity-graded uncertainty | needs head calibration first | open (deferred) |
+| 11c | Diagnose weak head: capacity vs. unmeasured confounding | external flexible propensity model | open — decides whether 11 is trustworthy |
 
 **Implementation note on §1, §6 and §7.** The cohort filter is applied at the
 **patient** level (keep patients whose *first* line is 2018+), not the record level:

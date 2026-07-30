@@ -58,3 +58,10 @@ min_samples_per_treatment = 200
 # was unsupported once the temporal holdout was taken into account.
 horizon_times = [24, 18, 12, 12]
 integration_step = 100 # the dx in the trapezoidal rule for integrating Brier score over time
+
+# Patient-level positivity gate. An arm is recommendable FOR A GIVEN PATIENT
+# only if the model's estimated propensity e(a | history) clears this floor;
+# below it the counterfactual for that patient is extrapolation even when the
+# arm has cohort-level support. 0.1 follows the Crump et al. (2009) trimming
+# rule. Set to 0 to disable and fall back to the cohort-level mask alone.
+propensity_floor = 0.1

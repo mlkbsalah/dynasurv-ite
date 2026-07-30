@@ -61,8 +61,10 @@ class DynaSurvCausalOnline(L.LightningModule):
         mlpsa_dropout: float = 0,
         mlpprop_dropout: float = 0,
         lambda_prop_loss: float = 0,
+        lambda_prop_head: float = 1.0,
         lambda_ipm_mmd: float = 0,
         lambda_ipm_emd2: float = 0,
+        propensity_floor: float | None = 0.1,
         evaluation_horizon_times: list[float] = [100, 75, 50, 30],
         brier_integration_step: int = 6,
     ):
@@ -131,8 +133,10 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         # Optimizer parameters
         self.lambda_prop_loss = lambda_prop_loss
+        self.lambda_prop_head = lambda_prop_head
         self.lambda_ipm_mmd = lambda_ipm_mmd
         self.lambda_ipm_emd2 = lambda_ipm_emd2
+        self.propensity_floor = propensity_floor
         self.lr = lr
         self.weight_decay = weight_decay
         self.lr_scheduler_stepsize = lr_scheduler_stepsize
@@ -261,6 +265,9 @@ class DynaSurvCausalOnline(L.LightningModule):
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
         prop_loss = self._compute_propensity_loss(latent_state, treatment_idx, mask)
+        prop_head_loss = self._compute_propensity_head_loss(
+            latent_state, treatment_idx, mask
+        )
         surv_loss = self._compute_sruvival_loss(
             hazard_logits, interval_idx, event, mask
         )
@@ -268,12 +275,20 @@ class DynaSurvCausalOnline(L.LightningModule):
         loss = (
             surv_loss
             - self.lambda_prop_loss * prop_loss
+            + self.lambda_prop_head * prop_head_loss
             + self.lambda_ipm_mmd * ipm_mmd_reg
         )
         # ipm_wass_reg = self.compute_ipm_w2(latent_state, treatment_idx, mask)
 
         # ========= logging =========
         self.log("train/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log(
+            "train/propensity_head_loss",
+            prop_head_loss,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+        )
         self.log(
             "train/survival_loss",
             surv_loss,
@@ -316,11 +331,17 @@ class DynaSurvCausalOnline(L.LightningModule):
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
         prop_loss = self._compute_propensity_loss(latent_state, treatment_idx, mask)
+        prop_head_loss = self._compute_propensity_head_loss(
+            latent_state, treatment_idx, mask
+        )
         surv_loss = self._compute_sruvival_loss(
             hazard_logits, interval_idx, event, mask
         )
         ipm_mmd_reg = self._compute_ipm_mmd(latent_state, treatment_idx, mask)
         imp_emd2_reg = self._compute_ipm_emd2(latent_state, treatment_idx, mask)
+        # prop_head_loss is deliberately NOT part of the validation loss: this
+        # loss feeds early stopping, which must select for the survival
+        # objective. The head's validation NLL is logged as a diagnostic below.
         loss = (
             surv_loss
             - self.lambda_prop_loss * prop_loss
@@ -348,6 +369,13 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.log(
             "val/survival_loss",
             surv_loss,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            "val/propensity_head_loss",
+            prop_head_loss,
             prog_bar=False,
             on_step=False,
             on_epoch=True,
@@ -411,7 +439,62 @@ class DynaSurvCausalOnline(L.LightningModule):
                 discrete_cumhazards[valid_mask, line, :].detach().cpu()
             )
 
+        self._log_positivity_diagnostics(latent_state, treatment_idx, mask)
+
         return loss
+
+    def _log_positivity_diagnostics(self, latent_state, treatment_idx, mask):
+        """Track the patient-level positivity gate during validation.
+
+        The abstention rate is the headline diagnostic: it counts patient-lines
+        for which NO arm clears both the cohort-level support mask and the
+        propensity floor, i.e. patients the data cannot advise on at all. Cheap
+        to compute here because it needs only the propensity, not RMST -- no
+        second forward pass and no counterfactual survival curves.
+        """
+        if self.propensity_floor is None or self.propensity_floor <= 0:
+            return
+
+        batch, n_lines, hidden = latent_state.shape
+        with torch.no_grad():
+            propensity = torch.softmax(
+                self.propensityhead(latent_state.detach().view(-1, hidden)), dim=-1
+            ).view(batch, n_lines, -1)
+            gmask = self.recommendable_mask(device=propensity.device)[:n_lines]
+            eligible = gmask.unsqueeze(0) & (propensity >= self.propensity_floor)
+
+            for line in range(n_lines):
+                valid = mask[:, line].bool()
+                if not valid.any():
+                    continue
+                n_elig = eligible[valid, line].sum(-1).float()
+                self.log(
+                    f"val/n_eligible_arms_time_step_{line + 1}",
+                    n_elig.mean(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    f"val/abstention_rate_time_step_{line + 1}",
+                    (n_elig == 0).float().mean(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                # Propensity of the arm actually received: a low value means the
+                # factual choice itself sits in a thin region of the covariate
+                # space, which bounds how well any counterfactual can be pinned.
+                e_factual = propensity[valid, line].gather(
+                    1, treatment_idx[valid, line].unsqueeze(1)
+                )
+                self.log(
+                    f"val/e_factual_time_step_{line + 1}",
+                    e_factual.mean(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
     def _train_surv_reference(self, line):
         """Training times/events for `line` as tensors, or None if unavailable.
@@ -551,16 +634,34 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def _compute_propensity_loss(self, latent_state, treatment_idx, mask):
         batch_size, n_lines, _ = latent_state.shape
-        treatment_prediction = torch.softmax(
-            self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
-            dim=-1,
+        # CrossEntropyLoss expects raw logits (it applies log_softmax itself);
+        # softmaxing first silently miscalibrates the head.
+        treatment_logits = self.propensityhead(
+            latent_state.view(-1, latent_state.shape[-1])
         )
         prop_loss = self.propensity_loss_fn(
-            treatment_prediction, treatment_idx.view(-1)
+            treatment_logits, treatment_idx.view(-1)
         ).view(batch_size, n_lines)
         masked_prop_loss = (prop_loss * mask).sum() / mask.sum()
 
         return masked_prop_loss
+
+    def _compute_propensity_head_loss(self, latent_state, treatment_idx, mask):
+        """Train the propensity head as a *predictor* of the received treatment.
+
+        Distinct from `_compute_propensity_loss`, which enters the total loss
+        with a negative sign (adversarial: the encoder is pushed to REMOVE
+        treatment information). This term teaches the head to estimate
+        e(a | h_t) so it can gate recommendations on patient-level positivity.
+        The latent state is detached, so only the head receives gradients and
+        the survival objective is untouched regardless of the coefficient.
+
+        h_t is invariant to the treatment chosen at line t by construction
+        (embed_LSTM_ITE feeds p_prev, not p, back into the recurrence), so
+        predicting treatment_idx[:, t] from h_t is leakage-free: it conditions
+        exactly on history, covariates up to t, and treatments up to t-1.
+        """
+        return self._compute_propensity_loss(latent_state.detach(), treatment_idx, mask)
 
     def _compute_sruvival_loss(self, hazard_logits, interval_idx, event, mask):
         batch_size, n_lines, _ = hazard_logits.shape
@@ -962,23 +1063,63 @@ class DynaSurvCausalOnline(L.LightningModule):
                     mask[line, k] = True
         return mask
 
+    def propensity_scores(
+        self,
+        XPd,
+        X_static,
+        factual_idx,
+    ) -> torch.Tensor:
+        """Estimated propensity e(a | h_t) for every arm at every line.
+
+        h_t conditions on covariate history through line t and treatments
+        through line t-1, and is invariant to the arm chosen at t (see
+        embed_LSTM_ITE) -- exactly the conditioning set under which sequential
+        positivity is stated.
+
+        Returns:
+            (batch, n_lines, n_treatments) probabilities, softmax-normalised
+            over arms within each line.
+        """
+        _, latent_state = self.forward(XPd, X_static, factual_idx)
+        batch, n_lines, hidden = latent_state.shape
+        # flatten: the head contains BatchNorm1d, which needs 2-D input
+        logits = self.propensityhead(latent_state.view(-1, hidden))
+        return torch.softmax(logits, dim=-1).view(batch, n_lines, -1)
+
     def recommend_treatment(
         self,
         XPd,
         X_static,
         factual_idx,
         horizon_times: list[float] | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Rank arms by RMST and return the best *supported* arm per line.
+        propensity_floor: float | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Rank arms by RMST and return the best *identified* arm per line.
 
-        Non-recommendable arms are set to -inf before the argmax rather than
-        merely being reported alongside the rest: an arm with no empirical
-        support at that line has a counterfactual the data cannot identify, and
-        letting it win the comparison would surface an extrapolation as advice.
+        Two positivity gates compose before the argmax:
+
+        1. Cohort-level: the per-line recommendable mask (empirical support +
+           well-definedness). An arm with no support at a line has a
+           counterfactual the data cannot identify at all.
+        2. Patient-level: the estimated propensity e(a | h_t) must clear
+           `propensity_floor`. An arm can be common at a line overall yet
+           essentially never given to patients like this one; its counterfactual
+           for THIS patient is extrapolation, and near-zero propensity is
+           precisely the positivity violation (Crump et al. 2009 recommend
+           trimming below ~0.1). Falls back to `self.propensity_floor`;
+           pass 0 to disable the patient-level gate.
+
+        Gated arms are set to -inf rather than merely reported alongside the
+        rest, so an unidentified counterfactual can never win the comparison
+        and surface as advice.
 
         Returns:
-            best_idx: (batch, n_lines) index of the recommended arm.
-            rmst: (batch, n_lines, n_treatments) RMST per arm, -inf where masked.
+            best_idx: (batch, n_lines) recommended arm, or -1 where NO arm
+                clears both gates -- the model abstains for that patient-line
+                rather than recommending off-support; defer to the clinician.
+            rmst: (batch, n_lines, n_treatments) RMST per arm, -inf where gated.
+            eligible: (batch, n_lines, n_treatments) bool, the composed gate.
+            propensity: (batch, n_lines, n_treatments) e(a | h_t).
         """
         survival = self.predict_discrete_survival(
             XPd=XPd, X_static=X_static, gather=False, factual_idx=factual_idx
@@ -993,9 +1134,20 @@ class DynaSurvCausalOnline(L.LightningModule):
             dim=1,
         )  # (batch, n_lines, n_treatments)
 
+        propensity = self.propensity_scores(XPd, X_static, factual_idx)
+
         mask = self.recommendable_mask(device=rmst.device)[: rmst.shape[1]]
-        rmst = rmst.masked_fill(~mask.unsqueeze(0), float("-inf"))
-        return rmst.argmax(dim=-1), rmst
+        eligible = mask.unsqueeze(0).expand_as(rmst).clone()
+        floor = self.propensity_floor if propensity_floor is None else propensity_floor
+        if floor is not None and floor > 0:
+            eligible &= propensity >= floor
+
+        rmst = rmst.masked_fill(~eligible, float("-inf"))
+        best_idx = rmst.argmax(dim=-1)
+        # argmax over an all--inf row returns an arbitrary index; report those
+        # patient-lines as -1 (abstain) instead of dressing them up as advice.
+        best_idx = best_idx.masked_fill(~eligible.any(dim=-1), -1)
+        return best_idx, rmst, eligible, propensity
 
     def eval_factual_cumhazard(
         self,
