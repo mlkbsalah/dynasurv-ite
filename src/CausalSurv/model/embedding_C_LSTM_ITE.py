@@ -222,6 +222,22 @@ class embed_LSTM_ITE(nn.Module):
 
         if XPd.ndim == 3:
             XPd = XPd[:, 0, :]
+
+        # XPd is [X | P one-hot | d]. Slicing X off the front is silent when the
+        # datamodule's feature set no longer matches the one the weights were
+        # trained on: a too-narrow X block just borrows the leading columns of
+        # the treatment one-hot and the model keeps predicting, plausibly but
+        # wrongly. Check the total width instead of trusting the slice.
+        expected = self.x_input_dim + self.p_input_dim + 1
+        if XPd.shape[-1] != expected:
+            raise ValueError(
+                f"XPd has {XPd.shape[-1]} features but this model was built for "
+                f"{expected} (x_input_dim={self.x_input_dim} + "
+                f"p_input_dim={self.p_input_dim} + 1 for d). The datamodule's "
+                "column map disagrees with the checkpoint -- check "
+                "cohort_start_year / add_calendar_feature / excluded_x_columns."
+            )
+
         X = XPd[:, : self.x_input_dim]
         # P = XPd[:, self.x_input_dim : -1]
         d = XPd[:, -1:]

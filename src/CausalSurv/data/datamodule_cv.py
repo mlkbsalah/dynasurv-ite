@@ -38,6 +38,22 @@ FULL_ESME_COLUMN_SCHEME = {
 # See improvements.md sections 3, 6 and 7 for the supporting counts.
 DEFAULT_EXCLUDED_ARMS = ["NO TREATMENT", "OTHER", "ET+TT"]
 
+# Post-treatment covariates that leak the current line's outcome and must never
+# reach the encoder as an ordinary feature.
+#
+#   X_onset_to_progression - IS the current line's duration (correlation 1.000
+#                   with observed line length, at every line): a consequence of
+#                   treatment response, i.e. a mediator on the A_k -> O_k path,
+#                   not a baseline covariate. Alone it predicts survival at
+#                   C ~= 0.83-0.85 per line and inflates every discrimination
+#                   figure computed with it still in the feature set.
+#
+# See reports/project_state_report.md sec 7(1). The companion
+# X_time_between_onsets (the PREVIOUS line's duration, i.e. the buffer time
+# before the current line starts) was audited separately and is legitimate --
+# it is deliberately not excluded.
+DEFAULT_LEAKED_X_COLUMNS = ["X_onset_to_progression"]
+
 
 class ESMEOnlineDataModuleCV(L.LightningDataModule):
     VALID_SUBTYPES = ["HR+HER2-", "HER2+", "TN"]
@@ -63,6 +79,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         temporal_split_year: int | None = None,
         add_calendar_feature: bool = False,
         excluded_treatment_arms: list[str] | None = None,
+        excluded_x_columns: list[str] | None = None,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -85,6 +102,15 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             DEFAULT_EXCLUDED_ARMS
             if excluded_treatment_arms is None
             else excluded_treatment_arms
+        )
+        # Post-treatment / leaked columns dropped from the "X_"-prefixed
+        # dynamic and static feature sets before they reach the encoder. See
+        # DEFAULT_LEAKED_X_COLUMNS above. Pass [] explicitly to disable (e.g.
+        # for a controlled ablation that intentionally re-adds the leak).
+        self.excluded_x_columns = (
+            DEFAULT_LEAKED_X_COLUMNS
+            if excluded_x_columns is None
+            else excluded_x_columns
         )
         self.patient_entry_years: pd.Series | None = None
         self.recommendable_treatments_per_line: dict[int, list[int]] = {}
@@ -170,11 +196,21 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         Returns:
             Dict[str, list[str]]: Mapping of data components to their respective column names.
         """
-        column_map = {
-            "x": self._resolve_columns(df_dynamic, self.column_scheme["x_prefix"]),
-            "x_static": self._resolve_columns(
+        x_cols = [
+            col
+            for col in self._resolve_columns(df_dynamic, self.column_scheme["x_prefix"])
+            if col not in self.excluded_x_columns
+        ]
+        x_static_cols = [
+            col
+            for col in self._resolve_columns(
                 df_static, self.column_scheme["x_static_prefix"]
-            ),
+            )
+            if col not in self.excluded_x_columns
+        ]
+        column_map = {
+            "x": x_cols,
+            "x_static": x_static_cols,
             "p": self.column_scheme["p_cols"],
             "p_static": self._resolve_columns(
                 df_static, self.column_scheme["p_static_prefix"]
@@ -570,6 +606,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             print(f"Split: random, holdout_size={self.holdout_size}")
 
         print(f"Excluded from action set: {self.excluded_treatment_arms}")
+        print(f"Excluded (leaked) X_ columns: {self.excluded_x_columns}")
         print(
             f"Recommendable arms per line (min {self.min_samples_per_treatment} obs):"
         )

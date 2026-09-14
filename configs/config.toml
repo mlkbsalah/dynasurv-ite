@@ -43,6 +43,15 @@ add_calendar_feature = true
 # well-defined intervention.
 excluded_treatment_arms = ["NO TREATMENT", "OTHER", "ET+TT"]
 
+# X_ columns dropped from the encoder's feature set entirely (not merely from
+# recommendation, unlike excluded_treatment_arms above). X_onset_to_progression
+# IS the current line's duration (corr 1.000 with observed line length) -- a
+# post-treatment mediator on the A_k -> O_k path, not a baseline covariate.
+# See reports/project_state_report.md sec 7(1). Leaving this unset falls back
+# to the same default in datamodule_cv.py; set explicitly to [] only for a
+# deliberate re-leak ablation.
+excluded_x_columns = ["X_onset_to_progression"]
+
 # An arm must clear this many observations at a line to be recommendable there.
 min_samples_per_treatment = 200
 

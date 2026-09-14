@@ -77,14 +77,17 @@ def make_data():
         df_merge = pd.get_dummies(df_merge, columns=cat_cols, dtype=float)
 
     Y_col = [TIME_COL, EVENT_COL]
+    # X_onset_to_progression IS the current line's duration (corr 1.000 with
+    # observed line length): a post-treatment mediator on the A_k -> O_k path,
+    # not a baseline covariate. See reports/project_state_report.md sec 7(1)
+    # and the matching exclusion in datamodule_cv.py's DEFAULT_LEAKED_X_COLUMNS.
+    LEAKED_X_COLUMNS = {"X_onset_to_progression"}
     X_col = [
         col
         for col in df_merge.columns
-        if col.startswith("X_") or col.startswith("T_treatment_")
+        if (col.startswith("X_") or col.startswith("T_treatment_"))
+        and col not in LEAKED_X_COLUMNS
     ] + [PAT_ID_COL]
-    # X_col = [
-    #     col for col in df_merge.columns if col.startswith("X_") and col != "X_onset_to_progression"
-    # ] + [PAT_ID_COL]
     ic(f"Total features (after encoding): {len(X_col)}")
 
     XY_list = [

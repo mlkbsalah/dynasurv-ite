@@ -24,6 +24,14 @@ FULL_ESME_COLUMN_SCHEME = {
     "lineid": ["lineid"],
 }
 
+# Post-treatment covariate that leaks the current line's outcome; see the
+# matching constant and comment in datamodule_cv.py and
+# reports/project_state_report.md sec 7(1). X_onset_to_progression IS the
+# current line's duration, a mediator on the A_k -> O_k path -- not a valid
+# feature, even though this datamodule's own *target* is progression time
+# (Y_onset_to_progression, a different column).
+DEFAULT_LEAKED_X_COLUMNS = ["X_onset_to_progression"]
+
 
 class ESMEProgressionOnlineDataModuleCV(L.LightningDataModule):
     VALID_SUBTYPES = ["HR+HER2-", "HER2+", "TN"]
@@ -44,11 +52,17 @@ class ESMEProgressionOnlineDataModuleCV(L.LightningDataModule):
         holdout_size: float = 0.2,
         num_workers: int = 4,
         bound_split: str = "uniform",
+        excluded_x_columns: list[str] | None = None,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.column_scheme = columns_scheme
         self._subtype = subtype
+        self.excluded_x_columns = (
+            DEFAULT_LEAKED_X_COLUMNS
+            if excluded_x_columns is None
+            else excluded_x_columns
+        )
 
         self.n_lines = n_lines
         self.n_intervals = n_intervals
@@ -128,11 +142,21 @@ class ESMEProgressionOnlineDataModuleCV(L.LightningDataModule):
         Returns:
             Dict[str, list[str]]: Mapping of data components to their respective column names.
         """
-        column_map = {
-            "x": self._resolve_columns(df_dynamic, self.column_scheme["x_prefix"]),
-            "x_static": self._resolve_columns(
+        x_cols = [
+            col
+            for col in self._resolve_columns(df_dynamic, self.column_scheme["x_prefix"])
+            if col not in self.excluded_x_columns
+        ]
+        x_static_cols = [
+            col
+            for col in self._resolve_columns(
                 df_static, self.column_scheme["x_static_prefix"]
-            ),
+            )
+            if col not in self.excluded_x_columns
+        ]
+        column_map = {
+            "x": x_cols,
+            "x_static": x_static_cols,
             "p": self.column_scheme["p_cols"],
             "p_static": self._resolve_columns(
                 df_static, self.column_scheme["p_static_prefix"]
