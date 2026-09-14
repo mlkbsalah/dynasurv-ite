@@ -28,6 +28,9 @@ __pycache__/
 .vscode/
 .DS_Store
 
+# Claude Code local state (settings, worktrees) -- never shared
+.claude/
+
 # SLURM logs
 slurm/logs/
 *.out
@@ -54,3 +57,9 @@ lightning_logs/*
 data_raw/*
 dynasurv.tar
 dynasurv.sif
+
+# Generated recommendation-run output (timestamped, regenerates every run)
+reports/recommendations/
+
+# Untitled/default-named scratch file, not meant for version control
+data_analysis/Présentation1.pptx
