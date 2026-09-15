@@ -13,11 +13,14 @@ from torchsurv.stats.ipcw import get_ipcw
 
 from ..config import ArchConfig, EvalConfig, TrainingConfig
 from ..evaluation.discrete_survival import (
+    cumhazard_at,
     hazards_to_cumhazard,
     hazards_to_survival,
     kaplan_meier,
     km_at,
     pad_hazards,
+    rmst,
+    survival_at,
 )
 from ..metrics.emd_loss import EMDLoss
 from ..metrics.ipm import pairwise_ipm
@@ -159,6 +162,10 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         # Per-epoch evaluation buffers, keyed [dataloader_idx][line][field]
         self._eval_buffers: dict[int, dict[int, dict[str, list]]] = {}
+        # A separately trained, calibrated treatment-assignment model supplied
+        # by the datamodule at fit/test time.  This is intentionally distinct
+        # from ``propensityhead``, which participates in gradient reversal.
+        self.recommendation_propensity_model = None
 
     # ====================== Core model logic =============================
     def forward(
@@ -1066,98 +1073,17 @@ class DynaSurvCausalOnline(L.LightningModule):
         # (..., n_intervals + 1), with S(0) = 1 prepended.
         return hazards_to_survival(discrete_hazards)
 
-    # ====================== RMST and recommendation ======================
+    # ====================== Survival curve helpers ======================
+    # The maths lives in evaluation/discrete_survival.py, shared with the
+    # recommendation layer. These remain methods only because DynasurvEvaluator
+    # and the epoch-metric logging call them on the model; each one just supplies
+    # the model's own interval grid.
     def compute_rmst(self, discrete_survival: torch.Tensor, tau: float) -> torch.Tensor:
-        """Restricted mean survival time up to `tau`.
+        """Restricted mean survival time up to `tau` on this model's grid.
 
-        RMST(tau) = the area under S(t) on [0, tau]. Preferred over survival at
-        a single distant time point here for two reasons: it stays interpretable
-        without proportional hazards (which the era-varying treatment mix makes
-        hard to defend), and it is the natural scale on which to compare arms
-        for a recommendation -- months of life gained, not a probability at an
-        arbitrary landmark.
-
-        Args:
-            discrete_survival: (..., n_intervals + 1) survival on interval_bounds.
-            tau: horizon, in the same units as interval_bounds (months).
-
-        Returns:
-            Tensor of shape (...) holding RMST for each leading index.
+        See `CausalSurv.evaluation.discrete_survival.rmst`.
         """
-        bounds = self.interval_bounds.to(discrete_survival.device)
-        tau_t = torch.as_tensor(
-            float(tau), device=discrete_survival.device, dtype=bounds.dtype
-        )
-        tau_t = torch.clamp(tau_t, max=bounds[-1])
-
-        # Trapezoid over each interval, truncated at tau. Segments beyond tau
-        # contribute nothing; the segment containing tau is clipped and its
-        # survival linearly interpolated at the cut point.
-        left, right = bounds[:-1], bounds[1:]
-        seg_lo = torch.clamp(left, max=tau_t)
-        seg_hi = torch.clamp(right, max=tau_t)
-        width = seg_hi - seg_lo  # (n_intervals,)
-
-        full_width = (right - left).clamp(min=1e-12)
-        frac = ((seg_hi - left) / full_width).clamp(0.0, 1.0)
-
-        s_left = discrete_survival[..., :-1]
-        s_right = discrete_survival[..., 1:]
-        s_at_hi = s_left + (s_right - s_left) * frac
-        return (0.5 * (s_left + s_at_hi) * width).sum(dim=-1)
-
-    def recommendable_mask(self, device: torch.device | None = None) -> torch.Tensor:
-        """(n_lines, n_treatments) boolean mask of arms eligible per line.
-
-        Defaults to all-true when no mask has been supplied, so the model still
-        behaves sensibly outside a Lightning fit/test loop.
-        """
-        mask = torch.zeros(
-            self.n_lines, self.n_treatments, dtype=torch.bool, device=device
-        )
-        per_line = getattr(self, "recommendable_treatments_per_line", None)
-        if not per_line:
-            return torch.ones_like(mask)
-        for line, arms in per_line.items():
-            if line < self.n_lines:
-                for k in arms:
-                    mask[line, k] = True
-        return mask
-
-    def recommend_treatment(
-        self,
-        XPd,
-        X_static,
-        factual_idx,
-        horizon_times: list[float] | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Rank arms by RMST and return the best *supported* arm per line.
-
-        Non-recommendable arms are set to -inf before the argmax rather than
-        merely being reported alongside the rest: an arm with no empirical
-        support at that line has a counterfactual the data cannot identify, and
-        letting it win the comparison would surface an extrapolation as advice.
-
-        Returns:
-            best_idx: (batch, n_lines) index of the recommended arm.
-            rmst: (batch, n_lines, n_treatments) RMST per arm, -inf where masked.
-        """
-        survival = self.predict_discrete_survival(
-            XPd=XPd, X_static=X_static, gather=False, factual_idx=factual_idx
-        )  # (batch, n_lines, n_treatments, n_intervals + 1)
-
-        horizons = horizon_times or self.evaluation_horizon_times
-        rmst = torch.stack(
-            [
-                self.compute_rmst(survival[:, line], horizons[line])
-                for line in range(survival.shape[1])
-            ],
-            dim=1,
-        )  # (batch, n_lines, n_treatments)
-
-        mask = self.recommendable_mask(device=rmst.device)[: rmst.shape[1]]
-        rmst = rmst.masked_fill(~mask.unsqueeze(0), float("-inf"))
-        return rmst.argmax(dim=-1), rmst
+        return rmst(discrete_survival, tau, self.interval_bounds)
 
     def eval_factual_cumhazard(
         self,
@@ -1165,42 +1091,16 @@ class DynaSurvCausalOnline(L.LightningModule):
         eval_time: torch.Tensor,
         device: torch.device = torch.device("cpu"),
     ):
-        """return cumulative hazard at eval time for all batch and all lines
+        """H(t) at `eval_time`: (batch, n_intervals + 1) -> (batch, n_eval_points).
 
-        Args:
-            discrete_cumhazards (torch.Tensor): tensor of shape (batch, n_intervals+1) cumulative hazards
-            eval_time (torch.Tensor): tensor of shape (n_eval_points,) evaluation times
-
-        Returns:
-            torch.Tensor: (batch, n_eval_points) cumulative hazards at eval_time for all batch and all lines
+        See `CausalSurv.evaluation.discrete_survival.cumhazard_at`.
         """
-        interval_bounds = self.interval_bounds.to(device)
-        eval_time = eval_time.to(device)
-        discrete_cumhazards = discrete_cumhazards.to(device)
-
-        # ic(eval_time.shape, discrete_cumhazards.shape)
-
-        interval_idx = (
-            torch.bucketize(eval_time, interval_bounds, right=True) - 1
-        )  # (n_eval_points, )
-
-        # ic(interval_idx)
-
-        # ic(interval_idx.shape)
-        if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
-            # print(
-            #     "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
-            # )
-            interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
-
-        batch_size = discrete_cumhazards.shape[0]
-        gather_idx = interval_idx.unsqueeze(0).expand(
-            batch_size, -1
-        )  # (batch, n_eval_points)
-        hazards = torch.gather(
-            discrete_cumhazards, dim=1, index=gather_idx
-        )  # (batch, n_eval_points)
-        return hazards
+        return cumhazard_at(
+            discrete_cumhazards.to(device),
+            eval_time,
+            self.interval_bounds,
+            n_intervals=self.output_length,
+        )
 
     def eval_factual_survival(
         self,
@@ -1208,36 +1108,16 @@ class DynaSurvCausalOnline(L.LightningModule):
         eval_time: torch.Tensor,
         device: torch.device = torch.device("cpu"),
     ):
-        """evaluate `S(t|X,P,A)` at eval_time for all batch and all lines
+        """S(t) at `eval_time`: (batch, n_intervals + 1) -> (batch, n_eval_points).
 
-        Args:
-            discrete_survival (torch.Tensor): tensor of shape (batch, n_intervals+1) survival probabilities
-            eval_time (torch.Tensor): tensor of shape (n_eval_points,) evaluation times
-
-        Returns:
-            torch.Tensor: (batch, n_lines, n_eval_points) survival probabilities at eval_time for all batch and all lines
+        See `CausalSurv.evaluation.discrete_survival.survival_at`.
         """
-        interval_bounds = self.interval_bounds.to(device)
-        discrete_survival = discrete_survival.to(device)
-        eval_time = eval_time.to(device)
-
-        interval_idx = (
-            torch.bucketize(eval_time, interval_bounds, right=True) - 1
-        )  # (n_eval_points,)
-        if torch.any(interval_idx < 0) or torch.any(interval_idx >= self.output_length):
-            # print(
-            #     "Warning: eval_time is outside the range of interval_bounds. Clamping to valid range."
-            # )
-            interval_idx = torch.clamp(interval_idx, min=0, max=self.output_length - 1)
-
-        batch_size = discrete_survival.shape[0]
-        gather_idx = interval_idx.unsqueeze(0).expand(
-            batch_size, -1
-        )  # (batch, n_eval_points)
-        survival = torch.gather(
-            discrete_survival, dim=1, index=gather_idx
-        )  # (batch, n_eval_points)
-        return survival
+        return survival_at(
+            discrete_survival.to(device),
+            eval_time,
+            self.interval_bounds,
+            n_intervals=self.output_length,
+        )
 
     # ====================== Optimizer configuration ======================
     def configure_optimizers(self):
@@ -1267,6 +1147,42 @@ class DynaSurvCausalOnline(L.LightningModule):
             "recommendable_treatments_per_line",
             self.valid_treatments_per_line,
         )
+        self.recommendation_propensity_model = getattr(
+            self.trainer.datamodule, "propensity_overlap_model", None
+        )
+
+    # Recommendation support state that lives outside the state dict: the pickled
+    # propensity model and the two per-line arm sets. `TreatmentRecommender.from_model`
+    # reads all three, and a checkpoint loaded outside a Trainer never runs
+    # `on_fit_start`/`on_test_start`, so without the arm sets filters 1-3 silently
+    # degrade to "every arm is recommendable".
+    _SUPPORT_SET_KEYS = (
+        "recommendable_treatments_per_line",
+        "valid_treatments_per_line",
+    )
+
+    def on_save_checkpoint(self, checkpoint) -> None:
+        """Persist the separately fitted support state with a Lightning checkpoint."""
+        checkpoint["recommendation_propensity_model"] = (
+            self.recommendation_propensity_model
+        )
+        for key in self._SUPPORT_SET_KEYS:
+            per_line = getattr(self, key, None)
+            checkpoint[key] = (
+                None
+                if per_line is None
+                else {
+                    int(line): [int(k) for k in arms] for line, arms in per_line.items()
+                }
+            )
+
+    def on_load_checkpoint(self, checkpoint) -> None:
+        self.recommendation_propensity_model = checkpoint.get(
+            "recommendation_propensity_model", None
+        )
+        for key in self._SUPPORT_SET_KEYS:
+            if checkpoint.get(key) is not None:
+                setattr(self, key, checkpoint[key])
 
     def on_fit_start(self) -> None:
         self._setup_valid_treatments()

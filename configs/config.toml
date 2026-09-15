@@ -68,6 +68,15 @@ excluded_x_columns = ["X_onset_to_progression"]
 
 # An arm must clear this many observations at a line to be recommendable there.
 min_samples_per_treatment = 200
+# Beyond raw counts, require outcome information relevant to each line's RMST
+# horizon. A death before tau establishes zero survival thereafter; a censored
+# record only contributes if observed through tau.
+min_events_per_treatment = 30
+min_followup_samples_per_treatment = 100
+# Patient-specific overlap floor.  Set to zero to audit propensities without
+# masking recommendations; tune from the resulting ESS/low-propensity reports.
+propensity_min_probability = 0.01
+propensity_cv_folds = 5
 
 [eval]
 # Per-line horizons in months. These are set by what the HOLDOUT can support,
@@ -88,3 +97,31 @@ integration_step = 100 # the dx in the trapezoidal rule for integrating Brier sc
 # contributes only the early ones. Kept independent of horizon_times, which is a
 # per-line integration limit for the Brier score rather than a reporting grid.
 calibration_times = [6, 12, 24, 36]
+
+[recommendation]
+# Decision rule of the ensemble recommender (scripts/RecommendEnsemble.py). Every
+# member is a checkpoint trained on the same temporal split with a different
+# init; per patient, line and arm the ensemble gives a mean RMST, a std over
+# members, and p_best = the share of members in which the arm is the best
+# supported one.
+#
+# Leader = argmax over supported arms of `mean - pessimism_c * std` ("lcb", the
+# offline-bandit pessimism rule: an arm the members disagree about is penalised)
+# or of the mean alone ("mean").
+#
+# The leader is *recommended* only when both hold:
+#   1. no other supported arm is within margin_months of it once the paired
+#      difference is shrunk by pessimism_c * its std (the equivalence set is a
+#      singleton), and
+#   2. p_best(leader) >= p_best_min.
+# Otherwise the output is the equivalence set and the decision is "undecided".
+# p_best takes values in multiples of 1/M: with 3 members, 0.7 means unanimity;
+# with 10 members it means 7 of 10.
+p_best_min = 0.7
+margin_months = 1.0
+pessimism_c = 1.0
+leader_rule = "lcb"
+# Which ModelCheckpoint file of each run to ensemble: val_loss | bestCI | bestIBS |
+# bestCALIB | final_epoch. bestCALIB exists only for runs after 2026-09-07.
+checkpoint_kind = "val_loss"
+min_members = 2

@@ -8,6 +8,7 @@ import torch
 import torch.utils.data as TorchData
 from sklearn.model_selection import KFold, train_test_split
 
+from ..evaluation.propensity_overlap import PropensityOverlapModel
 from .dataset import ESMEOnlineDataset
 from .utils import pad_sequence_to_length, split_dataframe, transform_time
 
@@ -67,6 +68,11 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         batch_size: int,
         split_seed: int,
         min_samples_per_treatment: int = 200,
+        min_events_per_treatment: int = 0,
+        min_followup_samples_per_treatment: int = 0,
+        evaluation_horizon_times: list[float] | None = None,
+        propensity_min_probability: float = 0.0,
+        propensity_cv_folds: int = 5,
         columns_scheme: Dict = FULL_ESME_COLUMN_SCHEME,
         final_training: bool = False,
         num_folds: int | None = None,
@@ -129,6 +135,22 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.final_training = final_training
 
         self.min_samples_per_treatment = min_samples_per_treatment
+        self.min_events_per_treatment = min_events_per_treatment
+        self.min_followup_samples_per_treatment = min_followup_samples_per_treatment
+        self.evaluation_horizon_times = evaluation_horizon_times
+        if (
+            self.evaluation_horizon_times is not None
+            and len(self.evaluation_horizon_times) != self.n_lines
+        ):
+            raise ValueError(
+                "evaluation_horizon_times must have one horizon per treatment line"
+            )
+        # Populated from the training partition in setup().  This is deliberately
+        # separate from the full-cohort tensor construction in prepare_data().
+        self.arm_support_summary: dict[int, dict[int, dict[str, int | float]]] = {}
+        self.propensity_min_probability = propensity_min_probability
+        self.propensity_cv_folds = propensity_cv_folds
+        self.propensity_overlap_model: PropensityOverlapModel | None = None
 
         self.standardize_continuous = standardize_continuous
         self.binary_threshold = binary_threshold
@@ -386,11 +408,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         return valid_treatments
 
     def _compute_recommendable_treatments_per_line(
-        self, valid_treatments_per_line: dict[int, list[int]]
+        self,
+        valid_treatments_per_line: dict[int, list[int]],
+        arm_support_summary: dict[int, dict[int, dict[str, int | float]]] | None = None,
     ) -> dict[int, list[int]]:
         """Arms the model is allowed to *recommend*, per line.
 
-        Two filters compose here:
+        Three filters compose here:
 
         1. Empirical support -- an arm must clear `min_samples_per_treatment` at
            that line. Below that the counterfactual is extrapolation rather than
@@ -398,7 +422,11 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
            line 4 endocrine therapy alone all but disappears while mono-chemo
            dominates), so a single global action space is wrong in both
            directions.
-        2. Well-definedness -- arms in `excluded_treatment_arms` are dropped
+        2. Outcome/horizon support -- when configured, an arm must also have
+           enough events before its line-specific RMST horizon and enough
+           records whose outcome is known through that horizon (an event before
+           the horizon is informative because survival is then known to be 0).
+        3. Well-definedness -- arms in `excluded_treatment_arms` are dropped
            regardless of support, either because they are not an intervention
            at all (NO TREATMENT) or because the label pools too many distinct
            regimens to be a single intervention (OTHER, ET+TT).
@@ -408,22 +436,116 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         and the shared encoder. Only their eligibility to be *recommended* is
         withdrawn.
 
-        Caveat: support is counted on the full cohort, holdout included, so the
-        holdout's arm composition informs which arms are eligible. This is an
-        eligibility decision rather than a fitted parameter -- at deployment you
-        would likewise use all history to decide what may be offered -- but if
-        you need a strictly clean split, recompute this from the train indices
-        inside setup() and re-read it in the model's on_fit_start.
+        Support is calculated from the training partition in setup(), so neither
+        validation nor test outcomes can change the action set.
         """
         excluded_idx = {
             idx
             for idx, name in self.treatment_dict.items()
             if name in self.excluded_treatment_arms
         }
-        return {
-            line: [k for k in valid if k not in excluded_idx]
-            for line, valid in valid_treatments_per_line.items()
-        }
+        summary = arm_support_summary or {}
+        recommendable = {}
+        for line, valid in valid_treatments_per_line.items():
+            eligible = []
+            for k in valid:
+                # A missing summary entry means the horizon filters cannot be
+                # evaluated for this arm.  Skip them instead of reading the
+                # absent counts as 0 and rejecting the arm: absence of a
+                # measurement is not evidence of absent support, and failing
+                # closed here empties the action set without saying so.
+                stats = summary.get(line, {}).get(k)
+                enough_events = stats is None or (
+                    int(stats.get("events_to_horizon", 0))
+                    >= self.min_events_per_treatment
+                )
+                enough_followup = stats is None or (
+                    int(stats.get("known_to_horizon", 0))
+                    >= self.min_followup_samples_per_treatment
+                )
+                if k not in excluded_idx and enough_events and enough_followup:
+                    eligible.append(k)
+            recommendable[line] = eligible
+        return recommendable
+
+    def _compute_arm_support_summary(
+        self, dataset: TorchData.Subset
+    ) -> dict[int, dict[int, dict[str, int | float]]]:
+        """Summarise training-only arm support at each treatment line.
+
+        ``known_to_horizon`` counts patients followed at least to tau plus
+        patients who died before tau; both have a known survival status on the
+        complete [0, tau] RMST interval.  Censored patients before tau do not.
+        """
+        if self.ESMEDataset is None:
+            raise RuntimeError("prepare_data() must run before support can be computed")
+
+        indices = torch.as_tensor(dataset.indices, dtype=torch.long)
+        treatment = self.ESMEDataset.treatment_indices[indices]
+        time = self.ESMEDataset.time[indices].squeeze(-1)
+        event = self.ESMEDataset.event[indices].squeeze(-1).bool()
+        mask = self.ESMEDataset.mask[indices].bool()
+        n_treatments = len(self.treatment_dict)
+        result: dict[int, dict[int, dict[str, int | float]]] = {}
+
+        for line in range(self.n_lines):
+            tau = (
+                float(self.evaluation_horizon_times[line])
+                if self.evaluation_horizon_times is not None
+                else float("nan")
+            )
+            valid = mask[:, line]
+            result[line] = {}
+            for arm in range(n_treatments):
+                arm_mask = valid & (treatment[:, line] == arm)
+                n = int(arm_mask.sum())
+                if self.evaluation_horizon_times is None:
+                    events_to_horizon = int((event[:, line] & arm_mask).sum())
+                    known_to_horizon = n
+                else:
+                    observed_to_tau = (time[:, line] >= tau) | event[:, line]
+                    events_to_horizon = int(
+                        (event[:, line] & (time[:, line] <= tau) & arm_mask).sum()
+                    )
+                    known_to_horizon = int((observed_to_tau & arm_mask).sum())
+                result[line][arm] = {
+                    "n": n,
+                    "tau": tau,
+                    "events_to_horizon": events_to_horizon,
+                    "known_to_horizon": known_to_horizon,
+                }
+        return result
+
+    def _set_training_support(self, dataset: TorchData.Subset) -> None:
+        """Build all action-set masks from the current training partition only."""
+        if self.ESMEDataset is None:
+            raise RuntimeError("prepare_data() must run before setup()")
+        indices = torch.as_tensor(dataset.indices, dtype=torch.long)
+        treatment = self.ESMEDataset.treatment_indices[indices]
+        mask = self.ESMEDataset.mask[indices]
+        self.valid_treatments_per_line = self._compute_valid_treatments_per_line(
+            treatment, mask, self.min_samples_per_treatment
+        )
+        self.arm_support_summary = self._compute_arm_support_summary(dataset)
+        self.recommendable_treatments_per_line = (
+            self._compute_recommendable_treatments_per_line(
+                self.valid_treatments_per_line, self.arm_support_summary
+            )
+        )
+        self.propensity_overlap_model = PropensityOverlapModel(
+            n_lines=self.n_lines,
+            min_probability=self.propensity_min_probability,
+            n_splits=self.propensity_cv_folds,
+            random_state=self.split_seed,
+        ).fit(
+            X=self.ESMEDataset.X[indices],
+            X_static=self.ESMEDataset.X_static[indices],
+            P=self.ESMEDataset.P[indices],
+            d=self.ESMEDataset.d[indices],
+            treatment_idx=treatment,
+            mask=mask,
+            eligible_arms_per_line=self.recommendable_treatments_per_line,
+        )
 
     def _transform_to_tensor(self, df_merge: pd.DataFrame):
         p_encoded = pd.get_dummies(
@@ -499,9 +621,14 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         valid_treatments_per_line = self._compute_valid_treatments_per_line(
             treatment_indices, mask, self.min_samples_per_treatment
         )
-        self.recommendable_treatments_per_line = (
-            self._compute_recommendable_treatments_per_line(valid_treatments_per_line)
-        )
+
+        # The *recommendable* action set is deliberately NOT built here.  This
+        # runs inside prepare_data(), which sees the whole dataset (holdout
+        # included) and has no arm_support_summary to pass, so the horizon
+        # filters below would score every arm 0 and reject all of them --
+        # leaving {line: []} and masking every arm for every patient.
+        # _set_training_support() builds it in setup() from the training
+        # partition alone, which is the invariant the docstring promises.
 
         return (
             {
@@ -608,7 +735,11 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         print(f"Excluded from action set: {self.excluded_treatment_arms}")
         print(f"Excluded (leaked) X_ columns: {self.excluded_x_columns}")
         print(
-            f"Recommendable arms per line (min {self.min_samples_per_treatment} obs):"
+            "Recommendable arms per line "
+            f"(min n={self.min_samples_per_treatment}, "
+            f"events={self.min_events_per_treatment}, "
+            f"known-to-horizon={self.min_followup_samples_per_treatment}; "
+            "training partition only):"
         )
         for line in sorted(self.recommendable_treatments_per_line):
             names = [
@@ -616,6 +747,19 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                 for k in self.recommendable_treatments_per_line[line]
             ]
             print(f"  line {line + 1}: {len(names)} arms -> {names}")
+            if self.arm_support_summary:
+                details = {
+                    self.treatment_dict[k]: self.arm_support_summary[line][k]
+                    for k in self.recommendable_treatments_per_line[line]
+                }
+                print(f"    support: {details}")
+        if self.propensity_overlap_model is not None:
+            print(
+                "Propensity overlap (OOF factual probabilities; "
+                f"floor={self.propensity_min_probability}):"
+            )
+            for line, stats in self.propensity_overlap_model.summary().items():
+                print(f"  line {line + 1}: {stats}")
         print("=" * 72 + "\n")
 
     # ========= Data splitting ==========
@@ -674,8 +818,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             if stage == "fit" or stage is None:
                 self.train_dataset = self.cv_dataset
                 self.val_dataset = self.holdout_dataset
+                self._set_training_support(self.train_dataset)
             if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
+                # A standalone test invocation has no fit-stage dataset.  Use
+                # the deterministic final-training partition in that case.
+                if not hasattr(self, "train_dataset"):
+                    self._set_training_support(self.cv_dataset)
         else:
             if stage == "fit" or stage is None:
                 kfold = KFold(
@@ -694,9 +843,15 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
                 self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
                 self.es_dataset = TorchData.Subset(self.ESMEDataset, early_stop_idx)
+                self._set_training_support(self.train_dataset)
 
             if stage == "test" or stage is None:
                 self.test_dataset = self.holdout_dataset
+                if not hasattr(self, "train_dataset"):
+                    raise RuntimeError(
+                        "Call setup('fit') before standalone test for CV mode so "
+                        "the fold-specific training support mask is available."
+                    )
 
     # ========= DataLoaders ==========
 
