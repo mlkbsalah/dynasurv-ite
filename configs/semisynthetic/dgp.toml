@@ -1,0 +1,131 @@
+# Semi-synthetic DGP for HR+/HER2- V2. Loaded by CausalSurv.semisynthetic.config.DGPConfig
+# (strict: unknown keys and driver-role violations raise).
+#
+# Driver scale: continuous drivers (mpps, log_prev_line, cum_new_sites, age, calendar) are
+# z-scored over the cohort rows; all others are 0/1 flags. Coefficients are therefore
+# "per SD" or "flag on vs off".
+
+seed = 20260914
+
+[cohort]
+data_dir = "../data"
+subtype = "HR+HER2-"
+n_lines = 4
+cohort_start_year = 2018
+# Latest line_start_date in V2; administrative censoring is measured from here.
+data_cutoff = "2024-02-21"
+# CT+ANTI-ANGIO dropped: 21/7/2/2 rows per line in the >=2018 cohort, no overlap.
+arms = ["ET alone", "ET+ANTI-CDK wo CT", "MONOCT std alone", "POLYCT alone"]
+
+# --------------------------------------------------------------------------------------
+# Assignment: logit_a = alpha_{line,a} + gamma * B[a] . z   (alpha calibrated, not set here)
+# Softmax is shift-invariant, so only differences between arms matter.
+# --------------------------------------------------------------------------------------
+[assignment]
+gamma = 1.0
+
+[assignment.coefficients."ET alone"]
+age = 0.4            # older patients -> ET monotherapy
+prev_et = -0.5       # endocrine resistance after ET
+prev_cdk = -0.3
+
+[assignment.coefficients."ET+ANTI-CDK wo CT"]
+bone_only = 0.5
+log_prev_line = 0.4  # long previous line = endocrine-sensitive
+prev_cdk = -1.0      # CDK rarely repeated
+liver = -0.3
+visceral = -0.2
+mpps = -0.3
+menopause = 0.3
+calendar = 0.3       # instrument: uptake grows over time
+cum_new_sites = -0.1
+
+[assignment.coefficients."MONOCT std alone"]
+liver = 0.5
+visceral = 0.3
+bone_only = -0.4
+mpps = 0.3           # frail -> single agent
+log_prev_line = -0.4
+prev_ct = 0.3
+prev_cdk = 0.4
+age = 0.3
+cum_new_sites = 0.2
+calendar = -0.1
+
+[assignment.coefficients."POLYCT alone"]
+liver = 0.9          # visceral crisis -> combination chemo
+visceral = 0.5
+bone_only = -0.6
+mpps = -0.2
+log_prev_line = -0.5
+prev_cdk = 0.3
+age = -0.4
+menopause = -0.3
+cum_new_sites = 0.3
+calendar = -0.2
+
+# --------------------------------------------------------------------------------------
+# Outcome (log-hazard scale; + = worse): eta_a = f(z) + tau_a + heterogeneity * g_a(z)
+# --------------------------------------------------------------------------------------
+[outcome]
+heterogeneity = 1.0
+
+[outcome.arm_effects]           # tau_a
+"ET alone" = 0.0
+"ET+ANTI-CDK wo CT" = -0.35
+"MONOCT std alone" = 0.10
+"POLYCT alone" = 0.0
+
+[outcome.prognostic]            # f(z)
+liver = 0.45
+visceral = 0.25
+bone_only = -0.30
+mpps = 0.30
+log_prev_line = -0.25
+prev_cdk = 0.20
+cum_new_sites = 0.15
+age = 0.10
+menopause = 0.05
+brain = 0.40
+lobular = 0.10
+brca = 0.15
+old_site_progression = 0.15
+
+# g_a(z): who benefits from what, so the best arm differs across patients.
+[outcome.interactions."ET alone"]
+bone_only = -0.15
+prev_et = 0.30
+liver = 0.30
+
+[outcome.interactions."ET+ANTI-CDK wo CT"]
+bone_only = -0.30
+log_prev_line = -0.20
+prev_cdk = 0.40
+liver = 0.25
+
+[outcome.interactions."MONOCT std alone"]
+mpps = -0.10
+age = -0.10
+liver = -0.15
+
+[outcome.interactions."POLYCT alone"]
+liver = -0.35
+visceral = -0.25
+mpps = 0.15
+age = 0.15
+
+# --------------------------------------------------------------------------------------
+# Hidden confounder u (never in the model input). Sweep `strength`; keep `outcome` fixed.
+# --------------------------------------------------------------------------------------
+[hidden_confounder]
+strength = 0.0
+liver_correlation = 0.3
+outcome = 0.4
+
+[hidden_confounder.assignment]
+"POLYCT alone" = 1.0
+"MONOCT std alone" = 0.5
+"ET+ANTI-CDK wo CT" = -0.5
+
+[censoring]
+dropout = true
