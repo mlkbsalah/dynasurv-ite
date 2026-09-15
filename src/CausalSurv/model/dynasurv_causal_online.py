@@ -12,6 +12,13 @@ from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
 from ..config import ArchConfig, EvalConfig, TrainingConfig
+from ..evaluation.discrete_survival import (
+    hazards_to_cumhazard,
+    hazards_to_survival,
+    kaplan_meier,
+    km_at,
+    pad_hazards,
+)
 from ..metrics.emd_loss import EMDLoss
 from ..metrics.ipm import pairwise_ipm
 from ..metrics.mmd_loss import MMDLoss
@@ -83,6 +90,11 @@ class DynaSurvCausalOnline(L.LightningModule):
 
         self.evaluation_horizon_times = list(evaluation.horizon_times)
         self.brier_integration_step = evaluation.integration_step
+        # Landmarks (months) at which mean predicted survival is compared with the
+        # Kaplan-Meier estimate of the same risk set, per line. Applied to every line;
+        # a landmark past a line's last observation is skipped rather than reported,
+        # so the later lines simply log fewer of them.
+        self.calibration_times = sorted(float(t) for t in evaluation.calibration_times)
 
         self.min_ipm_group_size = int(training.min_ipm_group_size)
 
@@ -160,6 +172,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         Args:
             XPd: (batch, n_lines, features = x_input_dim + p_input_dim + 1)
             X_static: ( (batch, x_static_dim), (batch, p_static_dim) )
+            treatment_idx: (batch, n_lines) integer treatment head indices
         Returns:
             hazard_logit: (batch, n_lines, n_treatments, n_intervals)
             latent_state: (batch, n_lines, latent_dim)
@@ -170,7 +183,6 @@ class DynaSurvCausalOnline(L.LightningModule):
         x_static, p_static = X_static
 
         for t in range(XPd.shape[1]):
-            # XPd_aug = torch
             logit_t, (h, c, p) = self._step(
                 XPd[:, t, :], (h, c, p), treatment_idx[:, t]
             )
@@ -250,14 +262,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
-        # (
-        #     XPd, X_static,
-        #     interval_idx, _,
-        #     treatment_idx,
-        #     time, event,
-        #     _, _,
-        #     mask, _,
-        # ) = batch
+
         if self.current_epoch == 0:
             self._accumulate_data(time, event, mask)
 
@@ -300,21 +305,6 @@ class DynaSurvCausalOnline(L.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        # self.log(
-        #     "train/propensity_loss",
-        #     prop_loss,
-        #     prog_bar=True,
-        #     on_step=False,
-        #     on_epoch=True,
-        # )
-
-        # self.log(
-        #     "train/ipm_reg",
-        #     ipm_mmd_reg,
-        #     prog_bar=True,
-        #     on_step=False,
-        #     on_epoch=True,
-        # )
 
         return loss
 
@@ -323,14 +313,6 @@ class DynaSurvCausalOnline(L.LightningModule):
         XPd, X_static, interval_idx, treatment_idx, time, event, mask, patient_id = (
             batch
         )
-        # (
-        #     XPd, X_static,
-        #     interval_idx, _,
-        #     treatment_idx,
-        #     time, event,
-        #     _, _,
-        #     mask, _,
-        # ) = batch
         N_lines = time.shape[1]
         hazard_logits, latent_state = self.forward_factual(XPd, X_static, treatment_idx)
 
@@ -383,43 +365,14 @@ class DynaSurvCausalOnline(L.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        # self.log(
-        #     "val/propensity_loss",
-        #     prop_loss,
-        #     prog_bar=False,
-        #     on_step=False,
-        #     on_epoch=True,
-        # )
 
-        # self.log(
-        #     "val/ipm_mmd",
-        #     ipm_mmd_reg,
-        #     prog_bar=True,
-        #     on_step=False,
-        #     on_epoch=True,
-        # )
-
-        # self.log(
-        #     "val/ipm_emd2",
-        #     imp_emd2_reg,
-        #     prog_bar=True,
-        #     on_step=False,
-        #     on_epoch=True,
-        # )
         if self.trainer.sanity_checking:
             return loss
 
         discrete_hazards = torch.sigmoid(hazard_logits)
-        discrete_survival = torch.cumprod(1 - discrete_hazards, dim=2)
-        discrete_survival = torch.cat(
-            [torch.ones_like(discrete_survival[:, :, :1]), discrete_survival], dim=2
-        )  # (batch, n_lines, n_intervals + 1) to account for S(0)=1
-
-        discrete_cumhazards = torch.cumsum(discrete_hazards, dim=2)
-        discrete_cumhazards = torch.cat(
-            [torch.zeros_like(discrete_cumhazards[:, :, :1]), discrete_cumhazards],
-            dim=2,
-        )  # (batch, n_lines, n_intervals + 1) to account for H(0)=0
+        # (batch, n_lines, n_intervals + 1), with S(0) = 1 and H(0) = 0 prepended.
+        discrete_survival = hazards_to_survival(discrete_hazards)
+        discrete_cumhazards = hazards_to_cumhazard(discrete_hazards)
 
         # C-index ranks all comparable pairs and IPCW weights are estimated from the
         # pooled sample, so neither can be averaged across batches. Stash the per-line
@@ -463,6 +416,64 @@ class DynaSurvCausalOnline(L.LightningModule):
             torch.tensor(times, dtype=torch.float32, device="cpu"),
         )
 
+    def _log_calibration_gap(self, prefix, line, times, events, discrete_survival):
+        """Log mean predicted S(t) against the Kaplan-Meier estimate of the same risk set.
+
+        Averaging the individual predicted curves over a risk set estimates the same
+        marginal survival that KM estimates from the observed times, so a systematic gap
+        between them is the model's and not the population's. C-index cannot see it (it
+        only ranks) and IBS averages it away across time, which is how a line can look
+        acceptable on both while its mean curve sits ten points above the data.
+
+        Returns the signed gaps (predicted - observed) so the caller can pool them.
+        """
+        t = times.reshape(-1).cpu().numpy().astype(np.float64)
+        e = events.reshape(-1).cpu().numpy()
+        if t.size == 0:
+            return []
+
+        bounds = self.interval_bounds.detach().cpu().numpy().astype(np.float64)
+        mean_curve = (
+            discrete_survival.mean(dim=0).reshape(-1).cpu().numpy().astype(np.float64)
+        )
+        uniq, surv = kaplan_meier(t, e)
+
+        gaps: list[float] = []
+        for landmark in self.calibration_times:
+            if landmark > bounds[-1]:
+                continue
+            observed = km_at(uniq, surv, landmark)
+            if not np.isfinite(observed):
+                continue
+
+            predicted = float(np.interp(landmark, bounds, mean_curve))
+            gap = predicted - observed
+            gaps.append(gap)
+
+            key = f"line_{line + 1}_t{landmark:g}"
+            for name, value in (
+                ("calib_pred", predicted),
+                ("calib_km", observed),
+                ("calib_gap", gap),
+            ):
+                self.log(
+                    f"{prefix}/{name}_{key}",
+                    value,
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+
+        if gaps:
+            self.log(
+                f"{prefix}/calib_gap_abs_mean_line_{line + 1}",
+                float(np.mean(np.abs(gaps))),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+            )
+        return gaps
+
     def _log_epoch_metrics(self):
         """Score C-index and IBS once per epoch over the pooled predictions."""
         for dataloader_idx, buffers in sorted(self._eval_buffers.items()):
@@ -471,6 +482,7 @@ class DynaSurvCausalOnline(L.LightningModule):
 
             prefix = "val" if dataloader_idx == 0 else "early_stop"
             ci, ibs, n_per_line = [], [], []
+            all_gaps: list[float] = []
 
             for line in sorted(buffers):
                 reference = self._train_surv_reference(line)
@@ -526,10 +538,10 @@ class DynaSurvCausalOnline(L.LightningModule):
                     on_step=False,
                     on_epoch=True,
                 )
-                # Mean predicted RMST at this line's horizon. Reported next to
-                # the observed Kaplan-Meier RMST it should track, so a model
-                # that discriminates well but is calibrated badly in absolute
-                # months is visible rather than hidden behind C-index.
+                # Mean predicted RMST at this line's horizon, next to the observed
+                # Kaplan-Meier RMST it should track: a model that discriminates well
+                # but is calibrated badly in absolute months is visible here rather
+                # than hidden behind the C-index.
                 tau = self.evaluation_horizon_times[line]
                 self.log(
                     f"{prefix}/rmst_pred_time_step_{line + 1}",
@@ -539,8 +551,35 @@ class DynaSurvCausalOnline(L.LightningModule):
                     on_epoch=True,
                 )
 
+                all_gaps.extend(
+                    self._log_calibration_gap(
+                        prefix, line, t_line, e_line, line_discrete_survival
+                    )
+                )
+
             if not ci:
                 continue
+
+            # One number per split for "how far is the mean predicted curve from the
+            # observed one", pooled over every line and landmark that had data. Watch
+            # it against the per-line series: a flat aggregate can hide one line still
+            # moving, which is the whole reason the per-line keys exist.
+            if all_gaps:
+                gaps_arr = np.abs(np.asarray(all_gaps, dtype=np.float64))
+                self.log(
+                    f"{prefix}/calib_gap_abs_mean",
+                    float(gaps_arr.mean()),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
+                self.log(
+                    f"{prefix}/calib_gap_abs_max",
+                    float(gaps_arr.max()),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
             # Inverse-frequency weighting over the lines actually observed, so a line
             # missing from the split cannot introduce a division by zero.
@@ -1002,17 +1041,10 @@ class DynaSurvCausalOnline(L.LightningModule):
                 self.forward(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_treatments, n_intervals)
 
-        discrete_hazards = torch.cat(
-            [torch.zeros_like(discrete_hazards[..., :1]), discrete_hazards],
-            dim=-1,
-        )  # (batch, n_lines, n_intervals + 1)/(batch, n_lines, n_treatments, n_intervals + 1) to account for H(0)=0
-
+        # (..., n_intervals + 1): a zero hazard is prepended at t = 0.
         if cum:
-            discrete_cumhazards = torch.cumsum(discrete_hazards, dim=-1)
-
-            return discrete_cumhazards
-        else:
-            return discrete_hazards
+            return hazards_to_cumhazard(discrete_hazards)
+        return pad_hazards(discrete_hazards)
 
     def predict_discrete_survival(
         self, XPd, X_static, gather: bool = False, factual_idx: None = None
@@ -1031,12 +1063,8 @@ class DynaSurvCausalOnline(L.LightningModule):
                 self.forward(XPd, X_static, factual_idx)[0]
             )  # (batch, n_lines, n_treatments, n_intervals)
 
-        discrete_survival = torch.cumprod(1 - discrete_hazards, dim=-1)
-        discrete_survival = torch.cat(
-            [torch.ones_like(discrete_survival[..., :1]), discrete_survival], dim=-1
-        )  # (batch, n_lines, n_intervals + 1)/ (batch, n_lines, n_treatments, n_intervals + 1)to account for S(0)=1
-
-        return discrete_survival
+        # (..., n_intervals + 1), with S(0) = 1 prepended.
+        return hazards_to_survival(discrete_hazards)
 
     # ====================== RMST and recommendation ======================
     def compute_rmst(self, discrete_survival: torch.Tensor, tau: float) -> torch.Tensor:

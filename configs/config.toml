@@ -3,7 +3,17 @@
 max_epochs = 100
 
 [train.early_stopping]
-monitor = "early_stop_loss/dataloader_idx_1"
+# Stop on marginal calibration, not on the survival NLL. Across an lr sweep
+# (1e-3/3e-4/1e-4) and an n_intervals sweep (100/70/50/30), val_loss bottomed at
+# epoch 5-27 and then degraded while calib_gap_abs_mean kept falling to the last
+# epoch of nearly every run -- so stopping on val_loss ended training while the
+# quantity we care about was still improving. Note val_loss is also not
+# comparable across n_intervals (it sums per-interval NLL terms), whereas the
+# calibration gap is a survival-probability difference and is.
+#
+# This key used to be ignored: the script hardcoded monitor="val_loss". It is
+# now read (TrainDynasurvCausal.py), so editing it here changes the run.
+monitor = "val/calib_gap_abs_mean"
 mode = "min"
 patience = 10
 
@@ -71,3 +81,10 @@ min_samples_per_treatment = 200
 # was unsupported once the temporal holdout was taken into account.
 horizon_times = [24, 18, 12, 12]
 integration_step = 100 # the dx in the trapezoidal rule for integrating Brier score over time
+
+# Landmarks (months) for the per-line calibration gap logged each validation epoch:
+# mean predicted S(t) minus the Kaplan-Meier S(t) of the same risk set. Applied to
+# every line; a landmark past a line's last observed time is skipped, so line 4
+# contributes only the early ones. Kept independent of horizon_times, which is a
+# per-line integration limit for the Brier score rather than a reporting grid.
+calibration_times = [6, 12, 24, 36]
