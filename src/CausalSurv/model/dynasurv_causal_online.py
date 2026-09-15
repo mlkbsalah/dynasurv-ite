@@ -11,6 +11,7 @@ from torchsurv.metrics.brier_score import BrierScore
 from torchsurv.metrics.cindex import ConcordanceIndex
 from torchsurv.stats.ipcw import get_ipcw
 
+from ..config import ArchConfig, EvalConfig, TrainingConfig
 from ..metrics.emd_loss import EMDLoss
 from ..metrics.ipm import pairwise_ipm
 from ..metrics.mmd_loss import MMDLoss
@@ -23,12 +24,24 @@ from ..model.mlp import MLP
 class DynaSurvCausalOnline(L.LightningModule):
     """Multi-treatment causal survival model with separate heads.
 
+    The data-derived dimensions stay explicit arguments because the datamodule
+    dictates them; everything that is *chosen* arrives as a config object, so a
+    construction site cannot silently omit one. It used to be able to: six
+    dropout values sat in `best_config.toml` that `TrainDynasurvCausal.py` never
+    passed, and every run trained at dropout 0.
+
     Args:
         x_input_dim: Number of X features per timestep.
-        p_input_dim: Number of P (patient / static / treatment history) features per timestep.
-        output_sa_length: Number of conditional survival intervals (n_intervals).
+        x_static_dim: Width of the static patient feature vector.
+        p_input_dim: Number of P (treatment history) features per timestep.
+        p_static_dim: Width of the static treatment-history vector.
         n_treatments: Number of distinct treatment heads to model.
-        config: Dict or TOML path for model configuration.
+        output_length: Number of conditional survival intervals (n_intervals).
+        interval_bounds: (n_intervals + 1,) grid the hazards are defined on.
+        n_lines: Maximum number of treatment lines per patient.
+        arch: Layer widths, dropout and attention (`ArchConfig`).
+        training: Optimiser and causal-balancing weights (`TrainingConfig`).
+        evaluation: Reporting grid for the epoch metrics (`EvalConfig`).
     """
 
     def __init__(
@@ -40,34 +53,10 @@ class DynaSurvCausalOnline(L.LightningModule):
         n_treatments: int,
         output_length: int,
         interval_bounds: torch.Tensor,
-        n_lines: int = 4,
-        lstm_hidden_length: int = 128,
-        lstm_num_layers: int = 4,
-        x_embed_dim: int = 64,
-        p_embed_dim: int = 16,
-        init_h_hidden: list[int] = [32],
-        init_p_hidden: list[int] = [32],
-        mlpx_hidden_units: list[int] = [128],
-        mlpp_hidden_units: list[int] = [32],
-        mlpsa_hidden_units: list[int] = [64, 64, 64],
-        mlpprop_hidden_units: list[int] = [64, 32],
-        lr: float = 1e-5,
-        lr_scheduler_stepsize: int = 20,
-        lr_scheduler_gamma: float = 0.3,
-        weight_decay: float = 0.05,
-        attention: bool = True,
-        init_h_dropout: float = 0,
-        init_p_dropout: float = 0,
-        mlpx_dropout: float = 0,
-        mlpp_dropout: float = 0,
-        mlpsa_dropout: float = 0,
-        mlpprop_dropout: float = 0,
-        lambda_prop_loss: float = 0,
-        lambda_ipm_mmd: float = 0,
-        lambda_ipm_emd2: float = 0,
-        min_ipm_group_size: int = 16,
-        evaluation_horizon_times: list[float] = [100, 75, 50, 30],
-        brier_integration_step: int = 6,
+        n_lines: int,
+        arch: ArchConfig,
+        training: TrainingConfig,
+        evaluation: EvalConfig,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -80,22 +69,22 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.n_lines = n_lines
         self.output_length = output_length
 
-        if len(evaluation_horizon_times) != n_lines:
+        self.arch = arch
+        self.training_config = training
+        self.eval_config = evaluation
+
+        if len(evaluation.horizon_times) != n_lines:
             raise ValueError(
-                f"evaluation_horizon_times has length {len(evaluation_horizon_times)} but n_lines={n_lines}"
+                f"horizon_times has length {len(evaluation.horizon_times)} but n_lines={n_lines}"
             )
 
         self.register_buffer("interval_bounds", interval_bounds)
         self.interval_bounds: torch.Tensor
 
-        self.evaluation_horizon_times = evaluation_horizon_times
-        self.brier_integration_step = brier_integration_step
+        self.evaluation_horizon_times = list(evaluation.horizon_times)
+        self.brier_integration_step = evaluation.integration_step
 
-        # Minimum per-batch samples in EACH treatment group for a pair to contribute to the
-        # IPM penalty. Deliberately not derived from lstm_hidden_length: that coupling made
-        # the threshold (128) equal the batch size, so no pair could ever qualify and both
-        # IPM terms returned 0.0 at every lambda.
-        self.min_ipm_group_size = int(min_ipm_group_size)
+        self.min_ipm_group_size = int(training.min_ipm_group_size)
 
         # Dedicated stream for IPM group subsampling, so computing the balance diagnostic
         # never perturbs the training trajectory (weight init, dropout, shuffling).
@@ -105,24 +94,27 @@ class DynaSurvCausalOnline(L.LightningModule):
             x_input_dim=self.x_input_dim,
             p_input_dim=self.p_input_dim,
             output_length=self.output_length,
-            hidden_length=lstm_hidden_length,
-            num_layers=lstm_num_layers,
-            x_embed_dim=x_embed_dim,
-            p_embed_dim=p_embed_dim,
-            mlpx_hidden_units=mlpx_hidden_units,
-            mlpp_hidden_units=mlpp_hidden_units,
-            mlpsa_hidden_units=mlpsa_hidden_units,
-            mlpx_dropout=mlpx_dropout,
-            mlpp_dropout=mlpp_dropout,
-            mlpsa_dropout=mlpsa_dropout,
-            attention=attention,
+            hidden_length=arch.lstm_hidden_length,
+            num_layers=arch.lstm_num_layers,
+            x_embed_dim=arch.x_embed_dim,
+            p_embed_dim=arch.p_embed_dim,
+            mlpx_hidden_units=list(arch.mlpx_hidden_units),
+            # `MLPp` is never constructed inside the encoder -- P goes through an
+            # nn.Embedding -- so these two are inert. Passed as fixed literals
+            # rather than as config so no tuned-looking value can imply otherwise.
+            mlpp_hidden_units=[],
+            mlpsa_hidden_units=list(arch.mlpsa_hidden_units),
+            mlpx_dropout=arch.mlpx_dropout,
+            mlpp_dropout=0.0,
+            mlpsa_dropout=arch.mlpsa_dropout,
+            attention=arch.attention,
         )
 
         self.treatment_head = MLP(
             input_dim=self.lstm.hidden_length,
             output_dim=output_length * n_treatments,
-            n_units=mlpsa_hidden_units,
-            dropout=mlpsa_dropout,
+            n_units=list(arch.mlpsa_hidden_units),
+            dropout=arch.mlpsa_dropout,
         )
 
         self.hazard_line_log_temperature = torch.nn.Parameter(torch.zeros(n_lines))
@@ -131,8 +123,8 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.propensityhead = MLP(
             input_dim=self.lstm.hidden_length,
             output_dim=self.n_treatments,
-            n_units=mlpprop_hidden_units,
-            dropout=mlpprop_dropout,
+            n_units=list(arch.mlpprop_hidden_units),
+            dropout=arch.mlpprop_dropout,
         )
 
         self.surv_loss_fn = NLLogisticHazard(reduction="none")
@@ -141,13 +133,13 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.emd2_loss = EMDLoss()
 
         # Optimizer parameters
-        self.lambda_prop_loss = lambda_prop_loss
-        self.lambda_ipm_mmd = lambda_ipm_mmd
-        self.lambda_ipm_emd2 = lambda_ipm_emd2
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.lr_scheduler_stepsize = lr_scheduler_stepsize
-        self.lr_scheduler_gamma = lr_scheduler_gamma
+        self.lambda_prop_loss = training.lambda_prop_loss
+        self.lambda_ipm_mmd = training.lambda_ipm_mmd
+        self.lambda_ipm_emd2 = training.lambda_ipm_emd2
+        self.lr = training.lr
+        self.weight_decay = training.weight_decay
+        self.lr_scheduler_stepsize = training.lr_scheduler_stepsize
+        self.lr_scheduler_gamma = training.lr_scheduler_gamma
 
         # IPCW buffer
         self.train_times = None
@@ -542,118 +534,6 @@ class DynaSurvCausalOnline(L.LightningModule):
                 self.log(
                     f"{prefix}/rmst_pred_time_step_{line + 1}",
                     float(self.compute_rmst(line_discrete_survival, tau).mean()),
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                )
-
-            if not ci:
-                continue
-
-            # Inverse-frequency weighting over the lines actually observed, so a line
-            # missing from the split cannot introduce a division by zero.
-            w = 1.0 / np.asarray(n_per_line, dtype=np.float64)
-            w = w / w.sum()
-            weighted_ibs = float(np.sum(np.asarray(ibs) * w))
-            average_ci = float(np.mean(ci))
-
-            if dataloader_idx == 0:
-                self.log(
-                    "average_ci",
-                    average_ci,
-                    prog_bar=True,
-                    on_step=False,
-                    on_epoch=True,
-                )
-                self.log(
-                    "average_ibs",
-                    weighted_ibs,
-                    prog_bar=True,
-                    on_step=False,
-                    on_epoch=True,
-                )
-            else:
-                self.log(
-                    "early_stop_average_ci",
-                    average_ci,
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                )
-                self.log(
-                    "early_stop_average_ibs",
-                    weighted_ibs,
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                )
-
-    def _compute_propensity_loss(self, latent_state, treatment_idx, mask):
-        batch_size, n_lines, _ = latent_state.shape
-        treatment_prediction = torch.softmax(
-            self.propensityhead(latent_state.view(-1, latent_state.shape[-1])),
-            dim=-1,
-        )
-
-    def _log_epoch_metrics(self):
-        """Score C-index and IBS once per epoch over the pooled predictions."""
-        for dataloader_idx, buffers in sorted(self._eval_buffers.items()):
-            if not buffers:
-                continue
-
-            prefix = "val" if dataloader_idx == 0 else "early_stop"
-            ci, ibs, n_per_line = [], [], []
-
-            for line in sorted(buffers):
-                reference = self._train_surv_reference(line)
-                if reference is None:
-                    raise ValueError(
-                        "IPCW weights cannot be computed before training epoch 0 is completed."
-                    )
-                train_events, train_times = reference
-
-                line_buffer = buffers[line]
-                t_line = torch.cat(line_buffer["time"])  # (n_line,)
-                e_line = torch.cat(line_buffer["event"]).bool()  # (n_line,)
-                line_discrete_survival = torch.cat(
-                    line_buffer["survival"]
-                )  # (n_line, n_intervals + 1)
-                line_discrete_cumhazards = torch.cat(
-                    line_buffer["cumhazard"]
-                )  # (n_line, n_intervals + 1)
-
-                c_index_td, _ = self.eval_cindex_ipcw(
-                    train_events=train_events,
-                    train_times=train_times,
-                    test_events=e_line,
-                    test_times=t_line,
-                    discrete_cumhazards=line_discrete_cumhazards,
-                    device="cpu",
-                )
-                ibs_line, _, _ = self.eval_brier_score_ipcw(
-                    train_events=train_events,
-                    train_times=train_times,
-                    test_events=e_line,
-                    test_times=t_line,
-                    discrete_survival=line_discrete_survival,
-                    tmax=self.evaluation_horizon_times[line],
-                    device=torch.device("cpu"),
-                )
-
-                ci.append(c_index_td)
-                ibs.append(float(ibs_line))
-                n_per_line.append(t_line.shape[0])
-
-                self.log(
-                    f"{prefix}/ci_time_step_{line + 1}",
-                    c_index_td,
-                    prog_bar=False,
-                    on_step=False,
-                    on_epoch=True,
-                )
-                self.log(
-                    f"{prefix}/ibs_time_step_{line + 1}",
-                    ibs_line,
                     prog_bar=False,
                     on_step=False,
                     on_epoch=True,

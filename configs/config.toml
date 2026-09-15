@@ -11,7 +11,11 @@ patience = 10
 data_dir = "../data"
 subtype = "HR+HER2-"
 n_lines = 4
-batch_size = 128
+
+# NOTE: batch_size and n_intervals are NOT here. Both are datamodule inputs that
+# the Optuna study tunes, so they live together in configs/best_config.json.
+# Splitting them -- n_intervals in the tuned file, batch_size here -- is what let
+# the study's winning batch_size be silently replaced by this file's value.
 
 # --- Identifiability controls (see improvements.md) ---
 # Keep only patients whose FIRST line starts in/after this year, so every arm in
