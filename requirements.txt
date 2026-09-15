@@ -8,7 +8,6 @@
 # --- Deep learning / training ---
 torch==2.10.0
 lightning==2.6.1
-torchmetrics==1.8.2
 
 # --- Survival analysis ---
 torchsurv==0.1.6
@@ -18,18 +17,15 @@ lifelines==0.30.0
 # --- Scientific stack ---
 numpy==2.3.5
 pandas==2.3.3
-scipy==1.16.3
 scikit-learn==1.7.2
-pyarrow==22.0.0          # parquet engine for pd.read_parquet in the datamodules
 joblib==1.5.2
 
 # --- Optimal transport (EMD covariate-balance loss: `import ot`) ---
 POT==0.9.6.post1
 
-# --- Experiment tracking & hyperparameter search ---
-wandb==0.23.0
+# --- Hyperparameter search ---
 optuna==4.7.0
-optuna-integration==4.8.0   # PyTorchLightningPruningCallback
+optuna-integration==4.8.0   # provides `optuna.integration.PyTorchLightningPruningCallback`
 
 # --- Plotting / reporting ---
 matplotlib==3.10.8
@@ -43,12 +39,7 @@ icecream==2.1.10
 
 # --- Notebooks (notebooks/*.ipynb) ---
 skrub==0.7.2
-ipykernel==7.1.0
-jupyterlab==4.5.2
 
-# --- Dev tooling ---
-ruff==0.14.14            # kept in sync with .pre-commit-config.yaml
-pre-commit==4.5.1
-nbstripout==0.9.0        # git filter configured in .gitattributes
-pytest==9.0.2
-pytest-cov==7.0.0
+# --- Not imported directly, but required at runtime ---
+wandb==0.23.0            # backend for lightning's WandbLogger in the training scripts
+pyarrow==22.0.0          # parquet engine for pd.read_parquet in the datamodules
