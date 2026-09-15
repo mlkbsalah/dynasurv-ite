@@ -24,6 +24,7 @@ figure(s) into `plots/`.
 | `km_line1_by_year.py` | Crude Kaplan-Meier overall survival from line-1 onset, crossed by treatment category and calendar year of onset, shown three ways: one panel per year stratified by treatment; one panel per treatment stratified by year (light = early → dark = recent); and both collapsed to 24-month OS by year. Clicking a series in any legend isolates it across every panel. → `plots/km_line1_panel_per_year.html`, `plots/km_line1_panel_per_category.html`, `plots/km_line1_24mo_trend.html` |
 | `mpps_performance_status_by_year.py` | Evolution of the performance-status distribution (`X_mpps`, ECOG/WHO 0–4) over calendar time: 100% stacked composition per year of line-1 onset, the two ends of the scale (PS 0 and PS ≥ 2) as trend lines with 95% Wilson intervals, and the distribution across treatment lines 1–4. **`X_mpps` is imputed** — see the caveat below. → `plots/mpps_by_year.html` |
 | `km_line1_adjusted.py` | Pooled OS by treatment category, crude vs **IPTW + IPCW adjusted**, so the curves are comparable across treatments — plus a diagnostics figure (covariate balance before/after, effective sample size, calendar-era overlap) that shows where the adjustment succeeds and where it cannot. → `plots/km_line1_adjusted.html`, `plots/km_line1_adjustment_diagnostics.html` |
+| `km_later_lines_by_history.py` | The same year-on-year question at **lines 2, 3 and 4**, where it only means something once **prior treatment is held fixed**. A KM grid (row = prior-exposure stratum, column = line, curve = era), a 12-month-OS trend with crude beside history-standardised, and a diagnostics figure for the case-mix shift and the selection that stratification cannot fix. → `plots/km_later_lines_by_era.html`, `plots/km_later_lines_trend.html`, `plots/km_later_lines_diagnostics.html` |
 
 ## Reading the repetition figure
 
@@ -86,6 +87,60 @@ sources exist and they disagree in direction — use the observed one.**
   and CT+ANTI-ANGIO all but disappears after 2015, so a within-category shift across
   years reflects both changing practice and a changing patient mix — the crude curves
   are not treatment-effect estimates.
+
+## Reading the later-line survival figures
+
+Line 1 showed no material survival improvement across calendar years. Lines 2–4 look at
+first glance as though they did — and about half of that is an artefact of who reaches
+the line.
+
+- **Time is months from that line's own start date.** `Y_onset_to_death` is already
+  measured per line, so it carries over from the line-1 analysis unchanged.
+- **Prior treatment is the stratifier**: the modalities received in lines 1..k−1,
+  coarsened to `prior CT only` / `prior ET only` / `prior ET+CT`, each optionally
+  `+CDK4/6`. The full ordered category sequence is far too sparse past line 2; this
+  encoding keeps ≥ 20 patients per (stratum, era) cell at every line.
+- **The crude trend is largely case mix.** 12-month OS, earliest era (2008–2011) →
+  latest (2020–2024):
+
+  | line | crude | history-standardised |
+  |------|-------|----------------------|
+  | 2 | 71% → 75% (**+4.3 pt**) | 72.2% → 73.3% (**+1.1 pt**) |
+  | 3 | 57% → 68% (**+10.9 pt**) | 59.9% → 65.0% (**+5.1 pt**) |
+  | 4 | 48% → 60% (**+11.9 pt**) | 51.9% → 57.5% (**+5.5 pt**) |
+
+- **What survives the standardisation happened early and then stopped.** The whole
+  within-history gain lands between 2008–2011 and 2012–2015 (line 3: 59.9 → 65.3, line 4:
+  51.9 → 55.6) and is flat afterwards — including across the CDK4/6 rollout. Line 2 is
+  flat throughout, matching the line-1 result.
+- **The mix shift is dramatic** (top row of the diagnostics figure): line-4 starts go
+  from ~74% `prior ET+CT` in 2008–2011 to ~70% `prior ET+CT +CDK4/6` by 2020–2024 — a
+  stratum that did not exist before 2016. A raw year-on-year comparison at line 4 is
+  comparing different patients, not different treatment.
+- **Standardisation collapses CDK4/6 into its base stratum** so the weights stay
+  estimable in every year and no patient is dropped. The cost: a CDK4/6 survival benefit
+  stays *inside* a stratum and is therefore **not** removed. The dashed/grey series is
+  "the trend with only the prior ET/CT mix held constant", not "the trend with modern
+  drugs removed".
+
+### The selection that stratification cannot fix
+
+Conditioning on reaching line k conditions on having progressed *and* survived. Two
+things move with calendar time, and both are measured on a fixed 48-month landmark from
+the line-1 start (only line-1 years with the full window before the 2024-03 lock count —
+otherwise recent years look artificially fast and artificially selective):
+
+- **Fewer patients arrive.** Share reaching line 2 within 4 years is flat at ~70–71%
+  from 2008 to 2016, then falls to 59% by 2019; line 4 falls from ~33% to 26%. The break
+  coincides with the CDK4/6 rollout, i.e. longer first-line disease control.
+- **Those who do arrive take about as long as before** — median 11.9 → 13.1 months to
+  line 2, and 27.8 → 28.0 months to line 4. So the later-line cohorts are a *smaller,
+  more selected* slice rather than a later-in-the-course one.
+
+**Do not index either quantity by the year the later line started.** The cohort opens in
+2008, so a line-4 start in 2010 cannot be more than two years past its line-1 start.
+Indexed that way, median time to line 4 appears to grow 22 → 35 months; on the landmark
+it is flat. That figure is a boundary artefact and should not be quoted.
 
 ## What the adjustment does, and what it cannot do
 
