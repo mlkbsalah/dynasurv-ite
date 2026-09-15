@@ -1,8 +1,8 @@
 import argparse
 import os
+from dataclasses import replace
 
 import lightning as L
-import tomllib
 from lightning.pytorch.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
@@ -10,45 +10,33 @@ from lightning.pytorch.callbacks import (
 )
 from lightning.pytorch.loggers import WandbLogger
 
+from CausalSurv.config import ExperimentConfig
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
 from CausalSurv.model import DynaSurvCausalOnline
 
-
-def load_config(config_path):
-    with open(config_path, "rb") as f:
-        config = tomllib.load(f)
-    return config
+CONFIG_PATH = "../configs/config.toml"
+MODEL_CONFIG_PATH = "../configs/best_config.json"
 
 
-def main(
-    model_config,
-    train_config,
-    eval_config,
-    data_config,
-    split_seed,
-    date,
-    fast_dev_run=False,
-):
+def main(cfg: ExperimentConfig, split_seed, date, fast_dev_run=False):
+    train_config = cfg.train
     if fast_dev_run:
-        train_config["trainer"]["max_epochs"] = 3
+        train_config = replace(
+            train_config, trainer=replace(train_config.trainer, max_epochs=3)
+        )
 
+    data_config = cfg.data
     data_module = ESMEOnlineDataModuleCV(
-        data_dir=data_config["data_dir"],
-        subtype=data_config["subtype"],
-        n_lines=data_config["n_lines"],
-        n_intervals=model_config["n_intervals"],
-        batch_size=data_config["batch_size"],
+        **cfg.datamodule_kwargs(),
         split_seed=split_seed,
         num_workers=4,
         final_training=True,
-        cohort_start_year=data_config.get("cohort_start_year"),
-        temporal_split_year=data_config.get("temporal_split_year"),
-        add_calendar_feature=data_config.get("add_calendar_feature", False),
-        excluded_treatment_arms=data_config.get("excluded_treatment_arms"),
-        min_samples_per_treatment=data_config.get("min_samples_per_treatment", 200),
     )
 
     data_module.prepare_data()
+    # Build the recommendation action set from the training partition before
+    # printing it. Trainer.fit() calls setup again, deterministically.
+    data_module.setup("fit")
     data_module.describe_cohort()
     data_dims = data_module.get_data_dimensions()
 
@@ -59,30 +47,19 @@ def main(
         p_static_dim=data_dims["p_static_dim"],
         output_length=data_dims["output_dim"],
         interval_bounds=data_dims["time_bins"],
-        # interval_bounds=data_dims["time_bins"],
+        # Treatments are one-hot in P, so the arm count is the P feature width.
         n_treatments=data_dims["p_input_dim"],
-        n_lines=data_config["n_lines"],
-        lstm_hidden_length=model_config["lstm_hidden_length"],
-        lstm_num_layers=model_config.get("lstm_num_layers", 4),
-        x_embed_dim=model_config["x_embed_dim"],
-        p_embed_dim=model_config["p_embed_dim"],
-        init_h_hidden=model_config["init_h_hidden"],
-        init_p_hidden=model_config["init_p_hidden"],
-        mlpx_hidden_units=model_config["mlpx_hidden_units"],
-        mlpp_hidden_units=model_config["mlpp_hidden_units"],
-        mlpsa_hidden_units=model_config["mlpsa_hidden_units"],
-        mlpprop_hidden_units=model_config["mlpprop_hidden_units"],
-        lambda_prop_loss=model_config["lambda_prop_loss"],
-        lambda_ipm_mmd=model_config["lambda_ipm_mmd"],
-        lambda_ipm_emd2=model_config["lambda_ipm_emd2"],
-        lr=model_config["lr"],
-        weight_decay=model_config["weight_decay"],
-        lr_scheduler_stepsize=model_config["lr_scheduler_stepsize"],
-        lr_scheduler_gamma=model_config["lr_scheduler_gamma"],
-        attention=model_config["attention"],
-        evaluation_horizon_times=eval_config["horizon_times"],
-        brier_integration_step=eval_config["integration_step"],
+        n_lines=data_config.n_lines,
+        arch=cfg.arch,
+        training=cfg.training,
+        evaluation=cfg.eval,
     )
+
+    run_dir = (
+        f"../models/{data_config.subtype}/{data_config.n_lines}lines/"
+        f"{date}_seed_{split_seed}"
+    )
+    ckpt_dir = f"{run_dir}/checkpoints/"
 
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
@@ -91,56 +68,74 @@ def main(
             mode="min",
             save_top_k=1,
             save_last=True,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            dirpath=ckpt_dir,
             filename="dynaSurvCausalOnline-{epoch:02d}-{val_loss: .4f}",
         ),
         ModelCheckpoint(
             monitor="average_ci",
             mode="max",
             save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            dirpath=ckpt_dir,
             filename="dynaSurvCausalOnline-bestCI-{epoch:02d}-{average_ci: .4f}",
         ),
         ModelCheckpoint(
             monitor="average_ibs",
             mode="min",
             save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            dirpath=ckpt_dir,
             filename="dynaSurvCausalOnline-bestIBS-{epoch:02d}-{average_ibs: .4f}",
+        ),
+        # Marginal calibration: mean predicted S(t) against the KM estimate of the
+        # same risk set, pooled over lines and landmarks. Kept separate from IBS and
+        # val_loss because it peaks much later than either -- across an lr sweep the
+        # gap was still falling ~10 epochs after val_loss bottomed, so neither of the
+        # monitors above ever saves the best-calibrated epoch.
+        ModelCheckpoint(
+            monitor="val/calib_gap_abs_mean",
+            mode="min",
+            save_top_k=1,
+            dirpath=ckpt_dir,
+            # No metric in the filename: the "/" in the metric name would be read
+            # as a path separator and scatter the checkpoints into subdirectories.
+            filename="dynaSurvCausalOnline-bestCALIB-{epoch:02d}",
         ),
         # Always keep the final trained epoch (no metric monitored), since the
         # best-metric checkpoints above tend to land on early epochs (~15).
         ModelCheckpoint(
             monitor=None,
             save_top_k=1,
-            dirpath=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}/checkpoints/",
+            dirpath=ckpt_dir,
             filename="dynaSurvCausalOnline-last-{epoch:02d}",
         ),
     ]
 
-    if train_config["early_stopping"].get("enabled", True):
+    early_stopping = train_config.early_stopping
+    if early_stopping.enabled:
         callbacks.append(
             EarlyStopping(
-                monitor="val_loss",
-                mode=train_config["early_stopping"]["mode"],
-                patience=train_config["early_stopping"]["patience"],
+                monitor=early_stopping.monitor,
+                mode=early_stopping.mode,
+                patience=early_stopping.patience,
                 verbose=True,
             )
         )
 
     logger = WandbLogger(
-        project=f"DynaSurvCausalOnline_{data_config['subtype']}_{data_config['n_lines']}lines_new_inline_outcome",
+        project=(
+            f"DynaSurvCausalOnline_{data_config.subtype}_"
+            f"{data_config.n_lines}lines_new_inline_outcome"
+        ),
         name=f"seed_{split_seed}_{date}",
-        save_dir=f"../models/{data_config['subtype']}/{data_config['n_lines']}lines/{date}_seed_{split_seed}",
+        save_dir=run_dir,
     )
 
     trainer = L.Trainer(
-        max_epochs=train_config["trainer"]["max_epochs"],
-        accelerator=train_config["trainer"].get("accelerator", "cpu"),
+        max_epochs=train_config.trainer.max_epochs,
+        accelerator=train_config.trainer.accelerator,
         devices=1,
         logger=logger,
         callbacks=callbacks,
-        gradient_clip_val=train_config["trainer"].get("gradient_clip_val", 0.0),
+        gradient_clip_val=train_config.trainer.gradient_clip_val,
         enable_checkpointing=True,
         enable_progress_bar=True,
         check_val_every_n_epoch=1,
@@ -160,27 +155,31 @@ if __name__ == "__main__":
         help="Enable fast development run mode",
         default=False,
     )
-
-    split_seed = int.from_bytes(os.urandom(4), "big")
-    date = datetime.now().strftime("%d%m%Y_%H%M%S")
+    parser.add_argument("--config", type=str, default=CONFIG_PATH)
+    parser.add_argument("--model-config", type=str, default=MODEL_CONFIG_PATH)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Seed for the split RNG, the propensity CV folds and torch/numpy "
+            "initialisation (via seed_everything). Random when omitted."
+        ),
+    )
 
     args = parser.parse_args()
-    fast_dev_run = args.fast_dev_run
 
-    config = load_config("../configs/config.toml")
-    data_config = config["data"]
-    train_config = config["train"]
-    eval_config = config["eval"]
-
-    model_config_dir = "/Users/malek/TheLAB/DynaSurv/configs/optuna_best.toml"
-    model_config = load_config(model_config_dir)
+    split_seed = (
+        args.seed if args.seed is not None else int.from_bytes(os.urandom(4), "big")
+    )
+    # Without this the run-directory seed never touched weight init or shuffling:
+    # two runs with the same seed were still two independent draws.
+    L.seed_everything(split_seed, workers=True)
+    date = datetime.now().strftime("%d%m%Y_%H%M%S")
 
     main(
-        model_config=model_config,
-        train_config=train_config,
-        eval_config=eval_config,
-        data_config=data_config,
+        cfg=ExperimentConfig.from_files(args.config, args.model_config),
         split_seed=split_seed,
         date=date,
-        fast_dev_run=fast_dev_run,
+        fast_dev_run=args.fast_dev_run,
     )
