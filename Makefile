@@ -30,7 +30,7 @@ build-apptainer:
 	       --wrap="apptainer build $(CONTAINER_NAME).sif docker-archive://$(CONTAINER_NAME).tar"
 
 run-interactive:
-	srun --job-name=nano-jepa_interactive \
+	srun --job-name=dynasurv_interactive \
 	     --time=12:00:00 \
 	     --mem=24G \
 	     --cpus-per-task=16 \
