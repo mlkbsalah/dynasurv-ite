@@ -22,12 +22,12 @@ send:
 build-and-send: build-docker send
 
 build-apptainer:
-	srun --job-name=build-apptainer \
-	     --time=30:00 \
-	     --mem=24G \
-	     --cpus-per-task=12 \
-	     --partition=ai \
-	     apptainer build $(CONTAINER_NAME).sif docker-archive://$(CONTAINER_NAME).tar
+	sbatch --job-name=build-apptainer \
+	       --time=30:00 \
+	       --mem=24G \
+	       --cpus-per-task=12 \
+	       --partition=ai \
+	       --wrap="apptainer build $(CONTAINER_NAME).sif docker-archive://$(CONTAINER_NAME).tar"
 
 run-interactive:
 	srun --job-name=nano-jepa_interactive \

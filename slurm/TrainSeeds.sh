@@ -14,16 +14,16 @@
 #   sbatch --array=1-10 slurm/TrainSeeds.sh     # seeds 1..10
 #   SEED_OFFSET=100 sbatch slurm/TrainSeeds.sh  # seeds 101..108
 # Then `make sync` locally and point RecommendEnsemble.py at the new run dirs.
-
-module load anaconda3/2023.09-0/none-none
-module load cuda/13.0.2/none-none
-
-source activate pytorch_env
+#
+# Requires dynasurv.sif at the project root on the cluster (make build-docker,
+# send, build-apptainer). The repo isn't baked into the image, so it's bind-
+# mounted into /workspace at run time.
 
 PROJECT_DIR="/workdir/bensalama/DynaSurv"
-cd "$PROJECT_DIR/scripts"
-
-export PYTHONPATH="$PROJECT_DIR/src"
+CONTAINER_NAME="dynasurv"
+SIF="$PROJECT_DIR/$CONTAINER_NAME.sif"
 
 SEED=$(( ${SEED_OFFSET:-0} + SLURM_ARRAY_TASK_ID ))
-python3 TrainDynasurvCausal.py --seed "$SEED"
+
+apptainer exec --nv --bind "$PROJECT_DIR:/workspace" "$SIF" \
+    bash -c "cd /workspace/scripts && PYTHONPATH=/workspace/src python3 TrainDynasurvCausal.py --seed $SEED"
