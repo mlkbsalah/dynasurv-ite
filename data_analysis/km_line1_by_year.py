@@ -10,8 +10,9 @@ Kaplan-Meier overall-survival curves measured from the line-1 start date. The sa
   * ``km_line1_panel_per_category.html`` - one panel per treatment category, one
     curve per onset year (light = early, dark = recent). Answers "did this
     treatment's survival shift over the years?".
-  * ``km_line1_24mo_trend.html``         - both collapsed to 24-month OS by year,
-    one line per category, with 95% CIs.
+  * ``km_line1_24mo_trend.pdf``          - both collapsed to 24-month OS by year,
+    one line per category, with 95% CIs. This is the paper figure (static
+    matplotlib, no title/subtitle/footnote — see ``make_trend_mpl``).
 
 Clicking a series in any legend isolates it across every panel at once.
 
@@ -36,10 +37,13 @@ Figures -> data_analysis/plots/
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from lifelines import KaplanMeierFitter
+from matplotlib.ticker import MultipleLocator
+from paper_style import savefig, use_paper_style
 from plotly.subplots import make_subplots
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -519,10 +523,15 @@ def make_category_panels(cats, kept):
     return write_html(fig, "km_line1_panel_per_category.html")
 
 
-def make_trend(cats, kept):
-    """24-month OS by onset year, one line per treatment category, with 95% CIs."""
+def make_trend_mpl(cats, kept):
+    """Paper figure: 24-month OS by onset year, one line per category, with 95% CIs.
+
+    No title/subtitle/footnote on the figure — that text (whiskers = 95% CI,
+    crude = unadjusted) belongs in the LaTeX caption instead.
+    """
+    use_paper_style()
     style = cat_style(cats)
-    fig = go.Figure()
+    fig, ax = plt.subplots(figsize=(6.6, 4.0))
     rows = []
     for cat in cats:
         years = sorted(y for c, y in kept if c == cat)
@@ -542,73 +551,33 @@ def make_trend(cats, kept):
         if not xs:
             continue
         color, dash = style[cat]
-        fig.add_trace(
-            go.Scatter(
-                x=xs,
-                y=ys,
-                mode="lines+markers",
-                name=cat,
-                line=dict(color=color, width=2, dash=dash),
-                marker=dict(color=color, size=8, line=dict(color=SURFACE, width=1.5)),
-                error_y=dict(
-                    type="data",
-                    symmetric=False,
-                    array=hi,
-                    arrayminus=lo,
-                    color=color,
-                    thickness=1,
-                    width=0,
-                ),
-                customdata=np.column_stack(
-                    [ns, np.array(ys) - np.array(lo), np.array(ys) + np.array(hi)]
-                ),
-                hovertemplate=(
-                    f"<b>{cat}</b><br>"
-                    "line-1 onset in %{x}<br>"
-                    f"{MILESTONE:.0f}-month OS: " + "%{y:.1f}%"
-                    " (95% CI %{customdata[1]:.1f}–%{customdata[2]:.1f})<br>"
-                    "cohort: %{customdata[0]:,} patients"
-                    "<extra></extra>"
-                ),
-            )
+        ax.errorbar(
+            xs,
+            ys,
+            yerr=[lo, hi],
+            marker="o",
+            markersize=3.5,
+            linewidth=1.3,
+            elinewidth=0.7,
+            capsize=1.5,
+            color=color,
+            linestyle="solid" if dash == "solid" else "dotted",
+            label=cat,
         )
 
-    apply_chrome(
-        fig,
-        f"Share still alive {MILESTONE:.0f} months after starting treatment",
-        "HR+HER2− · by year of first-line onset",
-        "treatment category at line 1",
-        560,
-        -0.16,
-        [
-            (
-                "each point",
-                f"the share of that year's patients still alive {MILESTONE:.0f} months "
-                "after their first-line start. Higher is better",
-            ),
-            (
-                "whiskers",
-                "95% confidence interval. A year is plotted only if it had enough "
-                f"patients and enough elapsed time to reach {MILESTONE:.0f} months",
-            ),
-            (
-                "crude",
-                "no adjustment — the groups differ in who was in them, so gaps between "
-                "treatments are not treatment effects",
-            ),
-        ],
+    ax.set_xlabel("year of line-1 onset")
+    ax.set_ylabel(f"{MILESTONE:.0f}-month overall survival")
+    ax.yaxis.set_major_formatter(lambda v, _: f"{v:.0f}%")
+    ax.xaxis.set_major_locator(MultipleLocator(2))
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.16),
+        ncol=4,
+        fontsize=7.5,
+        columnspacing=1.2,
+        handlelength=1.6,
     )
-    fig.update_layout(margin=dict(l=64, r=28, t=110, b=232))
-    fig.update_xaxes(
-        title_text="year of line-1 onset", gridcolor=GRID_C, zeroline=False, dtick=1
-    )
-    fig.update_yaxes(
-        title_text=f"{MILESTONE:.0f}-month overall survival",
-        ticksuffix="%",
-        gridcolor=GRID_C,
-        zeroline=False,
-    )
-    out = write_html(fig, "km_line1_24mo_trend.html")
+    out = savefig(fig, "km_line1_24mo_trend")
     return out, pd.DataFrame(
         rows, columns=["category", "year", "n", "os24", "ci_lo", "ci_hi"]
     )
@@ -636,7 +605,7 @@ def main():
 
     print("\nsaved", make_year_panels(cats, kept, counts))
     print("saved", make_category_panels(cats, kept))
-    out, tbl = make_trend(cats, kept)
+    out, tbl = make_trend_mpl(cats, kept)
     print("saved", out)
     print(f"\n{MILESTONE:.0f}-month OS by category and year (%):")
     piv = tbl.assign(os24=(tbl.os24 * 100).round(1)).pivot(

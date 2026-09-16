@@ -21,9 +21,11 @@ Figures:
     (top row = unstratified, for contrast), one column per line, one curve per era
     (pale = early, dark = recent). Answers "holding prior treatment fixed, did this
     line's survival move?".
-  * ``km_later_lines_trend.html``     - ``MILESTONE``-month OS. Top row is year-granular
+  * ``km_later_lines_trend.pdf``      - ``MILESTONE``-month OS. Top row is year-granular
     per stratum; bottom row puts the crude estimate beside the history-standardised one
     per era, so the size of the composition artefact is readable straight off the bars.
+    This is the paper figure (static matplotlib, no title/subtitle/footnote — see
+    ``make_trend_mpl``).
   * ``km_later_lines_diagnostics.html`` - why the stratification is needed and what it
     still cannot fix: the prior-exposure mix per line over time, how long reaching each
     line takes, how many patients get there, and how many start each line each year.
@@ -62,6 +64,7 @@ Figures -> data_analysis/plots/
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -72,7 +75,6 @@ from km_line1_by_year import (
     HORIZON,
     INK,
     SEC,
-    SURFACE,
     _left_align_titles,
     apply_chrome,
     km_curve,
@@ -80,6 +82,9 @@ from km_line1_by_year import (
     ramp_color,
     write_html,
 )
+from matplotlib.patches import Patch
+from matplotlib.ticker import MultipleLocator
+from paper_style import panel_label, savefig, use_paper_style
 from plotly.subplots import make_subplots
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -378,32 +383,23 @@ def make_era_panels(df):
     return write_html(fig, "km_later_lines_by_era.html")
 
 
-def make_trend(df, weights):
-    """Milestone OS per line: year-granular per stratum, then crude vs standardised.
+def make_trend_mpl(df, weights):
+    """Paper figure: milestone OS per line, year-granular per stratum (top row) and
+    crude vs history-standardised per era (bottom row).
 
-    The standardisation is drawn per era rather than per year on purpose. It needs all
-    three base strata to clear ``MIN_N`` in the same cell -- at year granularity that
-    fails often enough at line 4 to leave the series full of holes, and a series with
-    holes invites reading a gap as a dip.
+    No title/subtitle/footnote on the figure — the definitions (black = naive trend,
+    grey = history-standardised, dotted = CDK4/6-confined stratum, ...) belong in the
+    LaTeX caption instead. The standardisation is drawn per era rather than per year
+    on purpose: see the docstring on ``standardised_trend`` / the module docstring.
     """
+    use_paper_style()
     n_col = len(LINES)
-    fig = make_subplots(
-        rows=2,
-        cols=n_col,
-        subplot_titles=[
-            _panel_title(f"line {line}", f"n = {len(df[df['line'] == line]):,}")
-            for line in LINES
-        ]
-        + [_panel_title(f"line {line}", "crude vs standardised") for line in LINES],
-        horizontal_spacing=0.055,
-        vertical_spacing=0.19,
-        row_heights=[0.62, 0.38],
-    )
+    fig, axes = plt.subplots(2, n_col, figsize=(9.0, 5.6), sharey=True)
 
-    seen = set()
     rows = []
     for j, line in enumerate(LINES):
         sub = df[df["line"] == line]
+        ax_top, ax_bot = axes[0, j], axes[1, j]
 
         for stratum in (ALL,) + STRATA:
             s = sub if stratum == ALL else sub[sub["stratum"] == stratum]
@@ -419,160 +415,94 @@ def make_trend(df, weights):
             ns = np.array([pts[y][1] for y in years])
             color = STRATUM_COLOR[stratum]
             wide = stratum == ALL
-            fig.add_trace(
-                go.Scatter(
-                    x=years,
-                    y=est[:, 0],
-                    mode="lines+markers",
-                    name=stratum,
-                    legendgroup=stratum,
-                    legendrank=LEGEND_RANK[stratum],
-                    showlegend=stratum not in seen,
-                    line=dict(
-                        color=color,
-                        width=3 if wide else 2,
-                        dash="dot" if stratum in ERA_CONFINED else "solid",
-                    ),
-                    marker=dict(
-                        color=color,
-                        size=9 if wide else 6,
-                        line=dict(color=SURFACE, width=1.5),
-                    ),
-                    error_y=dict(
-                        type="data",
-                        symmetric=False,
-                        array=est[:, 2] - est[:, 0],
-                        arrayminus=est[:, 0] - est[:, 1],
-                        color=color,
-                        thickness=1,
-                        width=0,
-                    ),
-                    customdata=np.column_stack([ns, est[:, 1], est[:, 2]]),
-                    hovertemplate=(
-                        f"<b>line {line} · {stratum}</b><br>"
-                        "line started in %{x}<br>"
-                        f"{MILESTONE:.0f}-month OS: " + "%{y:.1f}%"
-                        " (95% CI %{customdata[1]:.1f}–%{customdata[2]:.1f})<br>"
-                        "%{customdata[0]:,} patients"
-                        "<extra></extra>"
-                    ),
-                ),
-                row=1,
-                col=j + 1,
+            ax_top.errorbar(
+                years,
+                est[:, 0],
+                yerr=[est[:, 0] - est[:, 1], est[:, 2] - est[:, 0]],
+                marker="o",
+                markersize=5.5 if wide else 3.5,
+                linewidth=2.0 if wide else 1.1,
+                elinewidth=0.6,
+                capsize=1.3,
+                color=color,
+                linestyle="dotted" if stratum in ERA_CONFINED else "solid",
+                label=stratum,
             )
-            seen.add(stratum)
             for y, e, n in zip(years, est, ns):
                 rows.append((line, stratum, y, n, e[0]))
+
+        ax_top.set_title(f"line {line}", fontsize=9, loc="left")
+        ax_top.xaxis.set_major_locator(MultipleLocator(2))
+        ax_top.set_xlabel("year this line started")
+        # panel letter at the top-right corner: "line k" already occupies the
+        # top-left, where panel_label's default position would collide with it
+        ax_top.text(
+            1.0,
+            1.06,
+            f"({'abc'[j]})",
+            transform=ax_top.transAxes,
+            fontsize=9,
+            fontweight="bold",
+            ha="right",
+            va="bottom",
+        )
 
         # bottom row: the same question at era granularity, crude beside standardised
         std = standardised_trend(sub, weights[line], "era")
         eras = [e for e in ERA_NAMES if e in std and milestone(sub[sub["era"] == e])]
         crude = [milestone(sub[sub["era"] == e])[0] for e in eras]
-        for label, vals, color, ns in (
-            (ALL, crude, INK, [len(sub[sub["era"] == e]) for e in eras]),
+        x = np.arange(len(eras))
+        width = 0.36
+        for offset, label, vals, color, ns in (
+            (-width / 2, ALL, crude, INK, [len(sub[sub["era"] == e]) for e in eras]),
             (
+                width / 2,
                 "history-standardised",
                 [std[e][0] for e in eras],
                 SEC,
                 [std[e][1] for e in eras],
             ),
         ):
-            fig.add_trace(
-                go.Bar(
-                    x=eras,
-                    y=vals,
-                    name=label,
-                    legendgroup=label if label == ALL else "std",
-                    legendrank=LEGEND_RANK[ALL if label == ALL else "std"],
-                    showlegend=label != ALL and "std" not in seen,
-                    marker=dict(color=color, line_width=0),
-                    text=[f"{v:.0f}%" for v in vals],
-                    textposition="outside",
-                    textfont=dict(size=10, color=SEC),
-                    customdata=ns,
-                    hovertemplate=(
-                        f"<b>line {line} · {label}</b><br>%{{x}}<br>"
-                        f"{MILESTONE:.0f}-month OS: " + "%{y:.1f}%<br>"
-                        "%{customdata:,} patients<extra></extra>"
-                    ),
-                ),
-                row=2,
-                col=j + 1,
-            )
+            ax_bot.bar(x + offset, vals, width=width, color=color, label=label)
+            for xi, v in zip(x + offset, vals):
+                ax_bot.text(
+                    xi, v + 1.5, f"{v:.0f}%", ha="center", va="bottom", fontsize=6.5
+                )
             if label != ALL:
-                seen.add("std")
                 for e, v, n in zip(eras, vals, ns):
                     rows.append((line, "history-standardised", e, n, v))
+        ax_bot.set_xticks(x)
+        ax_bot.set_xticklabels(eras, fontsize=7)
+        ax_bot.set_xlabel("era")
+        panel_label(ax_bot, "def"[j])
 
-    apply_chrome(
-        fig,
-        f"Share still alive {MILESTONE:.0f} months into lines 2-4",
-        "HR+HER2− · the gap between the black and grey bars is how much of the apparent "
-        "improvement is a change in who reaches the line rather than better survival",
-        "prior treatment at the start of this line",
-        980,
-        -0.10,
-        gloss_shift=170,  # 7 legend entries can wrap; keep the strip clear of them
-        glossary=[
-            (
-                "top row",
-                f"the share of each year's patients still alive {MILESTONE:.0f} months "
-                "after starting the line, split by prior treatment. Whiskers are 95% "
-                "confidence intervals",
-            ),
-            (
-                "black",
-                "all patients starting the line, histories mixed together — the naive "
-                "trend, and the one that looks like a large improvement",
-            ),
-            (
-                "grey bars",
-                "the same patients re-weighted so the prior ET/CT mix is held at that "
-                "line's pooled average. Shorter than black means the black rise was mix",
-            ),
-            (
-                "dotted series",
-                "prior CDK4/6 exposure — only exists from 2016, so it has no early years "
-                "to be compared against",
-            ),
-            (
-                "missing years",
-                f"a year is plotted only with at least {MIN_N} patients and enough elapsed "
-                f"time for most of them to reach {MILESTONE:.0f} months, which drops 2023",
-            ),
-            (
-                "still crude",
-                "prior modality is held fixed; performance status, metastatic burden and "
-                "age are not",
-            ),
-        ],
+    for ax in axes.flat:
+        ax.set_ylim(0, 100)
+        ax.yaxis.set_major_formatter(lambda v, _: f"{v:.0f}%")
+    axes[0, 0].set_ylabel(f"{MILESTONE:.0f}-month overall survival")
+    axes[1, 0].set_ylabel(f"{MILESTONE:.0f}-month overall survival")
+
+    by_label = {}
+    for ax in axes[0, :]:
+        h, leg = ax.get_legend_handles_labels()
+        by_label.update(zip(leg, h))
+    ordered = sorted(by_label, key=lambda name: LEGEND_RANK.get(name, 99))
+    handles = [by_label[name] for name in ordered]
+    handles.append(Patch(facecolor=SEC, label="history-standardised"))
+    ordered.append("history-standardised")
+    fig.legend(
+        handles,
+        ordered,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.06),
+        ncol=4,
+        fontsize=7.5,
+        frameon=False,
+        columnspacing=1.2,
+        handlelength=1.6,
     )
-    # b must cover gloss_shift + 19 px per glossary row + 16 (apply_chrome's budget)
-    fig.update_layout(
-        barmode="group", bargap=0.28, margin=dict(l=64, r=28, t=112, b=310)
-    )
-    fig.update_xaxes(gridcolor=GRID_C, zeroline=False)
-    fig.update_xaxes(dtick=2, row=1)
-    fig.update_yaxes(range=[0, 100], gridcolor=GRID_C, zeroline=False, ticksuffix="%")
-    for col in range(1, n_col + 1):
-        fig.update_xaxes(
-            title_text="year this line started",
-            title_font=dict(size=11, color=SEC),
-            row=1,
-            col=col,
-        )
-        fig.update_xaxes(
-            title_text="era", title_font=dict(size=11, color=SEC), row=2, col=col
-        )
-    for row in (1, 2):
-        fig.update_yaxes(
-            title_text=f"{MILESTONE:.0f}-month overall survival",
-            title_font=dict(size=11, color=SEC),
-            row=row,
-            col=1,
-        )
-    _left_align_titles(fig, 2 * n_col)
-    out = write_html(fig, "km_later_lines_trend.html")
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    out = savefig(fig, "km_later_lines_trend")
     return out, pd.DataFrame(rows, columns=["line", "stratum", "period", "n", "os"])
 
 
@@ -884,7 +814,7 @@ def main():
     )
 
     print("\nsaved", make_era_panels(df))
-    out, tbl = make_trend(df, weights)
+    out, tbl = make_trend_mpl(df, weights)
     print("saved", out)
     print("saved", make_diagnostics(df))
 

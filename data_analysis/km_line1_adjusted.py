@@ -29,10 +29,11 @@ curve stops once the effective sample size in its risk set falls below ``ESS_FLO
 rather than being drawn into a region where the weights carry it alone.
 
 Outputs:
-  * ``km_line1_adjusted.html``               - crude vs IPTW+IPCW-adjusted curves.
-  * ``km_line1_adjustment_diagnostics.html`` - covariate balance before/after,
+  * ``km_line1_adjusted.html``            - crude vs IPTW+IPCW-adjusted curves.
+  * ``km_line1_adjustment_diagnostics.pdf`` - covariate balance before/after,
     effective sample size, and the calendar-era overlap that limits how far the
-    adjustment can be believed.
+    adjustment can be believed. This is the paper figure (static matplotlib,
+    no title/subtitle/footnote — see ``make_diagnostics_figure_mpl``).
 
 **Read the diagnostics before the curves.** Weighting cannot manufacture overlap
 that does not exist: no patient treated before 2017 could have received
@@ -49,6 +50,7 @@ Figures -> data_analysis/plots/
 import time as _time
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -58,12 +60,13 @@ from km_line1_by_year import (
     INK,
     MUTED,
     SEC,
-    SURFACE,
     apply_chrome,
     cat_style,
     write_html,
 )
 from lifelines import CoxPHFitter, KaplanMeierFitter
+from matplotlib.colors import LinearSegmentedColormap
+from paper_style import panel_label, savefig, use_paper_style
 from plotly.subplots import make_subplots
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -340,165 +343,71 @@ def make_curves_figure(cats, drawn, crude, adjusted, n_by_cat, style, bal):
     return write_html(fig, "km_line1_adjusted.html")
 
 
-def make_diagnostics_figure(cats, drawn, bal, ess_tbl, era, style):
-    fig = make_subplots(
-        rows=1,
-        cols=3,
-        column_widths=[0.30, 0.26, 0.44],
-        horizontal_spacing=0.10,
-        subplot_titles=(
-            "<b>Covariate balance</b>",
-            "<b>Effective sample size</b>",
-            "<b>Calendar-era overlap</b>",
-        ),
-    )
+def make_diagnostics_figure_mpl(drawn, bal, ess_tbl, era):
+    """Paper figure: balance / effective sample size / calendar-era overlap.
 
+    Same three panels as the interactive version, but no title, subtitle or
+    on-figure glossary — the panel-by-panel explanation belongs in the LaTeX
+    caption instead.
+    """
+    use_paper_style()
     ys = drawn[::-1]
-    for name, key, wkey, color in (
-        ("before weighting", "before", "worst_before", "#eb6834"),
-        ("after weighting", "after", "worst", "#2a78d6"),
-    ):
-        fig.add_trace(
-            go.Scatter(
-                x=[bal[c][key] for c in ys],
-                y=ys,
-                mode="markers",
-                name=name,
-                marker=dict(color=color, size=10, line=dict(color=SURFACE, width=1.5)),
-                customdata=[
-                    [bal[c][wkey], bal[c][key.split("_")[0] + "_mean"]] for c in ys
-                ],
-                hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    f"max |SMD| {name}: " + "%{x:.3f}<br>"
-                    "worst covariate: %{customdata[0]}<br>"
-                    "mean |SMD| over all covariates: %{customdata[1]:.3f}"
-                    "<extra></extra>"
-                ),
-            ),
-            row=1,
-            col=1,
-        )
-    fig.add_vline(
-        x=SMD_THRESHOLD,
-        line=dict(color=BASE, width=1, dash="dot"),
-        annotation_text=f"{SMD_THRESHOLD:g} = balanced",
-        annotation_position="top",
-        annotation_font=dict(size=10, color=SEC),
-        row=1,
-        col=1,
+    y = np.arange(len(ys))
+    fig, (ax_a, ax_b, ax_c) = plt.subplots(
+        1, 3, figsize=(7.5, 0.30 * len(ys) + 1.3), width_ratios=(0.30, 0.24, 0.46)
     )
 
-    fig.add_trace(
-        go.Bar(
-            y=ys,
-            x=[ess_tbl[c]["n"] for c in ys],
-            orientation="h",
-            name="patients",
-            marker_color=MUTED,
-            hovertemplate="<b>%{y}</b><br>%{x:,} patients<extra></extra>",
-            showlegend=False,
-        ),
-        row=1,
-        col=2,
-    )
-    fig.add_trace(
-        go.Bar(
-            y=ys,
-            x=[ess_tbl[c]["ess"] for c in ys],
-            orientation="h",
-            name="effective (weighted)",
-            marker_color="#2a78d6",
-            hovertemplate=(
-                "<b>%{y}</b><br>effective sample size after weighting: "
-                "%{x:,.0f}<extra></extra>"
-            ),
-            showlegend=False,
-        ),
-        row=1,
-        col=2,
-    )
+    # (a) covariate balance, before vs after weighting
+    before = [bal[c]["before"] for c in ys]
+    after = [bal[c]["after"] for c in ys]
+    ax_a.scatter(before, y, color="#eb6834", s=26, label="before weighting", zorder=3)
+    ax_a.scatter(after, y, color="#2a78d6", s=26, label="after weighting", zorder=3)
+    ax_a.axvline(SMD_THRESHOLD, color=BASE, linestyle=":", linewidth=1, zorder=1)
+    ax_a.set_yticks(y)
+    ax_a.set_yticklabels(ys)
+    ax_a.set_xlabel("max |SMD| vs the pooled remainder")
+    ax_a.set_xlim(0, max(before + after) * 1.15)
+    panel_label(ax_a, "a")
 
-    fig.add_trace(
-        go.Heatmap(
-            z=era.values * 100,
-            x=[str(y) for y in era.columns],
-            y=list(era.index),
-            colorscale=SEQ_BLUE,
-            zmin=0,
-            colorbar=dict(
-                title=dict(text="% of<br>group", font=dict(size=10)), x=1.005
-            ),
-            hovertemplate=(
-                "<b>%{y}</b><br>%{x}: %{z:.1f}% of this treatment's patients"
-                "<extra></extra>"
-            ),
-        ),
-        row=1,
-        col=3,
-    )
+    # (b) effective sample size: raw patients vs weighted
+    n_pat = [ess_tbl[c]["n"] for c in ys]
+    ess = [ess_tbl[c]["ess"] for c in ys]
+    ax_b.barh(y, n_pat, color=MUTED, label="patients")
+    ax_b.barh(y, ess, color="#2a78d6", label="effective (weighted)")
+    ax_b.set_yticks(y)
+    ax_b.set_yticklabels([])
+    ax_b.set_ylim(ax_a.get_ylim())
+    ax_b.set_xlabel("patients (grey)\neffective (blue)", fontsize=7.5)
+    panel_label(ax_b, "b")
 
-    apply_chrome(
-        fig,
-        "Did the adjustment work?",
-        f"one row per treatment · {sum(bal[c]['after'] <= SMD_THRESHOLD for c in drawn)}"
-        f" of {len(drawn)} groups end up comparable",
-        "",
-        520,
-        -0.22,
-        gloss_shift=126,
-        glossary=[
-            (
-                "balance (left)",
-                f"how different this group still is from everyone else, across "
-                f"{bal[drawn[0]]['n_cov']} recorded characteristics. Orange = before "
-                f"weighting, blue = after. Below {SMD_THRESHOLD} counts as comparable, so "
-                "blue dots left of the line are the groups you can trust",
-            ),
-            (
-                "effective sample size (middle)",
-                "weighting buys comparability by leaning on fewer patients. Grey is how "
-                "many there are; blue is how many they are worth once weighted",
-            ),
-            (
-                "calendar-era overlap (right)",
-                "which years each treatment was actually used. A row concentrated in one "
-                "block of years has no counterpart in other years — that is why "
-                "weighting cannot fix it",
-            ),
-        ],
+    # (c) calendar-era overlap
+    cmap = LinearSegmentedColormap.from_list("seq_blue", [c for _, c in SEQ_BLUE])
+    era = era.loc[ys]
+    # origin="lower" so row 0 (= ys[0]) sits at the bottom, matching panels a/b
+    im = ax_c.imshow(era.values * 100, aspect="auto", cmap=cmap, vmin=0, origin="lower")
+    ax_c.set_xticks(range(len(era.columns)))
+    ax_c.set_xticklabels([str(yv) for yv in era.columns], rotation=90, fontsize=7)
+    ax_c.set_yticks(y)
+    ax_c.set_yticklabels([])
+    ax_c.set_xlabel("year of line-1 onset")
+    cbar = fig.colorbar(im, ax=ax_c, fraction=0.06, pad=0.04)
+    cbar.set_label("% of group", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+    panel_label(ax_c, "c")
+
+    handles, labels = ax_a.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.02),
+        ncol=2,
+        fontsize=7.5,
+        frameon=False,
+        handletextpad=0.4,
     )
-    fig.update_layout(barmode="overlay", margin=dict(l=150, r=90, t=118, b=212))
-    smd_max = max(max(bal[c]["before"], bal[c]["after"]) for c in drawn)
-    fig.update_xaxes(
-        title_text="max |SMD| vs the pooled remainder",
-        title_font=dict(size=11, color=SEC),
-        gridcolor=GRID_C,
-        zeroline=False,
-        range=[0, smd_max * 1.12],
-        row=1,
-        col=1,
-    )
-    fig.update_xaxes(
-        title_text="patients (grey) / effective (blue)",
-        title_font=dict(size=11, color=SEC),
-        gridcolor=GRID_C,
-        zeroline=False,
-        row=1,
-        col=2,
-    )
-    fig.update_xaxes(
-        title_text="year of line-1 onset",
-        title_font=dict(size=11, color=SEC),
-        row=1,
-        col=3,
-    )
-    fig.update_yaxes(gridcolor="rgba(0,0,0,0)", row=1, col=1)
-    fig.update_yaxes(showticklabels=False, row=1, col=2)
-    fig.update_yaxes(showticklabels=False, row=1, col=3)
-    for ann in fig.layout.annotations[:3]:
-        ann.update(font=dict(size=13, color=INK))
-    return write_html(fig, "km_line1_adjustment_diagnostics.html")
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    return savefig(fig, "km_line1_adjustment_diagnostics")
 
 
 # ----------------------------------------------------------------------------- run
@@ -590,7 +499,7 @@ def main():
         "\nsaved",
         make_curves_figure(cats, drawn, crude, adjusted, n_by_cat, style, bal),
     )
-    print("saved", make_diagnostics_figure(cats, drawn, bal, ess_tbl, era, style))
+    print("saved", make_diagnostics_figure_mpl(drawn, bal, ess_tbl, era))
 
     print("\nsurvival at 12 / 24 / 36 months (%), crude vs adjusted")
     print(

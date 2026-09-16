@@ -30,8 +30,11 @@ from itertools import groupby
 from pathlib import Path
 from typing import NamedTuple
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
+from matplotlib.patches import Patch
+from paper_style import panel_label, savefig, use_paper_style
 from plotly.subplots import make_subplots
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -292,215 +295,92 @@ def _write(fig, name):
 
 
 # --------------------------------------------------------------------------- #
-# figure 1 - both kinds of repetition
+# figure 1 - both kinds of repetition (paper figure, static)
 # --------------------------------------------------------------------------- #
-def add_profile_panel(fig, n_pat, profile):
-    """Panel A: every patient in exactly one repetition class."""
-    for kind in KINDS:
-        n = profile.get(kind, 0)
-        fig.add_trace(
-            go.Bar(
-                x=[KIND_LABEL[kind]],
-                y=[100 * n / n_pat],
-                name=KIND_LABEL[kind],
-                legendgroup=kind,
-                marker_color=KIND_COLOR[kind],
-                width=0.62,
-                text=[f"{100 * n / n_pat:.1f}%"],
-                textposition="outside",
-                textfont=dict(color=INK, size=12),
-                customdata=[[n]],
-                hovertemplate=(
-                    "<b>%{fullData.name}</b><br>"
-                    "%{customdata[0]:,} patients<br>"
-                    "%{y:.1f}% of patients"
-                    "<extra></extra>"
-                ),
-            ),
-            row=1,
-            col=1,
-        )
+def make_figure_mpl(rep):
+    """Build the paper version of the combined (both kinds) figure.
 
-
-def add_category_panel(fig, by_cat, runlen, gaplen):
-    """Panel B: repetitions per category, split by kind."""
-    totals = {c: sum(v.values()) for c, v in by_cat.items()}
-    cats = sorted(totals, key=totals.get)  # ascending -> largest on top
-    detail = {
-        "consec": [
-            "run lengths: " + _detail(runlen[c], lambda k: f"×{k} lines") for c in cats
-        ],
-        "nonconsec": [
-            "gaps: " + _detail(gaplen[c], lambda k: f"after {k} line(s) away")
-            for c in cats
-        ],
-    }
-    for kind in ("consec", "nonconsec"):
-        vals = [by_cat[c][kind] for c in cats]
-        fig.add_trace(
-            go.Bar(
-                y=cats,
-                x=vals,
-                orientation="h",
-                name=KIND_LABEL[kind],
-                legendgroup=kind,
-                showlegend=False,
-                marker_color=KIND_COLOR[kind],
-                marker_line=dict(color=SURFACE, width=1.2),
-                customdata=[
-                    [100 * v / totals[c], totals[c], d]
-                    for v, c, d in zip(vals, cats, detail[kind])
-                ],
-                hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    "%{fullData.name}: %{x:,} repetitions "
-                    "(%{customdata[0]:.1f}% of this category)<br>"
-                    "%{customdata[2]}<br>"
-                    "category total: %{customdata[1]:,} repetitions"
-                    "<extra></extra>"
-                ),
-            ),
-            row=1,
-            col=2,
-        )
-    return cats, totals
-
-
-def add_pattern_panel(fig, n_pat, patterns):
-    """Panel C: all 15 sequence patterns four lines can take.
-
-    One trace per kind rather than one trace with per-point colours, so that
-    clicking a legend entry filters this panel along with the other two.
+    Same three panels as the interactive figure, but no title, subtitle or
+    on-figure glossary — that text belongs in the LaTeX caption instead.
     """
-    items = patterns.most_common()
-    labelled = {p for p, _ in items[:N_LABELLED]}
-    for kind in KINDS:
-        sel = [(p, n) for p, n in items if kind_of(p) == kind]
-        if not sel:
-            continue
-        fig.add_trace(
-            go.Bar(
-                x=[" ".join(p) for p, _ in sel],
-                y=[100 * n / n_pat for _, n in sel],
-                name=KIND_LABEL[kind],
-                legendgroup=kind,
-                showlegend=False,
-                marker_color=KIND_COLOR[kind],
-                width=0.66,
-                text=[
-                    f"{100 * n / n_pat:.1f}%" if p in labelled else "" for p, n in sel
-                ],
-                textposition="outside",
-                textfont=dict(color=INK, size=11),
-                customdata=[[n, pattern_gloss(p)] for p, n in sel],
-                hovertemplate=(
-                    "<b>%{x}</b><br>"
-                    "%{customdata[0]:,} patients (%{y:.1f}%)<br>"
-                    "%{fullData.name} — %{customdata[1]}"
-                    "<extra></extra>"
-                ),
-            ),
-            row=2,
-            col=1,
+    use_paper_style()
+    fig = plt.figure(figsize=(7.2, 5.6))
+    gs = fig.add_gridspec(
+        2, 2, width_ratios=(0.34, 0.66), height_ratios=(0.42, 0.58), hspace=0.55
+    )
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+    ax_c = fig.add_subplot(gs[1, :])
+
+    # (a) patients by repetition kind
+    vals_a = [100 * rep.profile.get(k, 0) / rep.n_pat for k in KINDS]
+    ax_a.bar(
+        range(len(KINDS)), vals_a, color=[KIND_COLOR[k] for k in KINDS], width=0.62
+    )
+    ax_a.set_xticks(range(len(KINDS)))
+    ax_a.set_xticklabels(
+        [KIND_LABEL[k] for k in KINDS], rotation=30, ha="right", rotation_mode="anchor"
+    )
+    ax_a.set_ylabel("% of patients")
+    ax_a.set_ylim(0, max(vals_a) * 1.18)
+    for x, v in enumerate(vals_a):
+        ax_a.text(x, v + max(vals_a) * 0.02, f"{v:.1f}%", ha="center", va="bottom")
+    panel_label(ax_a, "a")
+
+    # (b) repetitions per category, stacked by kind
+    totals = {c: sum(v.values()) for c, v in rep.by_cat.items()}
+    cats = sorted(totals, key=totals.get)  # ascending -> largest bar on top
+    consec_vals = [rep.by_cat[c]["consec"] for c in cats]
+    nonconsec_vals = [rep.by_cat[c]["nonconsec"] for c in cats]
+    y = range(len(cats))
+    ax_b.barh(y, consec_vals, color=KIND_COLOR["consec"], label=KIND_LABEL["consec"])
+    ax_b.barh(
+        y,
+        nonconsec_vals,
+        left=consec_vals,
+        color=KIND_COLOR["nonconsec"],
+        label=KIND_LABEL["nonconsec"],
+    )
+    ax_b.set_yticks(list(y))
+    ax_b.set_yticklabels(cats)
+    ax_b.set_xlabel("number of repetitions")
+    xmax = max(totals.values())
+    ax_b.set_xlim(0, xmax * 1.16)
+    for yi, c in zip(y, cats):
+        ax_b.text(totals[c] + xmax * 0.015, yi, f"{totals[c]:,}", va="center")
+    ax_b.legend(loc="lower right")
+    panel_label(ax_b, "b")
+
+    # (c) all 15 sequence patterns, coloured by kind
+    items = rep.patterns.most_common()
+    labels_c = [" ".join(p) for p, _ in items]
+    vals_c = [100 * n / rep.n_pat for _, n in items]
+    colors_c = [KIND_COLOR[kind_of(p)] for p, _ in items]
+    x = range(len(items))
+    ax_c.bar(x, vals_c, color=colors_c, width=0.66)
+    ax_c.set_xticks(list(x))
+    ax_c.set_xticklabels(
+        labels_c, family="monospace", rotation=90, ha="center", fontsize=7.5
+    )
+    ax_c.set_ylabel("% of patients")
+    ax_c.set_ylim(0, vals_c[0] * 1.22)
+    for xi, v in list(zip(x, vals_c))[:N_LABELLED]:
+        ax_c.text(
+            xi,
+            v + vals_c[0] * 0.02,
+            f"{v:.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=7.5,
         )
-    order = [" ".join(p) for p, _ in items]
-    return order, 100 * items[0][1] / n_pat
+    ax_c.legend(
+        handles=[Patch(facecolor=KIND_COLOR[k], label=KIND_LABEL[k]) for k in KINDS],
+        loc="upper right",
+        ncol=2,
+    )
+    panel_label(ax_c, "c")
 
-
-def make_figure(rep):
-    """Build the combined (both kinds) figure and write it to an HTML file."""
-    fig = _new_figure(
-        (
-            "<b>Patients</b>",
-            "<b>Categories</b>",
-            "<b>Sequences</b>",
-        )
-    )
-
-    add_profile_panel(fig, rep.n_pat, rep.profile)
-    cats, totals = add_category_panel(fig, rep.by_cat, rep.runlen, rep.gaplen)
-    pat_order, pct_max = add_pattern_panel(fig, rep.n_pat, rep.patterns)
-    xmax = _end_labels(fig, cats, totals)
-
-    n_consec = sum(v["consec"] for v in rep.by_cat.values())
-    n_non = sum(v["nonconsec"] for v in rep.by_cat.values())
-    pct_any = 100 * (1 - rep.profile.get("none", 0) / rep.n_pat)
-    _apply_chrome(
-        fig,
-        "Repeated treatments over the first 4 lines",
-        (
-            f"HR+HER2− · {rep.n_pat:,} patients with 4 lines · "
-            f"{pct_any:.0f}% repeat a category · {n_consec + n_non:,} repetitions"
-        ),
-        "kind of repetition",
-        [
-            (
-                "repetition",
-                "a line given a treatment category the patient already had",
-            ),
-            (
-                "consecutive",
-                "the repeat is in the very next line — ET, ET",
-            ),
-            (
-                "non-consecutive",
-                "the category comes back after a switch — ET, MONOCT, ET",
-            ),
-            (
-                "A B C D",
-                "the shape of one patient's 4 lines; each letter is a distinct "
-                "category, lettered in order of first appearance, so A A B C means "
-                "lines 1 and 2 were the same treatment",
-            ),
-        ],
-    )
-
-    # Panel A
-    fig.update_yaxes(
-        title_text="% of patients",
-        gridcolor=GRID,
-        zeroline=False,
-        range=[0, 100 * max(rep.profile.values()) / rep.n_pat * 1.16],
-        row=1,
-        col=1,
-    )
-    fig.update_xaxes(type="category", gridcolor=GRID, row=1, col=1)
-    # Panel B
-    fig.update_xaxes(
-        title_text="number of repetitions",
-        gridcolor=GRID,
-        zeroline=False,
-        range=[0, xmax * 1.12],
-        row=1,
-        col=2,
-    )
-    fig.update_yaxes(
-        categoryorder="array",
-        categoryarray=cats,
-        gridcolor="rgba(0,0,0,0)",
-        row=1,
-        col=2,
-    )
-    # Panel C
-    fig.update_yaxes(
-        title_text="% of patients",
-        gridcolor=GRID,
-        zeroline=False,
-        range=[0, pct_max * 1.14],
-        row=2,
-        col=1,
-    )
-    fig.update_xaxes(
-        title_text="category sequence over lines 1 → 4",
-        type="category",
-        categoryorder="array",
-        categoryarray=pat_order,
-        gridcolor=GRID,
-        tickfont=dict(family="SFMono-Regular, Menlo, monospace", size=12),
-        row=2,
-        col=1,
-    )
-    return _write(fig, "treatment_category_repeats.html")
+    return savefig(fig, "treatment_category_repeats")
 
 
 # --------------------------------------------------------------------------- #
@@ -742,8 +622,8 @@ def main():
         span = f"{shape[0]}-{shape[0] + shape[1] - 1}"
         print(f"  {span:<7} {n:>6,}   {100 * n / n_blocks:>6.1f}%")
 
-    for out in (make_figure(rep), make_consecutive_figure(rep)):
-        print("saved", out)
+    print("saved", make_figure_mpl(rep))
+    print("saved", make_consecutive_figure(rep))
 
 
 if __name__ == "__main__":
