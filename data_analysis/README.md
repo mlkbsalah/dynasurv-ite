@@ -13,6 +13,11 @@ figure(s) into `plots/`.
 - Figures are written to `data_analysis/plots/` (git-ignored; regenerate by
   re-running the script). Interactive figures are self-contained HTML — open them
   in any browser and hover for the underlying counts.
+- Four scripts also each produce one **paper figure**: a static, minimalist
+  matplotlib PDF written straight to `latex/figs/` and included from
+  `latex/second_draft.tex`. These carry no title/subtitle/on-figure glossary —
+  that text lives in the LaTeX caption instead — and are named `make_*_mpl` in
+  their script, next to the exploratory Plotly figures they were adapted from.
 - Scripts resolve the repo root relative to their own location, so they work whether
   run from the repo root or elsewhere.
 
@@ -20,11 +25,11 @@ figure(s) into `plots/`.
 
 | Script | What it produces |
 |--------|------------------|
-| `treatment_category_repeats.py` | Two interactive Plotly figures on repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−). **Both kinds:** patients by repetition kind, repetitions per category split into **consecutive** (same category in the next line) and **non-consecutive** (the category returns after a switch), and all 15 sequence patterns four lines can take. **Consecutive only:** blocks per patient, category by run length, and where in the sequence each block sits. → `plots/treatment_category_repeats.html`, `plots/treatment_category_repeats_consecutive.html` |
-| `km_line1_by_year.py` | Crude Kaplan-Meier overall survival from line-1 onset, crossed by treatment category and calendar year of onset, shown three ways: one panel per year stratified by treatment; one panel per treatment stratified by year (light = early → dark = recent); and both collapsed to 24-month OS by year. Clicking a series in any legend isolates it across every panel. → `plots/km_line1_panel_per_year.html`, `plots/km_line1_panel_per_category.html`, `plots/km_line1_24mo_trend.html` |
+| `treatment_category_repeats.py` | Repetition of `T_treatment_category` over the first 4 treatment lines (HR+HER2−). **Both kinds** (paper figure, `fig:repeats`): patients by repetition kind, repetitions per category split into **consecutive** (same category in the next line) and **non-consecutive** (the category returns after a switch), and all 15 sequence patterns four lines can take. **Consecutive only** (exploratory only, interactive Plotly): blocks per patient, category by run length, and where in the sequence each block sits. → `../latex/figs/treatment_category_repeats.pdf`, `plots/treatment_category_repeats_consecutive.html` |
+| `km_line1_by_year.py` | Crude Kaplan-Meier overall survival from line-1 onset, crossed by treatment category and calendar year of onset. The 24-month-OS-by-year collapse is the paper figure (`fig:km-year`); one panel per year stratified by treatment and one panel per treatment stratified by year (light = early → dark = recent) are exploratory-only interactive Plotly. Clicking a series in any legend isolates it across every panel. → `../latex/figs/km_line1_24mo_trend.pdf`, `plots/km_line1_panel_per_year.html`, `plots/km_line1_panel_per_category.html` |
 | `mpps_performance_status_by_year.py` | Evolution of the performance-status distribution (`X_mpps`, ECOG/WHO 0–4) over calendar time: 100% stacked composition per year of line-1 onset, the two ends of the scale (PS 0 and PS ≥ 2) as trend lines with 95% Wilson intervals, and the distribution across treatment lines 1–4. **`X_mpps` is imputed** — see the caveat below. → `plots/mpps_by_year.html` |
-| `km_line1_adjusted.py` | Pooled OS by treatment category, crude vs **IPTW + IPCW adjusted**, so the curves are comparable across treatments — plus a diagnostics figure (covariate balance before/after, effective sample size, calendar-era overlap) that shows where the adjustment succeeds and where it cannot. → `plots/km_line1_adjusted.html`, `plots/km_line1_adjustment_diagnostics.html` |
-| `km_later_lines_by_history.py` | The same year-on-year question at **lines 2, 3 and 4**, where it only means something once **prior treatment is held fixed**. A KM grid (row = prior-exposure stratum, column = line, curve = era), a 12-month-OS trend with crude beside history-standardised, and a diagnostics figure for the case-mix shift and the selection that stratification cannot fix. → `plots/km_later_lines_by_era.html`, `plots/km_later_lines_trend.html`, `plots/km_later_lines_diagnostics.html` |
+| `km_line1_adjusted.py` | Pooled OS by treatment category, crude vs **IPTW + IPCW adjusted**, so the curves are comparable across treatments. The diagnostics figure (covariate balance before/after, effective sample size, calendar-era overlap) is the paper figure (`fig:adjustment`); the crude-vs-adjusted curves themselves are exploratory-only interactive Plotly. → `../latex/figs/km_line1_adjustment_diagnostics.pdf`, `plots/km_line1_adjusted.html` |
+| `km_later_lines_by_history.py` | The same year-on-year question at **lines 2, 3 and 4**, where it only means something once **prior treatment is held fixed**. The 12-month-OS trend (crude beside history-standardised) is the paper figure (`fig:later-lines`); the KM grid (row = prior-exposure stratum, column = line, curve = era) and the case-mix/selection diagnostics are exploratory-only interactive Plotly. → `../latex/figs/km_later_lines_trend.pdf`, `plots/km_later_lines_by_era.html`, `plots/km_later_lines_diagnostics.html` |
 
 ## Reading the repetition figure
 

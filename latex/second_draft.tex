@@ -229,7 +229,7 @@ The formulation above rests on assumptions about the data. Before building the m
 
 \subsection{Data Source and Record Construction}
 
-We use the HR+/HER2- population of the Epidemiological Strategy and Medical Economics (ESME) metastatic breast cancer cohort, a French real-world database collected in \todo{18} comprehensive cancer centers. Over the first four lines, the full data contain 19,865 patients and 63,317 line records, with treatments grouped into 11 categories.
+We use the HR+/HER2- population of the Epidemiological Strategy and Medical Economics (ESME) metastatic breast cancer cohort, a French real-world database collected in comprehensive cancer centers. Over the first four lines, the full data contain 19,865 patients and 63,317 line records, with treatments grouped into 11 categories.
 
 For each patient and each line $k$ at which the patient is alive, we build one record. It contains the medical history summarized up to the progression of line $k-1$ (or up to metastatic diagnosis at $k=1$), together with the treatment $A_k$ given at line $k$. This record is the observed version of the pair $(H_k, A_k)$ of Section~\ref{sec:formulation}. The outcomes are the progression-free survival $P_k$, from the first day of line $k$ to the next progression, and the overall survival $O_k$, from the first day of line $k$ to death or censoring. Patients who died during an earlier line contribute no later records.
 
@@ -243,8 +243,8 @@ This means that the treatment given at a line is strongly tied to the treatments
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=.85\linewidth]{figs/treatment_category_repeats.png}
-\caption{Repetition of treatment categories over the first four lines (patients with four lines). Left: patients by kind of repetition. Middle: repetitions per category, split into consecutive repeats and returns after a switch. Right: all 15 repeat patterns.}
+\includegraphics[width=.85\linewidth]{figs/treatment_category_repeats.pdf}
+\caption{Repetition of treatment categories over the first four lines (patients with four lines; HR+HER2$-$). A repetition is a line given a category the patient already had: \emph{consecutive} when it is the immediately following line (e.g.\ ET, ET), \emph{non-consecutive} when it returns after a switch (e.g.\ ET, MONOCT, ET). (a) Patients by repetition kind. (b) Repetitions per category, split by kind. (c) All 15 possible sequence patterns over four lines, colored by kind; letters denote treatment categories in order of first appearance, so A A B C means lines 1 and 2 were the same treatment.}
 \label{fig:repeats}
 \end{figure}
 
@@ -252,25 +252,27 @@ This means that the treatment given at a line is strongly tied to the treatments
 
 The treatment mix changed strongly over the study period. Endocrine therapy combined with CDK4/6 inhibitors was absent before 2014 and reached 66\% of first-line treatments in 2022. Chemotherapy combined with anti-angiogenic agents went the other way, from 12--16\% of first-line treatments to about 0.3\%. Calendar time also drives follow-up: death is observed for 94\% of patients who started in 2008, but for only 21\% of those who started in 2022, simply because recent patients have been followed for less time.
 
-Calendar time was not among the model covariates, and ignoring it gives a misleading picture of positivity. With a propensity model that ignores calendar time, only 0.4\% of patients have a probability below 0.01 of receiving CDK4/6 inhibitors. Once the start year is added, this share rises to 36.5\%. The apparent overlap came from pooling periods in which the treatment did and did not exist.
+Calendar time also hides a positivity problem. When all years are pooled and the propensity model ignores the start year, only 0.4\% of patients have a probability below 0.01 of receiving CDK4/6 inhibitors, and overlap looks excellent. When the start year is added to the propensity model as a check, this share rises to 36.5\%: many patients were treated before these drugs were in use, so their true probability was zero. The apparent overlap came from pooling periods in which the treatment did and did not exist. Adding calendar time to the model cannot fix this, because a probability that is truly zero cannot be adjusted for; the only remedy is to restrict the cohort to a period in which all treatments were available.
 
-Within each treatment category, crude first-line survival is essentially flat over 15 years (Figure~\ref{fig:km-year}). The differences between categories reflect which patients receive each treatment, not treatment effects. To test whether standard adjustment could make categories comparable over the whole period, we reweighted each group with inverse probability of treatment weights (80 covariates including calendar year) and inverse probability of censoring weights. The adjustment works for the categories used throughout the period: after weighting, the largest standardized mean difference is at most 0.07 for endocrine therapy alone, polychemotherapy, monochemotherapy, and \textsc{other}. It fails for the categories tied to a period: the remaining imbalance is 0.42 for CDK4/6 inhibitors and 0.38 for anti-angiogenic combinations, and it sits on the year indicators (Figure~\ref{fig:adjustment}). No weighting can make a 2010 patient a plausible recipient of a 2018 drug. This is the availability problem of Section~\ref{sec:identifiability}, visible directly in the data.
+The same problem appears when we try to compare treatments on survival. Figure~\ref{fig:km-year} shows first-line survival by year for each treatment category, computed directly from the observed patients, without any adjustment. Within each category, survival barely changes over 15 years: calendar time changed which treatments were given far more than it changed the survival of patients on a given treatment. The gaps \emph{between} categories, however, are not treatment effects. Each treatment is given to different patients, and these differences in patients are mixed into the survival of each group.
+
+The standard way to remove such differences is weighting. Each patient is weighted by the inverse of their probability of receiving the treatment they actually received, so that every treatment group comes to resemble the whole cohort. A second set of weights corrects for patients whose follow-up was cut short. We applied both over the whole study period, with 80 covariates including calendar year, and checked whether the treatment groups became balanced. Balance is measured by the standardized mean difference between groups, where values below 0.1 are usually considered acceptable \todo{[Austin, 2009]}. Weighting works for the treatments used throughout the period: the largest remaining difference is at most 0.07 for endocrine therapy alone, polychemotherapy, monochemotherapy, and \textsc{other}. It fails for the treatments tied to a period: the remaining difference is 0.42 for CDK4/6 inhibitors and 0.38 for anti-angiogenic combinations, and it sits on the year indicators (Figure~\ref{fig:adjustment}). Weighting can only give more weight to patients who exist, and no patient treated in 2010 received a drug introduced years later. This confirms, on survival data, the conclusion of the previous paragraph: a treatment that was not available cannot be adjusted for, and the cohort has to be restricted.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=.8\linewidth]{figs/km_line1_24mo_trend.png}
-\caption{Crude 24-month overall survival from the start of line 1, by calendar year and treatment category. Survival is flat within categories; the gaps between categories reflect patient mix, not treatment effects.}
+\includegraphics[width=.8\linewidth]{figs/km_line1_24mo_trend.pdf}
+\caption{Unadjusted 24-month overall survival from the start of line 1, by calendar year and treatment category. Error bars are 95\% confidence intervals; a (category, year) point is shown only when it has enough patients and enough follow-up to reach 24 months. Curves are crude: within a year the treatment groups are not exchangeable, so the gaps between categories reflect differences between the patients who receive each treatment, not treatment effects.}
 \label{fig:km-year}
 \end{figure}
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=.85\linewidth]{figs/km_line1_adjustment_diagnostics.png}
-\caption{Diagnostics of the inverse probability weighting at line 1: covariate balance before and after weighting, effective sample size, and overlap over calendar time. Balance fails for the categories that were only available during part of the period.}
+\includegraphics[width=.85\linewidth]{figs/km_line1_adjustment_diagnostics.pdf}
+\caption{Diagnostics of the inverse-probability weighting at line 1, one row per treatment category. (a) Covariate balance, measured as the maximum standardized mean difference (SMD) against the pooled remainder across all recorded covariates, before (orange) and after (blue) weighting; the dotted line marks the conventional balance threshold of 0.1. (b) Effective sample size: raw patient count (grey) versus the effective count after weighting (blue) --- weighting buys comparability by leaning on fewer effective patients. (c) Share of each category's patients by calendar year of line-1 onset; a row concentrated in one block of years has no counterpart in other eras, which weighting cannot fix. Balance fails for the categories that were only available during part of the study period.}
 \label{fig:adjustment}
 \end{figure}
 
-\paragraph{Design decision.} We restrict the cohort to patients whose \emph{first} line starts in 2018 or later. By 2018, CDK4/6 inhibitors were already in routine use and anti-angiogenic combinations had disappeared, so the set of available treatments is stable over the window. Selecting on the first line, rather than on each line separately, keeps every patient's trajectory complete. Inside the window, calendar time only reflects gradual changes in practice, which is ordinary confounding. We therefore add the time since the start of the window as a covariate. Within the window, a propensity model using calendar time alone predicts treatment no better than chance (AUC 0.50--0.54 at every line).
+\paragraph{Design decision.} We restrict the cohort to patients whose \emph{first} line starts in 2018 or later. By 2018, CDK4/6 inhibitors were already in routine use and anti-angiogenic combinations had disappeared, so the set of available treatments is stable over the window. Selecting on the first line, rather than on each line separately, keeps every patient's trajectory complete. The restriction removes the availability problem: over the whole period, calendar time strongly predicts the treatment received (macro-AUC 0.63--0.68 across lines 1--4 for a propensity model using calendar time alone), whereas within the window the same model does no better than chance (AUC 0.50--0.54 at every line). Treatment choice still depends on the patient's clinical state, but no longer on when the patient started. Gradual changes in practice may remain inside the window; they are ordinary confounding, and we keep the time since the start of the window as a covariate to account for them.
 
 \subsection{Finding 3: Later-Line Improvements Are Partly Case Mix}
 
@@ -280,8 +282,8 @@ Selection adds to this effect. Reaching line $k$ means having progressed and sur
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=.7\linewidth]{figs/km_later_lines_trend.png}
-\caption{12-month overall survival at lines 2--4 by calendar period. Top: trends within groups of patients with the same previous treatments. Bottom: crude versus history-standardized survival. The gap between the two is the part of the apparent improvement explained by who reaches the line.}
+\includegraphics[width=.7\linewidth]{figs/km_later_lines_trend.pdf}
+\caption{12-month overall survival at lines 2--4 (columns a/d, b/e, c/f), by calendar period. Top row: year-granular trend by prior treatment at the start of the line --- black is all patients with histories mixed together, the naive trend; colored series hold a prior-treatment stratum fixed; dotted series are strata defined only from 2016 onward, once CDK4/6 inhibitors entered use. Error bars are 95\% confidence intervals, and a year is shown only with enough patients and follow-up to reach 12 months (2023 is dropped). Bottom row: the same milestone at coarser calendar eras, crude (black) versus direct standardization to a fixed prior ET/CT mix (grey); the gap between the two bars is the share of the crude trend explained by a change in who reaches the line rather than by better survival. All curves remain crude with respect to covariates other than prior treatment (performance status, metastatic burden, age).}
 \label{fig:later-lines}
 \end{figure}
 
