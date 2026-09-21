@@ -25,5 +25,5 @@ SIF="$PROJECT_DIR/$CONTAINER_NAME.sif"
 
 SEED=$(( ${SEED_OFFSET:-0} + SLURM_ARRAY_TASK_ID ))
 
-apptainer exec --nv --bind "$PROJECT_DIR:/workspace" "$SIF" \
+time apptainer exec --nv --bind "$PROJECT_DIR:/workspace" "$SIF" \
     bash -c "cd /workspace/scripts && PYTHONPATH=/workspace/src python3 TrainDynasurvCausal.py --seed $SEED"
