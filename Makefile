@@ -1,15 +1,20 @@
-SOURCE := bensalama@ruche.mesocentre.universite-paris-saclay.fr:/workdir/bensalama/DynaSurv/models/
-DEST := /Users/malek/TheLAB/DynaSurv/models
+HPC = m-ben-salah@172.18.47.92
 CONTAINER_NAME = dynasurv
-PROJECT_DIR = ~/repos/dynasurv-ite
+
+HPC_PROJECT_PATH = ~/repos/dynasurv-ite
+LOCAL_PROJECT_PATH = /Users/malek/TheLAB/DynaSurv
+
+
+SOURCE := ${PROJECT_DIR}/models/
+DEST := /Users/malek/TheLAB/DynaSurv/models
 
 .PHONY: sync, delsync
 
 sync:
-	rsync -avz --progress $(SOURCE) $(DEST)
+	rsync -avz --progress $(HPC):$(SOURCE) $(DEST)
 
 delsync:
-	rsync -avz --delete --progress $(SOURCE) $(DEST)
+	rsync -avz --delete --progress $(HPC):$(SOURCE) $(DEST)
 
 
 build-docker:
@@ -17,7 +22,7 @@ build-docker:
 	docker save $(CONTAINER_NAME):latest -o $(CONTAINER_NAME).tar
 
 send:
-	rsync -avz --progress $(CONTAINER_NAME).tar m-ben-salah@172.18.47.92:${PROJECT_DIR}/
+	rsync -avz --progress $(CONTAINER_NAME).tar $(HPC):${HPC_PROJECT_PATH}/
 
 build-and-send: build-docker send
 
