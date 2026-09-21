@@ -6,7 +6,7 @@
 # install the CUDA wheel matching the node toolkit instead of this pin.
 
 # --- Deep learning / training ---
-torch==2.10.0
+# torch==2.10.0
 lightning==2.6.1
 
 # --- Survival analysis ---
