@@ -5,8 +5,9 @@ HPC_PROJECT_PATH = ~/repos/dynasurv-ite
 LOCAL_PROJECT_PATH = /Users/malek/TheLAB/DynaSurv
 
 
-SOURCE := ${PROJECT_DIR}/models/
-DEST := /Users/malek/TheLAB/DynaSurv/models
+
+SOURCE := ${HPC_PROJECT_PATH}/models/
+DEST := ${LOCAL_PROJECT_PATH}/models
 
 .PHONY: sync, delsync
 
