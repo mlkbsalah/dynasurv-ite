@@ -229,7 +229,7 @@ class DataConfig(StrictConfig):
 @dataclass(frozen=True)
 class TrainerConfig(StrictConfig):
     max_epochs: int = 100
-    accelerator: str = "cpu"
+    accelerator: str = "auto"
     gradient_clip_val: float = 0.0
 
 
