@@ -4,8 +4,8 @@
 #SBATCH --time=24:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
-#SBATCH --partition=gpu
+#SBATCH --gres=gpu:h100:1
+#SBATCH --partition=ai
 #SBATCH --array=1-20
 
 # One ensemble member per array task, all on the same temporal split with a
