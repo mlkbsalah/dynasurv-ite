@@ -23,7 +23,7 @@
 # send, build-apptainer). The repo isn't baked into the image, so it's bind-
 # mounted into /workspace at run time.
 
-PROJECT_DIR="/workdir/bensalama/DynaSurv"
+PROJECT_DIR="/home/m-ben-salah/repos/dynasurv-ite"
 CONTAINER_NAME="dynasurv"
 SIF="$PROJECT_DIR/$CONTAINER_NAME.sif"
 
