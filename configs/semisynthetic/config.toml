@@ -1,0 +1,58 @@
+# Run config for DynaSurv on the semi-synthetic benchmark (same schema as configs/config.toml,
+# loaded through ExperimentConfig.from_files). data_dir is overridden per replicate by
+# scripts/semisynthetic/train.py.
+#
+# Differences from the real-data config, and why:
+#   * excluded_treatment_arms lists every arm outside the DGP's four. They stay in the data as
+#     history, but must never be recommendable: the simulated truth exists for the four only.
+#   * support thresholds are lowered (30 / 10 / 30). The four arms are a subset of the real
+#     mix and thin out at lines 3-4 (ET alone: ~25 samples at line 4), so 200 / 30 / 100 would
+#     empty the action set. Arms that still fall short are reported per pair, not hidden.
+#   * early stopping on val_loss with more patience: the synthetic target is a single
+#     Weibull-family surface, and a June synthetic run stopped early on the real-data schedule
+#     and was undertrained. Check the loss curve of the first replicate before trusting scores.
+#   * excluded_x_columns keeps the real-data guard; the column is already absent from V2.
+
+[train]
+[train.trainer]
+max_epochs = 150
+
+[train.early_stopping]
+monitor = "val_loss"
+mode = "min"
+patience = 20
+
+[data]
+data_dir = "../data/semisynthetic"
+subtype = "HR+HER2-"
+n_lines = 4
+
+# Every sample already starts in >= 2018; kept so the calendar origin matches the DGP driver.
+cohort_start_year = 2018
+# 2021 as in the real config: the holdout is the latest entry years (deliberate policy-era
+# shift). All prefix samples of a patient share the entry year, so none straddles the split.
+temporal_split_year = 2021
+# The DGP uses calendar time as an instrument, so the model must see it.
+add_calendar_feature = true
+
+excluded_treatment_arms = [
+    "CT+ANTI-ANGIO",
+    "CT+ANTI-HER2",
+    "CT+IT",
+    "CT+TT",
+    "ET+TT",
+    "NO TREATMENT",
+    "OTHER",
+]
+excluded_x_columns = ["X_onset_to_progression"]
+
+min_samples_per_treatment = 30
+min_events_per_treatment = 10
+min_followup_samples_per_treatment = 30
+propensity_min_probability = 0.01
+propensity_cv_folds = 5
+
+[eval]
+horizon_times = [24, 18, 12, 12]
+integration_step = 100
+calibration_times = [6, 12, 24, 36]

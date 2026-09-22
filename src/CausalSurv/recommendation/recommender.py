@@ -14,7 +14,7 @@ state, and `_setup_valid_treatments` is what populates it during fit/test.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 import torch
 
@@ -119,6 +119,44 @@ class TreatmentRecommender:
         result[:, fitted_lines] &= propensity_mask[:, fitted_lines]
         return result
 
+    def arm_survival(
+        self, XPd, X_static, factual_idx
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Counterfactual survival of every arm plus the support mask.
+
+        The forward pass is the expensive half of `arm_rmst`; kept apart so a
+        horizon sweep can integrate one set of curves at many horizons.
+
+        Returns:
+            survival: (batch, n_lines, n_treatments, n_intervals + 1), S(0) = 1.
+            mask: (batch, n_lines, n_treatments) True where the arm is supported for
+                that patient and line. Independent of any horizon.
+        """
+        model = self.model
+        survival = model.predict_discrete_survival(
+            XPd=XPd, X_static=X_static, gather=False, factual_idx=factual_idx
+        )
+        mask = self.patient_support_mask(XPd, X_static)[:, : survival.shape[1]]
+        return survival, mask
+
+    def _check_horizons(self, horizons, n_lines: int) -> list[float]:
+        if horizons is None or len(horizons) < n_lines:
+            raise ValueError(
+                f"need one RMST horizon per line ({n_lines} lines), got {horizons!r}; "
+                "pass horizon_times or build the recommender with a default"
+            )
+        return [float(t) for t in horizons]
+
+    def _rmst_per_line(self, survival, horizons: Sequence[float]) -> torch.Tensor:
+        bounds = self.model.interval_bounds
+        return torch.stack(
+            [
+                rmst(survival[:, line], horizons[line], bounds)
+                for line in range(survival.shape[1])
+            ],
+            dim=1,
+        )  # (batch, n_lines, n_treatments)
+
     def arm_rmst(
         self,
         XPd,
@@ -138,28 +176,36 @@ class TreatmentRecommender:
             mask: (batch, n_lines, n_treatments) True where the arm is supported for
                 that patient and line.
         """
-        model = self.model
-        survival = model.predict_discrete_survival(
-            XPd=XPd, X_static=X_static, gather=False, factual_idx=factual_idx
-        )  # (batch, n_lines, n_treatments, n_intervals + 1)
+        survival, mask = self.arm_survival(XPd, X_static, factual_idx)
+        horizons = self._check_horizons(
+            self.horizon_times if horizon_times is None else horizon_times,
+            survival.shape[1],
+        )
+        return self._rmst_per_line(survival, horizons), mask
+
+    def arm_rmst_grid(
+        self,
+        XPd,
+        X_static,
+        factual_idx,
+        horizon_grid: Sequence[Sequence[float]],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """`arm_rmst` at several per-line horizons from one forward pass.
+
+        Args:
+            horizon_grid: H entries, each a per-line horizon list as `arm_rmst`
+                takes it.
+
+        Returns:
+            arm_rmst: (H, batch, n_lines, n_treatments), finite; entry h is what
+                `arm_rmst(..., horizon_times=horizon_grid[h])` returns.
+            mask: (batch, n_lines, n_treatments), shared by every horizon: the
+                action set is fixed, only the integration limit moves.
+        """
+        survival, mask = self.arm_survival(XPd, X_static, factual_idx)
         n_lines = survival.shape[1]
-
-        horizons = self.horizon_times if horizon_times is None else horizon_times
-        if horizons is None or len(horizons) < n_lines:
-            raise ValueError(
-                f"need one RMST horizon per line ({n_lines} lines), got {horizons!r}; "
-                "pass horizon_times or build the recommender with a default"
-            )
-        arm_rmst = torch.stack(
-            [
-                rmst(survival[:, line], horizons[line], model.interval_bounds)
-                for line in range(n_lines)
-            ],
-            dim=1,
-        )  # (batch, n_lines, n_treatments)
-
-        mask = self.patient_support_mask(XPd, X_static)[:, :n_lines]
-        return arm_rmst, mask
+        grid = [self._check_horizons(h, n_lines) for h in horizon_grid]
+        return torch.stack([self._rmst_per_line(survival, h) for h in grid]), mask
 
     def recommend(
         self,

@@ -72,7 +72,7 @@ heterogeneity = 1.0
 
 [outcome.arm_effects]           # tau_a
 "ET alone" = 0.0
-"ET+ANTI-CDK wo CT" = -0.35
+"ET+ANTI-CDK wo CT" = -0.20     # -0.35 made CDK best for ~65% of patients; "always CDK" then wins hit-rate
 "MONOCT std alone" = 0.10
 "POLYCT alone" = 0.0
 

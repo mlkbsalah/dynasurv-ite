@@ -795,24 +795,41 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             TorchData.Subset(self.ESMEDataset, holdout_idx),
         )
 
+    def _split_holdout(self) -> Tuple[TorchData.Subset, TorchData.Subset]:
+        """(train/finetuning, holdout) partition of the whole dataset."""
+        if self.temporal_split_year is not None:
+            return self._temporal_split()
+        dataset_length = len(self.ESMEDataset)
+        holdout_length = int(self.holdout_size * dataset_length)
+        generator = torch.Generator().manual_seed(self.split_seed)
+        return TorchData.random_split(
+            self.ESMEDataset,
+            [dataset_length - holdout_length, holdout_length],
+            generator=generator,
+        )
+
+    def _cv_split(self) -> Tuple[list[int], list[int], list[int]]:
+        """(train, validation, early-stopping) indices of the current CV fold."""
+        kfold = KFold(
+            n_splits=self.num_folds or 5,
+            shuffle=True,
+            random_state=self.split_seed,
+        )
+        all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
+        train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
+        train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
+
+        train_idx, early_stop_idx = train_test_split(
+            train_idx, test_size=0.1, shuffle=True
+        )
+        return train_idx, val_idx, early_stop_idx
+
     def setup(self, stage: str | None = None):
         if self.ESMEDataset is None:
             self.prepare_data()
             assert self.ESMEDataset is not None
 
-        dataset_length = len(self.ESMEDataset)
-        holdout_length = int(self.holdout_size * dataset_length)
-
-        if self.temporal_split_year is not None:
-            self.cv_dataset, self.holdout_dataset = self._temporal_split()
-        else:
-            # train/finetuning - RealTest (holdout)
-            generator = torch.Generator().manual_seed(self.split_seed)
-            self.cv_dataset, self.holdout_dataset = TorchData.random_split(
-                self.ESMEDataset,
-                [dataset_length - holdout_length, holdout_length],
-                generator=generator,
-            )
+        self.cv_dataset, self.holdout_dataset = self._split_holdout()
 
         if self.final_training:
             if stage == "fit" or stage is None:
@@ -827,18 +844,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
                     self._set_training_support(self.cv_dataset)
         else:
             if stage == "fit" or stage is None:
-                kfold = KFold(
-                    n_splits=self.num_folds or 5,
-                    shuffle=True,
-                    random_state=self.split_seed,
-                )
-                all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
-                train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
-                train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
-
-                train_idx, early_stop_idx = train_test_split(
-                    train_idx, test_size=0.1, shuffle=True
-                )
+                train_idx, val_idx, early_stop_idx = self._cv_split()
 
                 self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
                 self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)

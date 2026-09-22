@@ -396,6 +396,22 @@ class RecommendationSummary:
                 "RecommendationSummary invariants violated: " + "; ".join(failed)
             )
 
+    def runner_up_gap(self) -> torch.Tensor:
+        """(batch, n_lines) pessimistic deficit of the closest rival to the leader.
+
+        The minimum of `diff_lcb` over the supported arms other than the leader:
+        `+inf` where the leader is the only supported arm (its set is trivially a
+        singleton), NaN where nothing is supported. With `p_best_leader` this is
+        the whole decision rule: the equivalence set is a singleton exactly when
+        the gap reaches `margin_months`, and the decision is confident exactly
+        when `p_best_leader` also reaches `p_best_min`.
+        """
+        T = self.mask.shape[-1]
+        leader_one_hot = F.one_hot(self.leader_idx.clamp(min=0), T).bool()
+        rivals = self.mask & ~leader_one_hot
+        gap = self.diff_lcb.masked_fill(~rivals, float("inf")).amin(-1)
+        return gap.masked_fill(~self.mask.any(-1), float("nan"))
+
 
 def summarize(
     rmst: torch.Tensor,
@@ -556,6 +572,50 @@ class EnsembleRecommender:
         rmst, mask, member_masks = self.member_rmst(XPd, X_static, factual_idx)
         return self.summarize(rmst, mask, member_masks)
 
+    @torch.no_grad()
+    def member_rmst_grid(
+        self, XPd, X_static, factual_idx, horizon_grid: Sequence[Sequence[float]]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """`member_rmst` at several per-line horizons, one forward pass per member.
+
+        Returns:
+            rmst: (H, M, batch, n_lines, n_treatments), finite.
+            mask: (batch, n_lines, n_treatments), the AND over members; the same at
+                every horizon, since the action set is fixed.
+            member_masks: (M, batch, n_lines, n_treatments).
+        """
+        x_static, p_static = X_static
+        rmsts, masks = [], []
+        for rec in self.members:
+            device = next(rec.model.parameters()).device
+            r, m = rec.arm_rmst_grid(
+                XPd.to(device),
+                (x_static.to(device), p_static.to(device)),
+                factual_idx.to(device),
+                horizon_grid,
+            )
+            rmsts.append(r.detach().cpu())
+            masks.append(m.detach().cpu())
+        rmst = torch.stack(rmsts, dim=1)
+        member_masks = torch.stack(masks)
+        return rmst, member_masks.all(0), member_masks
+
+    def sweep(
+        self, XPd, X_static, factual_idx, horizon_grid: Sequence[Sequence[float]]
+    ) -> list[RecommendationSummary]:
+        """One `RecommendationSummary` per entry of `horizon_grid`.
+
+        A scoring-only sweep: the members' curves, the support mask and the
+        thresholds are shared, only the RMST integration limit changes. The entry
+        equal to `self.horizon_times` reproduces `recommend`.
+        """
+        rmst, mask, member_masks = self.member_rmst_grid(
+            XPd, X_static, factual_idx, horizon_grid
+        )
+        return [
+            self.summarize(rmst[h], mask, member_masks) for h in range(rmst.shape[0])
+        ]
+
 
 # --------------------------------------------------------------------------- #
 # Output
@@ -580,6 +640,7 @@ def to_frame(
     line_mask: torch.Tensor,
     observed_idx: torch.Tensor,
     treatment_dict: dict[int, str],
+    horizon: Sequence[float] | None = None,
 ) -> pd.DataFrame:
     """Long table: one row per observed (patient, line) and arm.
 
@@ -588,8 +649,13 @@ def to_frame(
         line_mask: (batch, n_lines) 1 where the patient actually has that line.
         observed_idx: (batch, n_lines) the arm actually received.
         treatment_dict: arm index -> name, from the datamodule.
+        horizon: the per-line RMST horizons the summary was computed at. When
+            given, a `horizon` column after `line` holds each row's own; left out
+            by default so the single-horizon table keeps its columns.
     """
     B, L, T = summary.mask.shape
+    if horizon is not None and len(horizon) < L:
+        raise ValueError(f"need one horizon per line ({L} lines), got {horizon!r}")
     rows = line_mask.bool()[:, :L].nonzero(as_tuple=False)  # (N, 2)
     b = rows[:, 0].repeat_interleave(T)
     line = rows[:, 1].repeat_interleave(T)
@@ -604,7 +670,7 @@ def to_frame(
 
     leader = per_line(summary.leader_idx)
     observed = per_line(observed_idx.long())
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "patient_id": patient_id[b].numpy(),
             "line": line.numpy(),
@@ -631,3 +697,9 @@ def to_frame(
             "n_members": summary.n_members,
         }
     )
+    if horizon is not None:
+        per_line_horizon = torch.tensor(
+            [float(t) for t in horizon], dtype=torch.float64
+        )
+        frame.insert(2, "horizon", per_line_horizon[line].numpy())
+    return frame

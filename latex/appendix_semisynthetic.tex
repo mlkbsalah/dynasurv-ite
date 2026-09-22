@@ -1,0 +1,425 @@
+% Appendix: design choices of the semi-synthetic data generation.
+% Include after the existing appendices of second_draft.tex with
+%     \input{appendix_semisynthetic}
+% Needs only amsmath and booktabs, both already loaded there. Self-contained: no \todo,
+% no external figures. Code references are to src/CausalSurv/semisynthetic/.
+
+\providecommand{\drv}[1]{\texttt{#1}}
+\providecommand{\arm}[1]{\textsc{#1}}
+\providecommand{\Ind}{\mathbf{1}}
+
+\section{Semi-Synthetic Data Generation}
+\label{app:semisynthetic}
+
+This appendix records every design choice of the semi-synthetic benchmark used for
+counterfactual validation (Section~\ref{sec:counterfactual}): what was decided, and why.
+The benchmark keeps the real covariates and treatment history of the cohort, and
+\emph{simulates} the treatment of the line being scored, the potential survival time under
+every arm, and the censoring. The true survival curve, restricted mean survival time (RMST)
+and best arm of every patient under every arm are then known in closed form.
+
+The numbers quoted below are for the reference configuration (assignment strength
+$\gamma=1$, hidden-confounder strength $s=0$, heterogeneity $h=1$). All coefficients are
+set by hand, not estimated: they fix the \emph{difficulty} of the benchmark, not its realism.
+The model-side evaluation of this benchmark is not part of this appendix.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Cohort and arms}
+\label{app:semisynthetic:cohort}
+
+\paragraph{Cohort.} HR$^+$/HER2$^-$ patients whose first treatment line starts in 2018 or
+later, lines 1--4, built exactly as the training pipeline builds its cohort (patient-level
+entry-year filter, inner join with the static file), so that simulated rows line up one to
+one with the rows the model trains on. This gives $6{,}191$ patients and $13{,}116$
+(patient, line) records, $6{,}191 / 3{,}401 / 2{,}169 / 1{,}355$ on lines 1 to 4. The year
+restriction is the identifiability window of the real pipeline: every arm was available
+throughout. One exact duplicate (patient, line) record in the source file is removed, because
+after expansion it would become a sample of its own with a false ``previous line''.
+Administrative censoring is measured from the last observed line start, 2024-02-21.
+
+\paragraph{Arms.} Four arms: \arm{ET alone}, \arm{ET+anti-CDK wo CT}, \arm{MonoCT std alone},
+\arm{PolyCT alone}. \arm{CT+anti-angio} is not simulated (21, 7, 2 and 2 records per line in the
+restricted cohort: no overlap). It and all other categories (\arm{CT+anti-HER2}, \arm{CT+IT},
+\arm{CT+TT}, \arm{ET+TT}, \arm{No treatment}, \arm{Other}) remain in the data as
+\emph{history} only and are excluded from the set of recommendable arms. Arm indices follow
+the alphabetical order of the arm names throughout.
+
+\paragraph{Real history, simulated present.} Covariates, past treatments and line structure
+(previous-line duration, gap, line number) are real. Only the arm and outcome of the line
+being scored are simulated, and the simulated outcome does \emph{not} feed back into later
+lines. This keeps the covariate distribution real and makes each line a separate problem
+given its history. The price is that the benchmark does not test how a model handles
+treatment--outcome feedback across lines.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Prefix expansion}
+\label{app:semisynthetic:expansion}
+
+A patient with $L$ lines becomes $L$ samples. Sample $j\in\{1,\dots,L\}$ contains the real
+records of lines $1,\dots,j-1$ and record $j$ with the simulated arm and simulated outcome;
+its identifier is $10\cdot\text{id}+j$, and all samples of a patient share the original id
+(the unit of any train/validation grouping) and the entry year. The reference cohort yields
+$13{,}116$ samples in $24{,}920$ rows.
+
+The reason is that the sequence model steps through lines in order, and its hidden state at
+line $j$ does not depend on the arm at line $j$. Scoring only the last line of each sample
+therefore requires no change to the model or its losses; the alternative, simulating all
+lines of a patient jointly, would require outcome feedback and a joint model. The data
+module masks every row except the sample's last line; history rows carry placeholder
+outcomes ($0$).
+
+Columns describing the real current line and its outcome (drug flags other than the treatment
+category, all outcome columns other than the two survival targets, line end date, death date)
+are removed, so that no real value sits next to a simulated one. Static features do not reach
+the encoder, so age and menopausal status are copied into dynamic columns; otherwise they
+would act as unplanned hidden confounders.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Drivers and causal roles}
+\label{app:semisynthetic:drivers}
+
+Each sample has a vector $z\in\mathbb{R}^{16}$ of drivers computed from its real record.
+Continuous drivers are standardised over the cohort; the others are $0/1$ flags.
+Table~\ref{tab:semisynthetic:drivers} gives their definitions and roles. The role of each
+driver is enforced when the configuration is loaded: a coefficient on an instrument in the
+outcome equation, or on a prognostic factor in the assignment equation, is rejected.
+
+\begin{table}[ht]
+\centering\small
+\caption{Drivers of the data-generating process. ``Both'' means the driver enters assignment
+and outcome (confounder).}
+\label{tab:semisynthetic:drivers}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Driver & Definition & Role \\
+\midrule
+\drv{liver} & liver metastases $>0$ & both \\
+\drv{visceral} & pulmonary or pleural metastases $>0$ & both \\
+\drv{bone\_only} & bone metastases, none of liver, visceral, brain & both \\
+\drv{mpps} & imputed ECOG/WHO performance status, 0--4 (standardised) & both \\
+\drv{log\_prev\_line} & $\log(1+\text{previous line duration})$ (standardised) & both \\
+\drv{prev\_cdk}, \drv{prev\_et}, \drv{prev\_ct} & class of the \emph{real} previous arm (one-hot; all zero at line 1) & both \\
+\drv{cum\_new\_sites} & cumulative new metastatic sites (standardised) & both \\
+\drv{age}, \drv{menopause} & age at selection (standardised), menopausal status & both \\
+\drv{calendar} & months since 2018-01-01 (standardised) & assignment only \\
+\drv{brain} & brain metastases $>0$ & outcome only \\
+\drv{lobular} & invasive lobular histology & outcome only \\
+\drv{brca} & \textit{BRCA1} or \textit{BRCA2} & outcome only \\
+\drv{old\_site\_progression} & progression of an old site $>0$ & outcome only \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The model still receives all real covariate columns ($73$, plus the calendar covariate); only
+these $16$ matter for the simulated data, and the remainder are nuisance columns it must
+learn to ignore. A buffer-time covariate is deliberately not a driver.
+
+\paragraph{Hidden confounder.} A latent variable
+$u=\rho\,\tilde z_{\text{liver}}+\sqrt{1-\rho^2}\,\varepsilon$ with $\varepsilon\sim\mathcal{N}(0,1)$,
+$\tilde z_{\text{liver}}$ the standardised liver indicator and $\rho=0.3$, enters both
+assignment and outcome and is \emph{never} written to the model input. Correlating it with a
+real covariate keeps it from being independent noise. Its outcome coefficient is fixed and
+only its coupling to assignment is swept, so that strength $0$ is an unconfounded reference
+carrying the same outcome heterogeneity: any error growth above it is confounding bias.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Treatment assignment}
+\label{app:semisynthetic:assignment}
+
+For a sample on line $\ell$ with drivers $z$ and hidden $u$, the arm $A$ is drawn with
+\begin{equation}
+    \pi_a(z,u)=\mathbb{P}(A=a\mid z,u)
+    =\frac{\exp\eta^{\text{A}}_a}{\sum_{b}\exp\eta^{\text{A}}_b},
+    \qquad
+    \eta^{\text{A}}_a=\alpha_{\ell a}+\gamma\,B_a^{\top}z+s\,c_a\,u,
+    \label{eq:semisynthetic:assignment}
+\end{equation}
+where $B_a$ are hand-set coefficients (Table~\ref{tab:semisynthetic:coefficients}, shared
+across lines), $c_a$ the hidden loadings, $\gamma$ the assignment strength, and $s$ the hidden
+strength. Coefficients are chosen for clinically plausible signs (visceral involvement pushes
+towards combination chemotherapy, a long previous line towards endocrine-based therapy, a CDK
+inhibitor is rarely repeated) and moderate size.
+
+\paragraph{Calibrated intercepts.} The intercepts $\alpha_{\ell a}$ are not set by hand. For
+every line they are fitted, by iterative proportional fitting
+\begin{equation}
+    \alpha_{\ell a}\leftarrow\alpha_{\ell a}+\log\frac{q_{\ell a}}{\bar\pi_{\ell a}},
+    \qquad
+    \bar\pi_{\ell a}=\frac{1}{n_\ell}\sum_{i\in\ell}\pi_a(z_i,u_i),
+\end{equation}
+until $\max_a|\bar\pi_{\ell a}-q_{\ell a}|<10^{-6}$, where $q_{\ell\cdot}$ is the real
+distribution of the four arms on line $\ell$. The marginal arm mix therefore equals the real
+mix at every $\gamma$ and $s$: a sweep changes \emph{who} receives which arm, never \emph{how
+many}. The average runs over every sample of the line (each is given a simulated arm) while
+the target is the real mix among the four arms only.
+The targets $q_\ell$ (order: ET, ET+CDK, MonoCT, PolyCT) are
+$(.183,.628,.090,.100)$, $(.148,.412,.330,.109)$, $(.049,.107,.611,.233)$ and
+$(.032,.031,.580,.357)$ for lines 1 to 4.
+
+\paragraph{Sampling.} The arm is drawn by inverting the cumulative distribution with
+\emph{one uniform per sample}, so that draws coincide wherever propensities coincide. The true
+propensities are stored.
+
+\paragraph{Range of the sweep.} The effective sample size of inverse-propensity weights of the
+assigned arm, divided by $n$, is $0.51$, $0.40$, $0.22$, $0.01$ and $0.00$ at $\gamma=0$, $0.5$,
+$1$, $2$ and $4$ respectively (no hidden confounder), and $0.07$ at $s=2$ even with $\gamma=0$. Beyond $\gamma\approx1.5$ or
+$s\approx1$ the benchmark measures extrapolation rather than confounding, so the sweep is
+restricted to $\gamma\le1.5$ and $s\le1$.
+
+\begin{table}[ht]
+\centering\small
+\caption{Hand-set coefficients (blank $=0$). Left: assignment coefficients $B_a$ and hidden
+loadings $c_a$. Right: outcome prognostic term $f$ and arm interactions $g_a$. Continuous
+drivers are per standard deviation, flags are on \emph{vs} off; outcome coefficients are on the
+log-hazard scale (positive $=$ worse). The row ``Hidden'' gives the loadings $c_a$ of $u$ on the
+arms' assignment logits and, in the $f$ column, its outcome coefficient $\beta_u$.}
+\label{tab:semisynthetic:coefficients}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}l rrrr c rrrrr@{}}
+\toprule
+ & \multicolumn{4}{c}{Assignment $B_a$} & & \multicolumn{5}{c}{Outcome} \\
+\cmidrule(lr){2-5}\cmidrule(l){7-11}
+Driver & ET & CDK & Mono & Poly & & $f$ & $g_{\text{ET}}$ & $g_{\text{CDK}}$ & $g_{\text{Mono}}$ & $g_{\text{Poly}}$ \\
+\midrule
+\drv{liver}          &      & $-0.3$ & $0.5$  & $0.9$  & & $0.45$ & $0.30$ & $0.25$ & $-0.15$ & $-0.35$ \\
+\drv{visceral}       &      & $-0.2$ & $0.3$  & $0.5$  & & $0.25$ &        &        &         & $-0.25$ \\
+\drv{bone\_only}     &      & $0.5$  & $-0.4$ & $-0.6$ & & $-0.30$ & $-0.15$ & $-0.30$ &      &         \\
+\drv{mpps}           &      & $-0.3$ & $0.3$  & $-0.2$ & & $0.30$ &        &        & $-0.10$ & $0.15$  \\
+\drv{log\_prev\_line} &     & $0.4$  & $-0.4$ & $-0.5$ & & $-0.25$ &       & $-0.20$ &        &         \\
+\drv{prev\_cdk}      & $-0.3$ & $-1.0$ & $0.4$ & $0.3$  & & $0.20$ &        & $0.40$ &         &         \\
+\drv{prev\_et}       & $-0.5$ &      &        &        & &        & $0.30$ &        &         &         \\
+\drv{prev\_ct}       &      &        & $0.3$  &        & &        &        &        &         &         \\
+\drv{cum\_new\_sites} &     & $-0.1$ & $0.2$  & $0.3$  & & $0.15$ &        &        &         &         \\
+\drv{age}            & $0.4$ &       & $0.3$  & $-0.4$ & & $0.10$ &        &        & $-0.10$ & $0.15$  \\
+\drv{menopause}      &      & $0.3$  &        & $-0.3$ & & $0.05$ &        &        &         &         \\
+\drv{calendar}       &      & $0.3$  & $-0.1$ & $-0.2$ & &        &        &        &         &         \\
+\drv{brain}          &      &        &        &        & & $0.40$ &        &        &         &         \\
+\drv{lobular}        &      &        &        &        & & $0.10$ &        &        &         &         \\
+\drv{brca}           &      &        &        &        & & $0.15$ &        &        &         &         \\
+\drv{old\_site\_prog.} &    &        &        &        & & $0.15$ &        &        &         &         \\
+\midrule
+Hidden ($c_a$; $\beta_u$ under $f$) & 0 & $-0.5$ & $0.5$ & $1.0$ & & $0.4$ & & & & \\
+Arm effect $\tau_a$  &      &        &        &        & & & $0$ & $-0.20$ & $0.10$ & $0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% -----------------------------------------------------------------------------------------
+\subsection{Potential outcomes}
+\label{app:semisynthetic:outcome}
+
+Time from the start of the line to death under arm $a$ follows a Weibull model with
+line-specific shape $k_\ell$ and scale $\lambda_\ell$,
+\begin{equation}
+    S_a(t\mid z,u)=\exp\!\Big(-\big(t/\lambda_\ell\big)^{k_\ell}e^{\eta_a}\Big),
+    \qquad
+    \eta_a=f(z)+\tau_a+h\,g_a(z)+\beta_u\,u,
+    \label{eq:semisynthetic:outcome}
+\end{equation}
+that is, $T_a\sim\text{Weibull}(k_\ell,\lambda_\ell e^{-\eta_a/k_\ell})$; $\eta_a>0$ is a higher
+hazard. $f$ is the prognostic term, $\tau_a$ the arm effect, $g_a$ the interaction that makes
+the best arm differ across patients (who benefits from what), $h$ the heterogeneity, and
+$\beta_u=0.4$ the fixed outcome coefficient of the hidden confounder. The functions $f$ and
+$g_a$ are linear in $z$ (Table~\ref{tab:semisynthetic:coefficients}) and \emph{centred within
+each line}, which makes $(k_\ell,\lambda_\ell)$ the baseline of the average patient.
+
+\paragraph{Fitting the baseline.} For each line, $(k_\ell,\lambda_\ell)$ minimise the squared
+difference between the population survival implied by the simulation for the assigned arms,
+$\bar S_\ell(t)=n_\ell^{-1}\sum_{i\in\ell}\exp\!\big(-(t/\lambda)^{k}e^{\eta_{i,A_i}}\big)$, and the
+real per-line Kaplan--Meier curve, over the observed jump times at which at least $5\%$ of the
+line is still at risk. The result is $k_\ell\approx1.27$--$1.33$ and
+$\lambda_\ell\approx53/27/22/18$ months; the fitted medians are $48.5/22.6/16.3/12.7$ months
+against $47.7/22.8/16.5/12.4$ in the real data.
+
+\paragraph{Closed-form truth.} Survival is given by \eqref{eq:semisynthetic:outcome}. With
+$\sigma_a=\lambda_\ell e^{-\eta_a/k_\ell}$ the RMST to horizon $\tau$ is
+\begin{equation}
+    \text{RMST}_a(\tau)=\int_0^{\tau}S_a(t)\,dt
+    =\sigma_a\,\Gamma\!\big(1+\tfrac1{k_\ell}\big)\,P\!\big(\tfrac1{k_\ell},(\tau/\sigma_a)^{k_\ell}\big),
+\end{equation}
+with $P$ the regularised lower incomplete gamma function; the individual treatment effect of
+arm $a$ against $b$ is $\text{RMST}_a-\text{RMST}_b$ and the best arm maximises RMST over the
+recommendable arms.
+
+\paragraph{Coupling of the arms.} A single uniform per sample is shared by all arms, so
+$T_a=\sigma_a(-\log V)^{1/k_\ell}$ with the same $V\sim\mathcal{U}(0,1)$ for every $a$. The
+arms then differ only through $\eta_a$, and the individual effect is not swamped by independent
+noise. The marginals are unaffected; the joint distribution of potential outcomes is one
+particular choice, and another coupling would give the same marginals with different
+individual-level effects.
+
+\paragraph{Effect sizes.} Effects are small on the RMST scale: the average true pairwise
+differences at the reference configuration lie between $-0.44$ and $+0.42$ months, and the
+\emph{headroom} of a policy (value of the oracle minus value of the best single arm per line)
+is $0.00, 0.11, 0.47, 1.25, 1.71$ months for $h=0,0.5,1,2,3$. The arm effect of
+\arm{ET+anti-CDK} was first $-0.35$, which made it the best arm for $63$--$74\%$ of patients
+(by line) so that ``always CDK'' scored highly; at $-0.20$ its share on line 2 drops from
+$63\%$ to $48\%$ and the best-arm metric discriminates.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Censoring}
+\label{app:semisynthetic:censoring}
+
+The observed time and event indicator are $\min(T,C)$ and $\Ind\{T\le C\}$ with
+\begin{equation}
+    C=\min\big(C^{\text{adm}},\,C^{\text{drop}}\big),\qquad
+    C^{\text{adm}}=\frac{t_{\text{cutoff}}-t^{\text{start}}}{30.44},\qquad
+    C^{\text{drop}}\sim\text{Exp}(r_\ell),
+\end{equation}
+in months, with $T$ the latent time under the simulated arm. Administrative censoring is a
+fact of the real cohort and is kept sample by sample. Dropout is added only where the cutoff
+alone leaves the simulated event rate above the real one; $r_\ell$ is found by bisection on
+$\log r$ (60 steps) so that the event rate equals the real rate of the restricted cohort,
+using fixed unit-exponential draws so that the event rate is a deterministic decreasing
+function of $r$. The targets are the event rates of the restricted cohort,
+$0.442/0.547/0.578/0.596$ (not those of the full 2008-onwards cohort, $0.73$--$0.85$). With
+the cutoff alone the rates would be $0.465/0.587/0.639/0.679$, so dropout is active on every
+line, at $0.0024/0.0041/0.0073/0.0103$ per month.
+
+Both components are independent of the outcome and the arm, so censoring is non-informative
+by construction. Real censoring probably is not, so this is the best case for
+inverse-probability-of-censoring-weighted estimators.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Randomness and artefacts}
+\label{app:semisynthetic:seeds}
+
+Four independent random streams (hidden confounder, assignment, outcome, censoring) are
+spawned from one seed sequence keyed by (data seed, replicate). A sweep over $\gamma$, $s$ or
+$h$ therefore reuses the same $u$, the same assignment uniforms, the same latent uniforms and
+the same dropout draws: levels differ \emph{only} by the swept knob, and repeating a
+configuration reproduces the data exactly.
+
+Each replicate writes (i) the expanded dynamic and re-keyed static tables under the names of
+the real data files, so that the directory can be used in place of the real data; (ii) a truth
+table with, per sample, the assigned arm, hidden $u$, Weibull parameters, latent time under
+every arm, both censoring times, observed time and event, and propensity and $\eta$ for every
+arm; and (iii) a manifest with every parameter, the calibrated intercepts, the arm counts per
+line, the fitted Weibull parameters and medians, the dropout rates, and the achieved and
+target event rates. The hidden $u$ appears only in the truth table.
+
+% -----------------------------------------------------------------------------------------
+\subsection{Training and data-loading choices}
+\label{app:semisynthetic:training}
+
+\begin{itemize}
+    \item \textbf{Mask.} Only the last line of each sample is unmasked, and the counts that
+    decide which arms are recommendable are computed on those rows.
+    \item \textbf{Grouped splits.} Every split other than the temporal one (random hold-out,
+    cross-validation folds, early-stopping split) groups by original patient, because the
+    samples of a patient share their history and would otherwise leak across the boundary. A
+    temporal split already keeps them together (shared entry year).
+    \item \textbf{Temporal hold-out.} Patients entering in 2021 or later ($26\%$ of samples),
+    a deliberate policy-era shift; calendar time is an instrument of the assignment, so the
+    model receives it.
+    \item \textbf{Support thresholds.} Arms need at least $30$ samples, $10$ events and $30$
+    samples followed to the horizon at a line to be recommendable, against $200/30/100$ on
+    real data, because the four arms thin out on later lines (on line 4, \arm{ET alone} has
+    $25$ samples and is excluded there).
+    \item \textbf{Optimisation.} Early stopping on the validation loss (patience $20$, at most
+    $150$ epochs). The architecture and learning-rate settings are those tuned on the real
+    data; they were not re-tuned for the synthetic data.
+\end{itemize}
+
+% -----------------------------------------------------------------------------------------
+\subsection{Evaluation against the truth}
+\label{app:semisynthetic:evaluation}
+
+All quantities are computed on the temporal hold-out, at each sample's own line $\ell$ and its
+horizon $\tau_\ell$ ($24, 18, 12, 12$ months), on a $0.1$-month grid, and only for arms that
+are recommendable at that line. Write $\hat S_a$ for a predicted curve and $S_a$ for the truth.
+\begin{itemize}
+    \item \textbf{Curve error.} $\big(\tau_\ell^{-1}\!\int_0^{\tau_\ell}(\hat S_a-S_a)^2dt\big)^{1/2}$
+    averaged in squares over samples, and the error and bias of $\widehat{\text{RMST}}_a-\text{RMST}_a$,
+    reported separately for the assigned (factual) arm and for the other (counterfactual) arms.
+    \item \textbf{Effect error.} For each arm pair $(a,b)$,
+    $\text{PEHE}=\big(\mathbb{E}[(\hat\Delta_{ab}-\Delta_{ab})^2]\big)^{1/2}$ with
+    $\Delta_{ab}=\text{RMST}_a-\text{RMST}_b$, the bias of the average effect
+    $\mathbb{E}[\hat\Delta_{ab}]-\mathbb{E}[\Delta_{ab}]$, and the share of samples with the
+    correct sign. Hidden confounding appears as bias, not as PEHE.
+    \item \textbf{Policy.} A policy picks the arm with the highest predicted RMST among
+    supported arms (abstaining to the assigned arm where none is supported). Value is the
+    true RMST of the chosen arm; regret is the oracle value minus it; the hit rate is the share
+    of samples where the chosen arm is the true best arm. Reference policies: the assigned
+    arm, the best single arm per line (an upper bound for constant policies), and uniform
+    random.
+    \item \textbf{Factual accuracy.} IPCW concordance index and Brier score of the factual
+    curve at $\tau_\ell$, with the censoring distribution of the training samples of the line
+    --- the only part real data could also measure.
+    \item \textbf{References.} The \emph{oracle} (true curves; must score zero error and zero
+    regret) and the \emph{naive Kaplan--Meier} (per line and arm, no covariates; the bar a
+    covariate model must clear).
+\end{itemize}
+
+% -----------------------------------------------------------------------------------------
+\subsection{Sweep design}
+\label{app:semisynthetic:sweep}
+
+One knob is varied at a time, the others staying at the reference values.
+Table~\ref{tab:semisynthetic:sweep} lists the cells; each is replicated three times (data seed
+and training seed equal to the replicate index), giving $30$ runs. The hidden-confounder axis
+is the one that separates methods that adjust for observed covariates only from methods that
+would be unbiased under hidden confounding; the assignment axis is expected to be flat for
+outcome-regression estimators, since observed confounding adds variance rather than bias.
+
+\begin{table}[ht]
+\centering\small
+\caption{Sweep cells. The reference cell is $\gamma=1$, $s=0$, $h=1$; $s=0$ and $h=1$ are
+therefore not repeated.}
+\label{tab:semisynthetic:sweep}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Knob & Levels & Meaning \\
+\midrule
+$\gamma$ & $0,\,0.25,\,0.5,\,1,\,1.5$ & assignment strength (observed confounding) \\
+$s$ & $0.5,\,1$ (and $0$) & hidden confounder $\to$ assignment \\
+$h$ & $0,\,0.5,\,2$ (and $1$) & effect heterogeneity \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% -----------------------------------------------------------------------------------------
+\subsection{Verification of the generator}
+\label{app:semisynthetic:verification}
+
+The following were checked on the reference replicate.
+\begin{itemize}
+    \item Mean propensity per line equals the target to $10^{-6}$ for
+    $\gamma\in\{0,0.5,1,2,4\}$ and $s\in\{0,2\}$; sampled arm counts pass a chi-square test;
+    at $\gamma=s=0$ the propensity is constant within a line.
+    \item A multinomial regression of the sampled arm on the drivers, pooled over lines with
+    line indicators, recovers the assignment coefficients (correlation $0.976$, all signs
+    correct). On line 1 alone it does not ($0.58$), because the previous-line drivers are
+    constant there.
+    \item Simulated Kaplan--Meier curves match the real ones (within about $0.04$ at 6, 12,
+    24 and 36 months, medians within $2\%$); observed curves after censoring within about
+    $0.02$; simulated event rates equal the real rates.
+    \item Closed-form RMST agrees with Monte Carlo (bias $-0.002$ months, standardised
+    differences of standard deviation $1.01$); at $h=0$, $\tau_a=0$ all arms have equal $\eta$.
+    \item Expansion: the unmasked rows per line equal the real patients per line; history rows
+    equal the real records; no hidden variable and no propensity in the model-facing files.
+    \item Reproducibility: an identical rerun is bit-identical; changing $\gamma$ keeps $u$
+    and changes $13\%$ of the arms; a new replicate changes $u$.
+    \item No patient appears on both sides of a temporal, random or cross-validation split.
+\end{itemize}
+
+% -----------------------------------------------------------------------------------------
+\subsection{Limitations}
+\label{app:semisynthetic:limitations}
+
+\begin{enumerate}
+    \item Coefficients are hand-set; results describe the difficulty of this generator, not
+    real effect sizes.
+    \item One Weibull shape per line, a shared coupling across arms, non-informative censoring,
+    no outcome feedback across lines, and no treatment change within a line.
+    \item Only $16$ covariates affect the outcome; the model sees many more real columns, which
+    are non-causal here by construction.
+    \item Arms are thin on late lines (\arm{ET alone} and \arm{ET+anti-CDK} on line 4): their
+    counterfactuals are extrapolation, and unsupported arms are excluded from the metrics.
+    \item Calendar time is an instrument and the hold-out enters late: an intentional shift
+    that the reported errors include.
+    \item The covariate standardiser is fitted on all samples, hold-out included (a property of
+    the existing data module).
+    \item Training settings were tuned on real data and chosen by hand here; the benchmark
+    scores the model \emph{as trained}, not the best model it could be.
+\end{enumerate}

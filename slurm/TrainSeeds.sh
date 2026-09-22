@@ -6,13 +6,17 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu
-#SBATCH --array=1-8
+#SBATCH --array=1-20
 
 # One ensemble member per array task, all on the same temporal split with a
 # different seeded init -- the members scripts/RecommendEnsemble.py expects.
-#   sbatch slurm/TrainSeeds.sh                  # seeds 1..8
+# A single run takes ~1h25 on the gpu partition, so the array is the only cost
+# driver; 20 members give p_best a resolution of 0.05 and make the default
+# p_best_min = 0.7 an exact 14-of-20 vote (8 members would force 6-of-8 = 0.75).
+#   sbatch slurm/TrainSeeds.sh                  # seeds 1..20
 #   sbatch --array=1-10 slurm/TrainSeeds.sh     # seeds 1..10
-#   SEED_OFFSET=100 sbatch slurm/TrainSeeds.sh  # seeds 101..108
+#   sbatch --array=1-20%5 slurm/TrainSeeds.sh   # same seeds, at most 5 running at once
+#   SEED_OFFSET=100 sbatch slurm/TrainSeeds.sh  # seeds 101..120
 # Then `make sync` locally and point RecommendEnsemble.py at the new run dirs.
 #
 # Requires dynasurv.sif at the project root on the cluster (make build-docker,

@@ -116,7 +116,8 @@ calibration_times = [6, 12, 24, 36]
 #   2. p_best(leader) >= p_best_min.
 # Otherwise the output is the equivalence set and the decision is "undecided".
 # p_best takes values in multiples of 1/M: with 3 members, 0.7 means unanimity;
-# with 10 members it means 7 of 10.
+# with 10 members it means 7 of 10; with the 20 seeds slurm/TrainSeeds.sh
+# launches by default it means 14 of 20.
 p_best_min = 0.7
 margin_months = 1.0
 pessimism_c = 1.0

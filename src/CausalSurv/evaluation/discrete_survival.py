@@ -15,6 +15,8 @@ survival, H(0) = 0 for cumulative hazard.
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 import torch
 
@@ -146,6 +148,24 @@ def rmst(
 # --------------------------------------------------------------------------- #
 # Kaplan-Meier
 # --------------------------------------------------------------------------- #
+
+
+def rmst_grid(
+    discrete_survival: torch.Tensor,
+    taus: Sequence[float],
+    interval_bounds: torch.Tensor,
+) -> torch.Tensor:
+    """`rmst` at several horizons from one set of curves.
+
+    Returns:
+        Tensor of shape (len(taus), ...); entry i is bitwise what `rmst` returns
+        for `taus[i]`, so a horizon sweep never has to recompute survival.
+    """
+    return torch.stack(
+        [rmst(discrete_survival, float(tau), interval_bounds) for tau in taus]
+    )
+
+
 def kaplan_meier(times: np.ndarray, events: np.ndarray):
     """Kaplan-Meier estimator as (unique observation times, survival at those times).
 

@@ -13,12 +13,25 @@ from lightning.pytorch.loggers import WandbLogger
 from CausalSurv.config import ExperimentConfig
 from CausalSurv.data.datamodule_cv import ESMEOnlineDataModuleCV
 from CausalSurv.model import DynaSurvCausalOnline
+from CausalSurv.semisynthetic.datamodule import SemiSyntheticDataModule
 
 CONFIG_PATH = "../configs/config.toml"
 MODEL_CONFIG_PATH = "../configs/best_config.json"
+DATAMODULES = {
+    "esme": ESMEOnlineDataModuleCV,
+    "semisynthetic": SemiSyntheticDataModule,
+}
 
 
-def main(cfg: ExperimentConfig, split_seed, date, fast_dev_run=False):
+def main(
+    cfg: ExperimentConfig,
+    split_seed,
+    date,
+    fast_dev_run=False,
+    datamodule_cls=ESMEOnlineDataModuleCV,
+    run_dir=None,
+    wandb_project=None,
+):
     train_config = cfg.train
     if fast_dev_run:
         train_config = replace(
@@ -26,7 +39,7 @@ def main(cfg: ExperimentConfig, split_seed, date, fast_dev_run=False):
         )
 
     data_config = cfg.data
-    data_module = ESMEOnlineDataModuleCV(
+    data_module = datamodule_cls(
         **cfg.datamodule_kwargs(),
         split_seed=split_seed,
         num_workers=4,
@@ -55,10 +68,11 @@ def main(cfg: ExperimentConfig, split_seed, date, fast_dev_run=False):
         evaluation=cfg.eval,
     )
 
-    run_dir = (
-        f"../models/{data_config.subtype}/{data_config.n_lines}lines/"
-        f"{date}_seed_{split_seed}"
-    )
+    if run_dir is None:
+        run_dir = (
+            f"../models/{data_config.subtype}/{data_config.n_lines}lines/"
+            f"{date}_seed_{split_seed}"
+        )
     ckpt_dir = f"{run_dir}/checkpoints/"
 
     callbacks = [
@@ -121,7 +135,8 @@ def main(cfg: ExperimentConfig, split_seed, date, fast_dev_run=False):
         )
 
     logger = WandbLogger(
-        project=(
+        project=wandb_project
+        or (
             f"DynaSurvCausalOnline_{data_config.subtype}_"
             f"{data_config.n_lines}lines_new_inline_outcome"
         ),
@@ -167,6 +182,22 @@ if __name__ == "__main__":
         ),
     )
 
+    parser.add_argument(
+        "--datamodule",
+        choices=sorted(DATAMODULES),
+        default="esme",
+        help="'semisynthetic' reads prefix-expanded data written by semisynthetic/generate.py",
+    )
+    parser.add_argument(
+        "--data-dir", default=None, help="Override [data] data_dir of the config"
+    )
+    parser.add_argument(
+        "--run-root",
+        default=None,
+        help="Directory that receives {date}_seed_{seed}/ (default ../models/{subtype}/{n}lines)",
+    )
+    parser.add_argument("--wandb-project", default=None)
+
     args = parser.parse_args()
 
     split_seed = (
@@ -177,9 +208,21 @@ if __name__ == "__main__":
     L.seed_everything(split_seed, workers=True)
     date = datetime.now().strftime("%d%m%Y_%H%M%S")
 
+    cfg = ExperimentConfig.from_files(args.config, args.model_config)
+    if args.data_dir is not None:
+        cfg = replace(cfg, data=replace(cfg.data, data_dir=args.data_dir))
+    run_dir = (
+        f"{args.run_root}/{date}_seed_{split_seed}"
+        if args.run_root is not None
+        else None
+    )
+
     main(
-        cfg=ExperimentConfig.from_files(args.config, args.model_config),
+        cfg=cfg,
         split_seed=split_seed,
         date=date,
         fast_dev_run=args.fast_dev_run,
+        datamodule_cls=DATAMODULES[args.datamodule],
+        run_dir=run_dir,
+        wandb_project=args.wandb_project,
     )
