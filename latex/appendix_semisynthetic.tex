@@ -21,7 +21,10 @@ and best arm of every patient under every arm are then known in closed form.
 The numbers quoted below are for the reference configuration (assignment strength
 $\gamma=1$, hidden-confounder strength $s=0$, heterogeneity $h=1$). All coefficients are
 set by hand, not estimated: they fix the \emph{difficulty} of the benchmark, not its realism.
-The model-side evaluation of this benchmark is not part of this appendix.
+DynaSurv's own results on the sweep (Section~\ref{app:semisynthetic:sweep}) are reported
+against the oracle and naive Kaplan--Meier references only: this rebuild does not yet include
+the Cox/DeepSurv baselines used for the observed-vs-hidden-confounding argument in
+Section~\ref{sec:counterfactual}.
 
 % -----------------------------------------------------------------------------------------
 \subsection{Cohort and arms}
@@ -276,9 +279,12 @@ $0.442/0.547/0.578/0.596$ (not those of the full 2008-onwards cohort, $0.73$--$0
 the cutoff alone the rates would be $0.465/0.587/0.639/0.679$, so dropout is active on every
 line, at $0.0024/0.0041/0.0073/0.0103$ per month.
 
-Both components are independent of the outcome and the arm, so censoring is non-informative
-by construction. Real censoring probably is not, so this is the best case for
-inverse-probability-of-censoring-weighted estimators.
+Dropout draws are independent conditional on line and the fitted generator parameters.
+Administrative follow-up depends on calendar date, which also affects assignment and is
+associated with patient characteristics. Marginal independent censoring is therefore not
+guaranteed, and training-cohort censoring weights need not transfer to the later test cohort.
+Protocol v2 uses known survival probabilities and uncensored latent outcomes for primary
+simulation scoring instead of making that transfer assumption.
 
 % -----------------------------------------------------------------------------------------
 \subsection{Randomness and artefacts}
@@ -309,6 +315,11 @@ target event rates. The hidden $u$ appears only in the truth table.
     cross-validation folds, early-stopping split) groups by original patient, because the
     samples of a patient share their history and would otherwise leak across the boundary. A
     temporal split already keeps them together (shared entry year).
+    \item \textbf{Protocol-v2 validation.} Twenty percent of the pre-2021 original patients
+    form a separate development validation set (fixed split seed 0); the remainder train
+    the model, scaler and support models. The survival grid is fitted from training endpoint
+    outcomes only. The temporal test set never supplies early stopping or hyperparameter
+    selection. Historical results below predate this correction and require rerunning.
     \item \textbf{Temporal hold-out.} Patients entering in 2021 or later ($26\%$ of samples),
     a deliberate policy-era shift; calendar time is an instrument of the assignment, so the
     model receives it.
@@ -336,16 +347,19 @@ are recommendable at that line. Write $\hat S_a$ for a predicted curve and $S_a$
     $\text{PEHE}=\big(\mathbb{E}[(\hat\Delta_{ab}-\Delta_{ab})^2]\big)^{1/2}$ with
     $\Delta_{ab}=\text{RMST}_a-\text{RMST}_b$, the bias of the average effect
     $\mathbb{E}[\hat\Delta_{ab}]-\mathbb{E}[\Delta_{ab}]$, and the share of samples with the
-    correct sign. Hidden confounding appears as bias, not as PEHE.
+    correct sign. Hidden confounding can affect both bias and PEHE.
     \item \textbf{Policy.} A policy picks the arm with the highest predicted RMST among
     supported arms (abstaining to the assigned arm where none is supported). Value is the
     true RMST of the chosen arm; regret is the oracle value minus it; the hit rate is the share
     of samples where the chosen arm is the true best arm. Reference policies: the assigned
     arm, the best single arm per line (an upper bound for constant policies), and uniform
     random.
-    \item \textbf{Factual accuracy.} IPCW concordance index and Brier score of the factual
-    curve at $\tau_\ell$, with the censoring distribution of the training samples of the line
-    --- the only part real data could also measure.
+    \item \textbf{Factual accuracy (protocol v2).} At the exact requested horizon, write
+    $p=S_A(\tau_\ell)$ and $q=\hat S_A(\tau_\ell)$. The primary Brier score averages
+    $p(1-q)^2+(1-p)q^2$. We also report Brier scores from uncensored latent outcomes and
+    concordance of latent event times with horizon-specific predicted risk. These are
+    simulation diagnostics, not estimators available on real censored data. The historical
+    IPCW results below used training-cohort censoring weights and must be replaced.
     \item \textbf{References.} The \emph{oracle} (true curves; must score zero error and zero
     regret) and the \emph{naive Kaplan--Meier} (per line and arm, no covariates; the bar a
     covariate model must clear).
@@ -377,6 +391,123 @@ $h$ & $0,\,0.5,\,2$ (and $1$) & effect heterogeneity \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+% -----------------------------------------------------------------------------------------
+\subsection{Sweep results}
+\label{app:semisynthetic:sweep-results}
+
+All $30$ runs of Table~\ref{tab:semisynthetic:sweep} completed and were scored on all four
+checkpoint kinds (\texttt{val\_loss}, \texttt{bestCI}, \texttt{bestCALIB}, \texttt{final\_epoch});
+Table~\ref{tab:semisynthetic:checkpoint} pools every cell and replicate by kind. \texttt{val\_loss}
+--- the real-data recommender's default --- has the highest pooled regret and PEHE of the four;
+\texttt{bestCI} is lowest on both and is used for Table~\ref{tab:semisynthetic:sweep-results}.
+This was a post-hoc choice using the reported hold-out's oracle metrics, while that hold-out
+also supplied early stopping. The following tables are therefore exploratory historical
+results, not independent validation. Protocol-v2 aggregation accepts a fixed checkpoint rule
+(default \texttt{val\_loss}) and never selects it from the reported oracle regret.
+
+\paragraph{Comparator interpretation.} The omitted Kaplan--Meier effect-error comparison
+changes the conclusion: at these historical \texttt{bestCI} checkpoints DynaSurv has higher
+mean pair PEHE in nine of ten cells. The reference values are $1.761$ versus $1.705$ months;
+at hidden strength 1 they are $2.699$ versus $2.171$; at heterogeneity 0, $2.082$ versus
+$1.192$. Only heterogeneity 2 favors DynaSurv ($2.643$ versus $2.773$). Reference policy
+regret favors DynaSurv ($0.336$ versus $0.516$ months). The corrected aggregator reports
+curve, effect, policy and factual metrics for every comparator on the same support. Ranking
+benefit must not be interpreted as accurate individual treatment-effect estimation.
+
+\begin{table}[ht]
+\centering\small
+\caption{Checkpoint-kind comparison, pooled over all 30 sweep runs. PEHE and $|$bias$|$
+(months) are $n$-weighted means over arm pairs and cells; regret (months) and hit rate are
+$n$-weighted means of the \texttt{line\_only} policy; factual $C$ is the IPCW concordance index.}
+\label{tab:semisynthetic:checkpoint}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Checkpoint & PEHE & $|$bias$|$ & Regret & Hit rate & Factual $C$ \\
+\midrule
+\texttt{val\_loss} (real-data default) & 2.37 & 1.51 & 0.42 & 0.62 & 0.666 \\
+\texttt{bestCI} & 1.95 & 1.14 & 0.36 & 0.64 & 0.675 \\
+\texttt{bestCALIB} & 2.43 & 1.35 & 0.37 & 0.58 & 0.665 \\
+\texttt{final\_epoch} & 2.23 & 1.16 & 0.40 & 0.52 & 0.663 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering\small
+\caption{Sweep results at the \texttt{bestCI} checkpoint, mean $\pm$ std over 3 replicates.
+PEHE and $|$bias$|$ (months) pool over lines and arm pairs; regret (months, oracle $=0$) and
+hit rate use the \texttt{line\_only} policy; $h_r$ is the random policy's regret, an upper
+bound on the task's headroom at that cell.}
+\label{tab:semisynthetic:sweep-results}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Axis & Level & PEHE & $|$bias$|$ & Regret & Hit rate & $h_r$ \\
+\midrule
+$\gamma$ & 0        & $1.27\pm0.15$ & $0.34\pm0.15$ & $0.41\pm0.03$ & $0.57\pm0.05$ & 0.77 \\
+$\gamma$ & 0.25      & $1.45\pm0.28$ & $0.70\pm0.40$ & $0.45\pm0.02$ & $0.56\pm0.02$ & 0.78 \\
+$\gamma$ & 0.5       & $1.61\pm0.19$ & $0.85\pm0.23$ & $0.39\pm0.04$ & $0.59\pm0.04$ & 0.79 \\
+$\gamma$ & 1 (ref.)  & $1.76\pm0.42$ & $0.87\pm0.33$ & $0.34\pm0.04$ & $0.64\pm0.04$ & 0.80 \\
+$\gamma$ & 1.5       & $2.33\pm1.10$ & $1.49\pm1.03$ & $0.40\pm0.05$ & $0.62\pm0.02$ & 0.81 \\
+$s$ & 0.5            & $2.25\pm0.32$ & $1.49\pm0.24$ & $0.44\pm0.04$ & $0.59\pm0.02$ & 0.80 \\
+$s$ & 1               & $2.70\pm0.15$ & $2.14\pm0.16$ & $0.48\pm0.01$ & $0.57\pm0.01$ & 0.80 \\
+$h$ & 0               & $2.08\pm0.75$ & $1.28\pm0.34$ & $0.03\pm0.03$ & $0.95\pm0.03$ & 0.46 \\
+$h$ & 0.5             & $1.46\pm0.29$ & $0.94\pm0.45$ & $0.15\pm0.08$ & $0.67\pm0.12$ & 0.50 \\
+$h$ & 2               & $2.64\pm0.53$ & $1.35\pm0.49$ & $0.52\pm0.07$ & $0.62\pm0.01$ & 1.46 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering\small
+\caption{Overlap (effective sample size / $n$ per line, mean over 3 replicates), from the
+synced manifests. Heterogeneity does not touch assignment, so it repeats the $\gamma=1$ row
+exactly at every level.}
+\label{tab:semisynthetic:overlap}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Axis & Level & Line 1 & Line 2 & Line 3 & Line 4 \\
+\midrule
+$\gamma$ & 0        & 0.566 & 0.750 & 0.440 & 0.239 \\
+$\gamma$ & 0.25      & 0.539 & 0.709 & 0.422 & 0.217 \\
+$\gamma$ & 0.5       & 0.462 & 0.586 & 0.364 & 0.184 \\
+$\gamma$ & 1 (ref.)  & 0.251 & 0.282 & 0.198 & 0.086 \\
+$\gamma$ & 1.5       & 0.087 & 0.154 & 0.085 & 0.097 \\
+$s$ & 0.5            & 0.197 & 0.275 & 0.140 & 0.061 \\
+$s$ & 1               & 0.156 & 0.199 & 0.109 & 0.098 \\
+$h$ & any level        & 0.251 & 0.282 & 0.198 & 0.086 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Reading the three axes.} $\gamma$ (assignment on observed covariates) roughly
+doubles PEHE and the average-effect bias from $\gamma=0$ to $\gamma=1.5$, but the model's own
+regret is flat within noise (0.34--0.45) while the random-policy headroom $h_r$ grows only
+slightly (0.77 to 0.81): the ranking of arms survives better than the size of the effect does.
+This is consistent with overlap collapse: mean effective sample size / $n$ on line 4 falls from
+$0.24$ at $\gamma=0$ to $0.10$ at $\gamma=1.5$ (Table~\ref{tab:semisynthetic:overlap}), so
+precision, not direction, is what degrades. Three replicates cannot separate true bias from
+finite-sample noise on this axis; the sweep gives a variance estimate, not a significance test.
+$s$ (hidden confounder into assignment) is the sharper effect: bias more than doubles from the
+$s=0$ reference ($0.87$) to $s=1$ ($2.14$) and regret rises by $40\%$ even though its overlap
+loss is comparable to $\gamma$'s (line-4 ESS/$n$ falls to $0.06$--$0.10$) -- the pattern expected
+of a confounder the model cannot see, not merely thinner support. $h$ (heterogeneity) mainly
+changes the size of the task rather than the model's absolute accuracy: it does not change
+assignment at all (identical overlap to the $\gamma=1$ reference row, Table~\ref{tab:semisynthetic:overlap}),
+so any shift in the metrics below comes from the outcome model alone. At $h=0$ every line has
+a single best arm, so both the model and a constant policy score near zero regret ($h_r=0.46$
+is administrative-censoring headroom, not heterogeneity); as $h$ grows to $2$, $h_r$ triples to
+$1.46$ and the model's regret grows with it (to $0.52$) while staying well under the random
+policy's ceiling and the hit rate falls from $0.95$ to $0.62$ -- picking the right arm gets
+harder as there are more genuinely different arms to pick between.
+
+\paragraph{What this does not show.} The 30-run sweep uses one training configuration
+(Section~\ref{app:semisynthetic:training}) and the model config predating this benchmark; it is
+not re-tuned per cell. It has no Cox or DeepSurv baseline, so it cannot yet reproduce the
+observed-vs-hidden-confounding bias comparison of Section~\ref{sec:counterfactual} with this
+generator. Achieved censoring event rates matched their per-line targets to within $0.0007$ in
+every one of the 30 synced manifests, confirming the calibration of
+Section~\ref{app:semisynthetic:censoring} generalizes across the sweep.
 
 % -----------------------------------------------------------------------------------------
 \subsection{Verification of the generator}
