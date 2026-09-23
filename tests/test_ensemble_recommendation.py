@@ -35,7 +35,9 @@ def test_single_member_reproduces_masked_argmax(leader_rule):
     ref = rmst[0].masked_fill(~mask, float("-inf")).argmax(-1)
     ref = ref.masked_fill(~mask.any(-1), NO_SUPPORTED_ARM)
     assert torch.equal(s.leader_idx, ref)
-    assert torch.equal(s.recommended_idx, ref)
+    assert torch.equal(
+        s.recommended_idx, ref.masked_fill(mask.sum(-1) < 2, NO_SUPPORTED_ARM)
+    )
     assert torch.equal(s.rmst_mean, rmst[0])
     assert not s.rmst_std.any()
     assert s.n_members == 1
@@ -105,11 +107,11 @@ def test_pessimism_prefers_the_tight_arm():
 def test_exact_tie_and_margin_zero():
     rmst = torch.tensor([[[[5.0, 5.0, 1.0]]], [[[5.0, 5.0, 1.0]]]])
     mask = torch.ones(1, 1, 3, dtype=torch.bool)
-    # margin 0: "any positive difference counts", so the tied arm drops out and
-    # the leader still sits in its own (now singleton) set.
+    # Zero margin still requires positive evidence of superiority, not a tie.
     s = summarize(rmst, mask, margin_months=0.0, leader_rule="mean")
     assert s.leader_idx.item() == 0
-    assert s.equivalence_set[0, 0].tolist() == [True, False, False]
+    assert s.equivalence_set[0, 0].tolist() == [True, True, False]
+    assert s.decision.item() == Decision.UNDECIDED
     s.validate()
     # any positive margin keeps the tie undecided
     s = summarize(rmst, mask, margin_months=0.5, leader_rule="mean")
@@ -202,7 +204,21 @@ def test_to_frame_rows_and_columns():
     assert expected <= set(df.columns)
     assert (df.groupby(["patient_id", "line"])["is_leader"].sum() == 1).all()
     assert df["arm_name"].iloc[0] == "arm0"
-    assert set(df["decision"]) <= {"no_support", "confident", "undecided"}
+    assert set(df["decision"]) <= {
+        "no_support",
+        "confident",
+        "undecided",
+        "only_supported_option",
+    }
+
+
+def test_only_supported_option_is_not_comparative_confidence():
+    s = summarize([[[[50.0, 1.0]]], [[[50.0, 1.0]]]], [[[True, False]]])
+    assert s.leader_idx.item() == 0
+    assert s.set_size.item() == 1
+    assert s.decision.item() == Decision.ONLY_SUPPORTED_OPTION
+    assert s.recommended_idx.item() == NO_SUPPORTED_ARM
+    s.validate()
 
 
 def test_find_checkpoints_one_per_kind(tmp_path):

@@ -37,7 +37,7 @@ from .ensemble import (
 
 # Defaults are relative to scripts/, where the CLIs run, like the training script.
 CONFIG_PATH = "../configs/config.toml"
-MODEL_CONFIG_PATH = "../configs/best_config.json"
+MODEL_CONFIG_PATH = "../configs/hpo_v3/best_config.json"
 OUT_DIR = "../reports/recommendations"
 
 # datamodule dimension -> checkpoint hyperparameter; mirrors the validation notebook.
@@ -190,7 +190,12 @@ def assemble_members(
     members: list[Member] = []
     for path in paths:
         try:
-            members.append(load_member(path, recommendable=recommendable))
+            member = load_member(path, recommendable=recommendable)
+            if member.model.data_manifest != dm.data_manifest:
+                raise IncompatibleMemberError(
+                    f"{path}: data, preprocessing or split manifest differs from this datamodule"
+                )
+            members.append(member)
         except IncompatibleMemberError as exc:
             give_up(str(exc))
     if not members:

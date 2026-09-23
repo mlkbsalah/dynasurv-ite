@@ -35,11 +35,10 @@ class TreatmentRecommender:
     Args:
         model: a trained `DynaSurvCausalOnline`.
         recommendable_treatments_per_line: `{line: [arm, ...]}` of arms eligible to
-            be recommended at each line. `None` or empty means every arm is
-            eligible, so the recommender still behaves sensibly for a model
-            loaded outside a Lightning fit/test loop.
+            be recommended at each line. Missing metadata raises an error;
+            an empty mapping makes every arm ineligible.
         propensity_model: a fitted `PropensityOverlapModel` giving patient-specific
-            support, or `None` to rely on the per-line eligibility alone.
+            support; `None` fails closed (no patient-level support verified).
         horizon_times: default per-line RMST horizon (months), used when
             `recommend` is not given one.
     """
@@ -75,8 +74,8 @@ class TreatmentRecommender:
             model.n_lines, model.n_treatments, dtype=torch.bool, device=device
         )
         per_line = self.recommendable_treatments_per_line
-        if not per_line:
-            return torch.ones_like(mask)
+        if per_line is None:
+            raise ValueError("Recommendation support metadata is missing")
         for line, arms in per_line.items():
             if line < model.n_lines:
                 for k in arms:
@@ -86,10 +85,8 @@ class TreatmentRecommender:
     def patient_support_mask(self, XPd, X_static) -> torch.Tensor:
         """(batch, n_lines, n_treatments) patient-specific arm eligibility.
 
-        A false entry means the patient's observed pre-treatment history gives that
-        arm too little estimated probability. Lines without a fitted multi-arm
-        propensity model keep their per-line eligibility, which keeps single-arm
-        lines and legacy checkpoints usable.
+        A false entry means insufficient or unverified support. Lines without a
+        fitted assignment model fail closed, including single-eligible-arm lines.
         """
         model = self.model
         batch_size, n_lines = XPd.shape[:2]
@@ -97,7 +94,11 @@ class TreatmentRecommender:
         result = global_mask.unsqueeze(0).expand(batch_size, -1, -1).clone()
         overlap = self.propensity_model
         if overlap is None:
-            return result
+            return torch.zeros_like(result)
+        if getattr(overlap, "assignment_scope", None) != "all_observed":
+            raise ValueError(
+                "Legacy conditional propensity model; refit on all observed assignment classes"
+            )
 
         x_end = model.x_input_dim
         p_end = x_end + model.p_input_dim
@@ -112,12 +113,7 @@ class TreatmentRecommender:
             d=d,
             n_treatments=model.n_treatments,
         ).to(XPd.device)
-        fitted_lines = torch.zeros(n_lines, dtype=torch.bool, device=XPd.device)
-        for line in overlap.line_results:
-            if line < n_lines:
-                fitted_lines[line] = True
-        result[:, fitted_lines] &= propensity_mask[:, fitted_lines]
-        return result
+        return result & propensity_mask
 
     def arm_survival(
         self, XPd, X_static, factual_idx

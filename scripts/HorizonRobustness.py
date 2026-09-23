@@ -256,13 +256,14 @@ def main() -> None:
             f"follow-up to {block['max_observed_time']:.1f} months"
         )
         print(
-            f"{'h':>6} {'coverage':>8} {'confident':>9} {'undecided':>9} {'set':>5} "
+            f"{'h':>6} {'coverage':>8} {'only_option':>11} {'confident':>9} {'undecided':>9} {'set':>5} "
             f"{'leader_same':>11} {'jaccard':>8}"
         )
         for r in block["records"]:
             tag = "*" if r["is_reference"] else " "
             print(
                 f"{r['horizon']:>5.0f}{tag} {r['coverage']:>8.2f} "
+                f"{r['rates']['only_supported_option']:>11.2f} "
                 f"{r['rates']['confident']:>9.2f} {r['rates']['undecided']:>9.2f} "
                 f"{r['set_size_mean'] or 0:>5.2f} "
                 f"{'-' if r['leader_same'] is None else f'{r['leader_same']:.2f}':>11} "

@@ -49,8 +49,19 @@ def inputs():
     )
 
 
+class AllSupported:
+    """Explicit support stub: absence of a propensity model must fail closed."""
+
+    assignment_scope = "all_observed"
+
+    def predict_mask(self, X, X_static, P, d, n_treatments):
+        return torch.ones(X.shape[0], X.shape[1], n_treatments, dtype=torch.bool)
+
+
 def recommender(seed: int) -> TreatmentRecommender:
-    return TreatmentRecommender(FakeModel(seed), RECOMMENDABLE, None, list(REFERENCE))
+    model = FakeModel(seed)
+    model.x_input_dim, model.p_input_dim = 0, 0
+    return TreatmentRecommender(model, RECOMMENDABLE, AllSupported(), list(REFERENCE))
 
 
 def test_grid_entry_reproduces_arm_rmst_with_one_forward_pass():
@@ -147,7 +158,7 @@ def test_gap_and_vote_share_are_the_whole_rule(leader_rule):
     singleton = s.set_size == 1
     assert torch.equal(singleton[supported], (gap >= 1.0)[supported])
     confident = s.decision == 1
-    expected = (gap >= 1.0) & (s.p_best_leader + 1e-6 >= 0.6) & supported
+    expected = (gap >= 1.0) & (s.p_best_leader + 1e-6 >= 0.6) & (s.mask.sum(-1) >= 2)
     assert torch.equal(confident, expected)
 
 

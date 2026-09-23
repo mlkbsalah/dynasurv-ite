@@ -22,7 +22,6 @@ per-line hazard temperature and bias.
 from __future__ import annotations
 
 import re
-import warnings
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -128,10 +127,8 @@ def load_member(
 ) -> Member:
     """Load one checkpoint as a frozen, eval-mode `TreatmentRecommender`.
 
-    `recommendable` overrides the per-line recommendable arm sets (pass the
-    datamodule's, which are exact). Without it the sets come from the checkpoint,
-    and for checkpoints written before they were persisted, from the arms the
-    propensity model was fitted on -- the same set, for the lines it covers.
+    `recommendable`, when supplied, must match the persisted training arm sets.
+    Assignment classes include ineligible arms and cannot reconstruct eligibility.
     A checkpoint without a propensity model is refused: its patient-level support
     would silently differ from every other member's.
     """
@@ -151,25 +148,27 @@ def load_member(
             f"{path}: checkpoint carries no propensity model, so its patient-level "
             "support (filter 4) would silently differ from the other members'"
         )
-    if recommendable is None:
-        recommendable = getattr(model, "recommendable_treatments_per_line", None)
-    if not recommendable:
-        recommendable = {
-            int(line): [int(k) for k in result.arms]
-            for line, result in propensity.line_results.items()
-        }
-        missing = sorted(set(range(model.n_lines)) - set(recommendable))
-        warnings.warn(
-            f"{path.name}: recommendable arm sets are not in the checkpoint; rebuilt "
-            "from the arms the propensity model was fitted on"
-            + (
-                f". Lines {missing} have no fitted propensity model and would get "
-                "NO recommendable arm -- pass `recommendable` from the datamodule"
-                if missing
-                else ""
-            ),
-            stacklevel=2,
+    if getattr(propensity, "assignment_scope", None) != "all_observed":
+        raise IncompatibleMemberError(
+            f"{path}: legacy conditional propensities; retrain with the corrected assignment model"
         )
+    if (
+        not model.use_static_features
+        or not model.data_manifest
+        or model.data_manifest.get("protocol_version") != 2
+    ):
+        raise IncompatibleMemberError(
+            f"{path}: legacy input/split protocol; corrected recommendations require retraining"
+        )
+    persisted = getattr(model, "recommendable_treatments_per_line", None)
+    if persisted is None:
+        raise IncompatibleMemberError(f"{path}: missing training eligibility metadata")
+    if recommendable is not None and _arm_sets(recommendable) != _arm_sets(persisted):
+        raise IncompatibleMemberError(
+            f"{path}: checkpoint and current training eligibility differ"
+        )
+    if recommendable is None:
+        recommendable = persisted
     model.recommendable_treatments_per_line = recommendable
     recommender = TreatmentRecommender.from_model(model)
     return Member(
@@ -188,6 +187,7 @@ _STRICT_HPARAMS = (
     "n_treatments",
     "n_lines",
     "output_length",
+    "use_static_features",
 )
 
 
@@ -210,8 +210,8 @@ def check_members(
     Strict (raises `IncompatibleMemberError`): data dimensions, survival grid,
     architecture, the recommendable arm sets, and per line the arms and threshold
     of the propensity model. With `expected_recommendable` (the datamodule's sets)
-    every member's propensity arms must also match it, which is the only check
-    that catches a config drift between training and now. Training
+    eligible arms must be among its observed assignment classes. Data/preprocessing
+    manifests and calibration status must match across members. Training
     hyperparameters (lr, weight decay, scheduler) only produce warnings: an lr
     sweep is still a set of valid random inits.
     """
@@ -233,6 +233,14 @@ def check_members(
     ref_prop = ref.propensity_model
     for rec, label in zip(recs[1:], labels[1:]):
         h = dict(rec.model.hparams)
+        if getattr(rec.model, "data_manifest", None) != getattr(
+            ref.model, "data_manifest", None
+        ):
+            refuse(label, "data/preprocessing/split manifests differ")
+        if getattr(rec.model, "calibration_status", None) != getattr(
+            ref.model, "calibration_status", None
+        ):
+            refuse(label, "calibration status differs")
         for key in _STRICT_HPARAMS:
             if h.get(key) != ref_h.get(key):
                 refuse(label, f"{key} {h.get(key)} != {ref_h.get(key)}")
@@ -266,7 +274,7 @@ def check_members(
         for rec, label in zip(recs, labels):
             for line, result in rec.propensity_model.line_results.items():
                 arms = sorted(map(int, result.arms))
-                if arms != expected.get(int(line)):
+                if not set(expected.get(int(line), [])).issubset(arms):
                     refuse(
                         label,
                         f"line {line}: propensity model was fitted on arms {arms} but "
@@ -290,6 +298,7 @@ class Decision(IntEnum):
     NO_SUPPORT = 0  # every arm unsupported for this patient and line
     CONFIDENT = 1  # singleton equivalence set and the leader wins often enough
     UNDECIDED = 2  # supported arms exist but the data cannot separate them
+    ONLY_SUPPORTED_OPTION = 3  # eligibility leaves no comparative choice
 
 
 @dataclass
@@ -344,6 +353,13 @@ class RecommendationSummary:
             ),
             "confident implies a singleton set": bool(
                 self.set_size[confident].eq(1).all()
+            ),
+            "confident implies at least two eligible arms": bool(
+                self.mask.sum(-1)[confident].ge(2).all()
+            ),
+            "only-supported-option exactly identifies one eligible arm": torch.equal(
+                self.decision.eq(Decision.ONLY_SUPPORTED_OPTION),
+                self.mask.sum(-1).eq(1),
             ),
             "confident implies p_best(leader) >= p_best_min": bool(
                 (self.p_best_leader[confident] + eps >= self.config.p_best_min).all()
@@ -401,10 +417,8 @@ class RecommendationSummary:
 
         The minimum of `diff_lcb` over the supported arms other than the leader:
         `+inf` where the leader is the only supported arm (its set is trivially a
-        singleton), NaN where nothing is supported. With `p_best_leader` this is
-        the whole decision rule: the equivalence set is a singleton exactly when
-        the gap reaches `margin_months`, and the decision is confident exactly
-        when `p_best_leader` also reaches `p_best_min`.
+        singleton), NaN where nothing is supported. A confident comparison also
+        requires at least two eligible arms and a positive gap at zero margin.
         """
         T = self.mask.shape[-1]
         leader_one_hot = F.one_hot(self.leader_idx.clamp(min=0), T).bool()
@@ -468,18 +482,25 @@ def summarize(
     # Arms not confidently worse than the leader by `margin`. The leader is
     # forced in so that margin == 0 does not empty its own set.
     leader_one_hot = F.one_hot(safe_leader, T).bool()
-    equivalence_set = (mask & (diff_lcb < margin)) | leader_one_hot
+    equivalence_set = (mask & ((diff_lcb < margin) | (diff_lcb <= 0))) | leader_one_hot
     equivalence_set &= has_support.unsqueeze(-1)
     set_size = equivalence_set.sum(-1)
 
     p_best_leader = p_best.gather(-1, safe_leader.unsqueeze(-1)).squeeze(-1)
     p_best_leader = p_best_leader * has_support.to(p_best.dtype)
     # 1e-6 absorbs float rounding of k/M against the configured threshold.
-    confident = has_support & (set_size == 1) & (p_best_leader + 1e-6 >= cfg.p_best_min)
+    only_option = mask.sum(-1) == 1
+    confident = (
+        has_support
+        & ~only_option
+        & (set_size == 1)
+        & (p_best_leader + 1e-6 >= cfg.p_best_min)
+    )
 
     decision = torch.full((B, L), int(Decision.UNDECIDED), dtype=torch.long)
     decision[~has_support] = int(Decision.NO_SUPPORT)
     decision[confident] = int(Decision.CONFIDENT)
+    decision[only_option] = int(Decision.ONLY_SUPPORTED_OPTION)
     recommended_idx = torch.where(
         confident, leader, torch.full_like(leader, NO_SUPPORTED_ARM)
     )

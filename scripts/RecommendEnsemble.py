@@ -88,6 +88,9 @@ def main() -> None:
         "git_head": git_head(),
         "config": str(Path(args.config).resolve()),
         "recommendation": asdict(rec_cfg),
+        "calibration_status": [m.model.calibration_status for m in kept],
+        "evaluation_protocol": 2,
+        "dataset_sha256": dm.data_manifest["dataset_sha256"],
         "horizon_times": horizons,
         "members": [
             {"path": str(m.path), "seed": m.seed, "epoch": m.epoch} for m in kept
@@ -111,7 +114,7 @@ def main() -> None:
 
     print(f"\nholdout: {XPd.shape[0]} patients, {len(frame)} rows -> {out_dir}")
     print(
-        f"{'line':>4} {'n':>5} {'no_support':>10} {'confident':>9} {'undecided':>9} "
+        f"{'line':>4} {'n':>5} {'no_support':>10} {'only_option':>11} {'confident':>9} {'undecided':>9} "
         f"{'set':>5} {'agree_conf':>10} {'agree_lead':>10}"
     )
     for key, row in lines.items():
@@ -119,7 +122,7 @@ def main() -> None:
         conf = row["agree_confident_with_observed"]
         lead = row["agree_leader_with_observed"]
         print(
-            f"{key[-1]:>4} {row['n']:>5} {r['no_support']:>10.2f} {r['confident']:>9.2f} "
+            f"{key[-1]:>4} {row['n']:>5} {r['no_support']:>10.2f} {r['only_supported_option']:>11.2f} {r['confident']:>9.2f} "
             f"{r['undecided']:>9.2f} {row['set_size_among_supported']['mean'] or 0:>5.2f} "
             f"{'-' if conf is None else f'{conf:.2f}':>10} "
             f"{'-' if lead is None else f'{lead:.2f}':>10}"
