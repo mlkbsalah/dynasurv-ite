@@ -8,6 +8,14 @@
 !models/README.md
 !models/.gitkeep
 
+# Quarantined historical binaries (track the archive manifest and instructions)
+/archives/*/artifacts/
+# Local render/extraction scratch; published reports live under reports/.
+/tmp/
+# New, versioned HPO runtime output
+/studies/
+/configs/hpo_v3/
+
 # Experiment outputs
 /training_logs/
 /wandb_logs/
@@ -52,6 +60,9 @@ CLAUDE.md
 *.png
 *.pdf
 *.csv
+# Keep the audit deliverables and aggregate benchmark evidence.
+!/reports/full_project_audit_2026-09-23.pdf
+!/reports/semisynthetic_legacy_audit_comparison/*.csv
 *.db
 lightning_logs/*
 data_raw/*
