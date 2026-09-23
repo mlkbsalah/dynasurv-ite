@@ -248,6 +248,7 @@ def evaluate_cox(cox, feature_cols, y_train_struct, X_test, y_test_struct, tmax)
         event=test_events,
         time=test_times,
         new_time=bs_eval_times,
+        weight=ci_ipcw_weights,
         weight_new_time=bs_ipcw_weights,
     )
     ibs = bs_fun.integral().item()

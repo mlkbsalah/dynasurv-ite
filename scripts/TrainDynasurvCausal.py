@@ -1,6 +1,8 @@
 import argparse
+import json
 import os
 from dataclasses import replace
+from pathlib import Path
 
 import lightning as L
 from lightning.pytorch.callbacks import (
@@ -16,7 +18,7 @@ from CausalSurv.model import DynaSurvCausalOnline
 from CausalSurv.semisynthetic.datamodule import SemiSyntheticDataModule
 
 CONFIG_PATH = "../configs/config.toml"
-MODEL_CONFIG_PATH = "../configs/best_config.json"
+MODEL_CONFIG_PATH = "../configs/hpo_v3/best_config.json"
 DATAMODULES = {
     "esme": ESMEOnlineDataModuleCV,
     "semisynthetic": SemiSyntheticDataModule,
@@ -31,6 +33,7 @@ def main(
     datamodule_cls=ESMEOnlineDataModuleCV,
     run_dir=None,
     wandb_project=None,
+    evaluate_test=False,
 ):
     train_config = cfg.train
     if fast_dev_run:
@@ -74,6 +77,14 @@ def main(
             f"{date}_seed_{split_seed}"
         )
     ckpt_dir = f"{run_dir}/checkpoints/"
+    if any(Path(ckpt_dir).glob("*.ckpt")):
+        raise FileExistsError(
+            "Run directory already contains checkpoints; choose a new run directory instead of mixing protocols/runs"
+        )
+    Path(run_dir).mkdir(parents=True, exist_ok=True)
+    (Path(run_dir) / "data_manifest.json").write_text(
+        json.dumps(data_module.data_manifest, indent=2)
+    )
 
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
@@ -156,7 +167,12 @@ def main(
         check_val_every_n_epoch=1,
     )
     trainer.fit(model, datamodule=data_module)
-    trainer.test(model, datamodule=data_module)
+    # Test is an explicit final evaluation action, never part of selection.
+    if evaluate_test:
+        from CausalSurv.recommendation.ensemble import find_checkpoints
+
+        checkpoint = find_checkpoints([run_dir], cfg.recommendation.checkpoint_kind)[0]
+        trainer.test(model, datamodule=data_module, ckpt_path=str(checkpoint))
 
 
 if __name__ == "__main__":
@@ -197,6 +213,11 @@ if __name__ == "__main__":
         help="Directory that receives {date}_seed_{seed}/ (default ../models/{subtype}/{n}lines)",
     )
     parser.add_argument("--wandb-project", default=None)
+    parser.add_argument(
+        "--evaluate-test",
+        action="store_true",
+        help="Evaluate the preselected checkpoint on the reserved test set after training",
+    )
 
     args = parser.parse_args()
 
@@ -225,4 +246,5 @@ if __name__ == "__main__":
         datamodule_cls=DATAMODULES[args.datamodule],
         run_dir=run_dir,
         wandb_project=args.wandb_project,
+        evaluate_test=args.evaluate_test,
     )

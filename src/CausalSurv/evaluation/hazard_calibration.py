@@ -60,13 +60,13 @@ class HazardCalibrator:
     ) -> dict[int, dict[str, float]]:
         """Refit the temperature and bias in place on `self.model`.
 
-        Fit this on the TRAINING partition. With `final_training=True` the
-        holdout is also the validation set, so fitting on the holdout would be
-        scoring the correction on the data that produced it.
+        Fit on development/calibration data only, never on the reserved test
+        partition. This experimental procedure is not run by bestCALIB epoch
+        selection or by the recommendation CLI.
 
-        Bin membership is stable during the fit: `logit / T + b` is monotone in
-        the logit, so the induced ordering of predicted survival never changes
-        and the KM targets can be computed once up front.
+        Bins are fixed reference groups. A monotone map of individual hazard
+        logits need not preserve products of interval survival probabilities:
+        survival ranks, C-index and recommendations must be reevaluated after fit.
 
         Note that every other model parameter is left with `requires_grad=False`
         afterwards, as it always was.
@@ -76,6 +76,7 @@ class HazardCalibrator:
             error before and after, and the fitted temperature and bias.
         """
         model = self.model
+        model.eval()
         device = next(model.parameters()).device
         bounds = model.interval_bounds.to(device)
         landmarks = [float(t) for t in landmarks]
@@ -205,4 +206,5 @@ class HazardCalibrator:
                 torch.exp(model.hazard_line_log_temperature[i].detach())
             )
             report[line]["bias"] = float(model.hazard_line_bias[i].detach())
+        model.calibration_status = "posthoc_reference_bin_fit"
         return report

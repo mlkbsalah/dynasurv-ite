@@ -67,6 +67,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         arch: ArchConfig,
         training: TrainingConfig,
         evaluation: EvalConfig,
+        use_static_features: bool = True,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -82,6 +83,9 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.arch = arch
         self.training_config = training
         self.eval_config = evaluation
+        self.use_static_features = use_static_features
+        self.data_manifest = None
+        self.calibration_status = "joint_nll_only"
 
         if len(evaluation.horizon_times) != n_lines:
             raise ValueError(
@@ -131,6 +135,17 @@ class DynaSurvCausalOnline(L.LightningModule):
             n_units=list(arch.mlpsa_hidden_units),
             dropout=arch.mlpsa_dropout,
         )
+
+        # Both baseline covariates and pretreatment therapy history inform the
+        # first decision; the current treatment never enters these projections.
+        if use_static_features:
+            self.init_h = torch.nn.Linear(
+                x_static_dim + p_static_dim, arch.lstm_hidden_length
+            )
+            self.init_c = torch.nn.Linear(
+                x_static_dim + p_static_dim, arch.lstm_hidden_length
+            )
+            self.init_p = torch.nn.Linear(p_static_dim, arch.p_embed_dim)
 
         self.hazard_line_log_temperature = torch.nn.Parameter(torch.zeros(n_lines))
         self.hazard_line_bias = torch.nn.Parameter(torch.zeros(n_lines))
@@ -224,10 +239,17 @@ class DynaSurvCausalOnline(L.LightningModule):
         """Initialize LSTM hidden, cell, and treatment embedding states."""
         x_static_general, x_static_treatment = X_static
         batch_size = x_static_general.shape[0]
-        # h0 = self.init_h_mlp(x_static_general)
-        # c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
-        # p0 = self.init_p_mlp(x_static_treatment)
-
+        if self.use_static_features:
+            baseline = torch.cat((x_static_general, x_static_treatment), dim=-1).to(
+                device
+            )
+            return (
+                torch.tanh(self.init_h(baseline)),
+                torch.tanh(self.init_c(baseline)),
+                torch.tanh(self.init_p(x_static_treatment.to(device))),
+            )
+        # Explicit legacy mode only: old weights must not acquire random new
+        # static projections on load. Corrected experiments require retraining.
         h0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
         c0 = torch.zeros(batch_size, self.lstm.hidden_length, device=device)
         p0 = torch.zeros(batch_size, self.lstm.p_embed_dim, device=device)
@@ -376,7 +398,9 @@ class DynaSurvCausalOnline(L.LightningModule):
         if self.trainer.sanity_checking:
             return loss
 
-        discrete_hazards = torch.sigmoid(hazard_logits)
+        # Survival products and CPU/NumPy metric buffers stay FP32 even when
+        # the encoder/heads run under H100 BF16 autocast.
+        discrete_hazards = torch.sigmoid(hazard_logits.float())
         # (batch, n_lines, n_intervals + 1), with S(0) = 1 and H(0) = 0 prepended.
         discrete_survival = hazards_to_survival(discrete_hazards)
         discrete_cumhazards = hazards_to_cumhazard(discrete_hazards)
@@ -981,6 +1005,11 @@ class DynaSurvCausalOnline(L.LightningModule):
             time=train_times.squeeze(),
             new_time=bs_eval_times.squeeze(),
         )
+        subject_ipcw_weights = get_ipcw(
+            event=train_events.squeeze(),
+            time=train_times.squeeze(),
+            new_time=test_times.squeeze(),
+        )
 
         bs_fun = BrierScore()
         bs_val = bs_fun(
@@ -988,6 +1017,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             event=test_events,
             time=test_times,
             new_time=bs_eval_times,
+            weight=subject_ipcw_weights,
             weight_new_time=bs_ipcw_weights,
         )
         ibs = bs_fun.integral()
@@ -1137,6 +1167,11 @@ class DynaSurvCausalOnline(L.LightningModule):
         assert hasattr(self.trainer, "datamodule"), (
             "Trainer does not have a datamodule, make sure to pass it to trainer.fit/test()"
         )
+        manifest = getattr(self.trainer.datamodule, "data_manifest", None)
+        if self.data_manifest is not None and self.data_manifest != manifest:
+            raise ValueError(
+                "Checkpoint data/preprocessing/split manifest does not match the datamodule"
+            )
         self.valid_treatments_per_line = (
             self.trainer.datamodule.valid_treatments_per_line
         )
@@ -1150,6 +1185,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.recommendation_propensity_model = getattr(
             self.trainer.datamodule, "propensity_overlap_model", None
         )
+        self.data_manifest = manifest
 
     # Recommendation support state that lives outside the state dict: the pickled
     # propensity model and the two per-line arm sets. `TreatmentRecommender.from_model`
@@ -1163,6 +1199,8 @@ class DynaSurvCausalOnline(L.LightningModule):
 
     def on_save_checkpoint(self, checkpoint) -> None:
         """Persist the separately fitted support state with a Lightning checkpoint."""
+        checkpoint["data_manifest"] = self.data_manifest
+        checkpoint["calibration_status"] = self.calibration_status
         checkpoint["recommendation_propensity_model"] = (
             self.recommendation_propensity_model
         )
@@ -1177,6 +1215,10 @@ class DynaSurvCausalOnline(L.LightningModule):
             )
 
     def on_load_checkpoint(self, checkpoint) -> None:
+        self.data_manifest = checkpoint.get("data_manifest")
+        self.calibration_status = checkpoint.get(
+            "calibration_status", "unverified_legacy"
+        )
         self.recommendation_propensity_model = checkpoint.get(
             "recommendation_propensity_model", None
         )

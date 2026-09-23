@@ -115,6 +115,12 @@ def load_dynasurv_checkpoint(
     else:
         kwargs = hparams
 
+    # Preserve the function represented by historical checkpoints. New static
+    # parameters cannot be invented at inference time.
+    kwargs.setdefault(
+        "use_static_features", "init_h.weight" in checkpoint["state_dict"]
+    )
+
     model = DynaSurvCausalOnline(**kwargs)
     model.load_state_dict(checkpoint["state_dict"], strict=strict)
     # Restores the pickled recommendation propensity model, which lives outside

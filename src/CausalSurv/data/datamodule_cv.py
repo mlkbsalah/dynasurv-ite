@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -83,6 +84,8 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         binary_threshold: int = 2,
         cohort_start_year: int | None = None,
         temporal_split_year: int | None = None,
+        validation_size: float = 0.2,
+        validation_seed: int = 0,
         add_calendar_feature: bool = False,
         excluded_treatment_arms: list[str] | None = None,
         excluded_x_columns: list[str] | None = None,
@@ -103,6 +106,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         #   covariate, which is safe once availability is stable (section 2).
         self.cohort_start_year = cohort_start_year
         self.temporal_split_year = temporal_split_year
+        if not 0 < validation_size < 1:
+            raise ValueError("validation_size must be strictly between 0 and 1")
+        self.validation_size = validation_size
+        self.validation_seed = validation_seed
+        self._partition_indices = None
+        self._training_time_max = None
+        self.data_manifest = None
         self.add_calendar_feature = add_calendar_feature
         self.excluded_treatment_arms = (
             DEFAULT_EXCLUDED_ARMS
@@ -339,7 +349,7 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
     ) -> Dict[str, pd.Series]:
         """Compute per-column mean/std on df[cols]. Constant columns get std=1."""
         means = df[cols].mean()
-        stds = df[cols].std().replace(0.0, 1.0)
+        stds = df[cols].std().replace(0.0, 1.0).fillna(1.0)
         return {"mean": means, "std": stds}
 
     def _apply_standardizer(
@@ -366,6 +376,10 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             .reset_index(drop=True)
             .copy()
         )
+        keys = self.column_map["pat_id"] + self.column_map["lineid"]
+        df_merge = df_merge.drop_duplicates().reset_index(drop=True)
+        if df_merge.duplicated(keys).any():
+            raise ValueError("Conflicting duplicate patient-line records")
         return df_merge
 
     def _split_and_pad(
@@ -606,7 +620,11 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         treatment_indices = torch.argmax(P_padded, dim=-1)
 
         interval_bounds = torch.linspace(
-            0, df_merge[self.column_map["time"][0]].max(), self.n_intervals + 1
+            0,
+            self._training_time_max
+            if self._training_time_max is not None
+            else df_merge[self.column_map["time"][0]].max(),
+            self.n_intervals + 1,
         )
         event_in_bounds = torch.where(
             time_padded <= interval_bounds[-1], event_padded, 0
@@ -651,10 +669,61 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
     def prepare_data(
         self,
     ) -> None:
+        self._training_time_max = None
+        self.propensity_overlap_model = None
+        self.scaler = None
         self.df_dynamic, self.df_static = self._load_data()
 
         self.column_map = self._build_column_map(self.df_dynamic, self.df_static)
         df_merge = self._merge_and_filter(self.df_dynamic, self.df_static)
+
+        # Build identity/group metadata before fitting any preprocessing. The
+        # subclass establishes original-patient groups during tensorization.
+        raw, _, _ = self._transform_to_tensor(df_merge)
+        self.ESMEDataset = ESMEOnlineDataset(**raw)
+        self.patient_entry_years = self._entry_years(df_merge).reindex(
+            raw["patient_ids"]
+        )
+        self.cv_dataset, self.holdout_dataset = self._split_holdout()
+        if self.final_training:
+            pool = np.asarray(self.cv_dataset.indices)
+            group_ids = getattr(self, "group_ids", raw["patient_ids"])
+            groups = np.unique(group_ids[pool])
+            if len(groups) < 2:
+                raise ValueError(
+                    "At least two development patients are needed for validation"
+                )
+            groups = np.random.default_rng(self.validation_seed).permutation(groups)
+            n_val = min(
+                len(groups) - 1, max(1, round(self.validation_size * len(groups)))
+            )
+            is_val = np.isin(group_ids[pool], groups[:n_val])
+            train_idx, val_idx = pool[~is_val].tolist(), pool[is_val].tolist()
+            early_stop_idx = []
+        else:
+            train_idx, val_idx, early_stop_idx = self._cv_split()
+        self._partition_indices = (
+            train_idx,
+            val_idx,
+            early_stop_idx,
+            list(self.holdout_dataset.indices),
+        )
+        train_ids = raw["patient_ids"][train_idx]
+        training_rows = df_merge[self.column_map["pat_id"][0]].isin(train_ids)
+        fit_frame = df_merge.loc[training_rows]
+        # For expanded simulations only endpoint outcomes are real labels.
+        if "prefix_line" in fit_frame:
+            fit_frame = fit_frame.loc[
+                fit_frame[self.column_map["lineid"][0]] == fit_frame["prefix_line"]
+            ]
+        self._training_time_max = float(fit_frame[self.column_map["time"][0]].max())
+        if not np.isfinite(self._training_time_max) or self._training_time_max <= 0:
+            raise ValueError(
+                "Training survival times must define a positive finite grid"
+            )
+        data_hash = hashlib.sha256(
+            pd.util.hash_pandas_object(df_merge, index=False).values.tobytes()
+        ).hexdigest()
 
         if self.standardize_continuous:
             # Scaling is restricted to X (dynamic) and X_static. We skip:
@@ -662,16 +731,16 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             #   - d_cols: time-decay input is fed into 1/log(e + d); z-scoring can make
             #     it negative and produce NaNs
             #   - time/event/lineid/pat_id: survival targets and identifiers
-            # Caveat: scaler is fit on the full merged frame (including the 20% holdout).
-            # Z-score means/stds are robust to that, but if you ever need strict no-leak,
-            # move the fit into setup() once train indices are known.
+            # Validation/test values never influence fitted scaling parameters.
             scaling_candidates = list(
                 dict.fromkeys(self.column_map["x"] + self.column_map["x_static"])
             )
             self.continuous_cols = self._detect_continuous_columns(
-                df_merge, scaling_candidates
+                df_merge.loc[training_rows], scaling_candidates
             )
-            self.scaler = self._fit_standardizer(df_merge, self.continuous_cols)
+            self.scaler = self._fit_standardizer(
+                df_merge.loc[training_rows], self.continuous_cols
+            )
             df_merge = self._apply_standardizer(
                 df_merge, self.continuous_cols, self.scaler
             )
@@ -688,6 +757,23 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
         self.ESMEDataset = ESMEOnlineDataset(
             **padded_tensor_data,
         )
+        self.data_manifest = {
+            "protocol_version": 2,
+            "dataset_sha256": data_hash,
+            "column_map": self.column_map,
+            "treatment_dict": self.treatment_dict,
+            "scaler": None
+            if self.scaler is None
+            else {k: v.to_dict() for k, v in self.scaler.items()},
+            "interval_bounds": self.interval_bounds.tolist(),
+            "splits": {
+                name: padded_tensor_data["patient_ids"][indices].tolist()
+                for name, indices in zip(
+                    ("train", "validation", "early_stop", "test"),
+                    self._partition_indices,
+                )
+            },
+        }
 
     def describe_cohort(self) -> None:
         """Print the cohort restriction, action mask and split composition.
@@ -726,11 +812,17 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             n_ho = int((years >= self.temporal_split_year).sum())
             print(
                 f"Temporal split at {self.temporal_split_year}: "
-                f"train {n_tr} patients / holdout {n_ho} patients "
+                f"development {n_tr} patients / test {n_ho} patients "
                 f"({n_ho / (n_tr + n_ho):.1%} held out)"
             )
         else:
             print(f"Split: random, holdout_size={self.holdout_size}")
+
+        if self.data_manifest is not None:
+            print(
+                "Actual partitions:",
+                {k: len(v) for k, v in self.data_manifest["splits"].items()},
+            )
 
         print(f"Excluded from action set: {self.excluded_treatment_arms}")
         print(f"Excluded (leaked) X_ columns: {self.excluded_x_columns}")
@@ -815,12 +907,13 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             shuffle=True,
             random_state=self.split_seed,
         )
-        all_splits = [k for k in kfold.split(range(len(self.ESMEDataset)))]  # type: ignore
-        train_idx, val_idx = all_splits[self.fold_idx]  # type: ignore
-        train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
+        pool = np.asarray(self.cv_dataset.indices)
+        all_splits = list(kfold.split(pool))
+        train_idx, val_idx = all_splits[self.fold_idx or 0]
+        train_idx, val_idx = pool[train_idx].tolist(), pool[val_idx].tolist()
 
         train_idx, early_stop_idx = train_test_split(
-            train_idx, test_size=0.1, shuffle=True
+            train_idx, test_size=0.1, shuffle=True, random_state=self.validation_seed
         )
         return train_idx, val_idx, early_stop_idx
 
@@ -829,35 +922,14 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             self.prepare_data()
             assert self.ESMEDataset is not None
 
+        train_idx, val_idx, early_stop_idx, test_idx = self._partition_indices
+        self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
+        self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
+        self.es_dataset = TorchData.Subset(self.ESMEDataset, early_stop_idx)
+        self.test_dataset = TorchData.Subset(self.ESMEDataset, test_idx)
         self.cv_dataset, self.holdout_dataset = self._split_holdout()
-
-        if self.final_training:
-            if stage == "fit" or stage is None:
-                self.train_dataset = self.cv_dataset
-                self.val_dataset = self.holdout_dataset
-                self._set_training_support(self.train_dataset)
-            if stage == "test" or stage is None:
-                self.test_dataset = self.holdout_dataset
-                # A standalone test invocation has no fit-stage dataset.  Use
-                # the deterministic final-training partition in that case.
-                if not hasattr(self, "train_dataset"):
-                    self._set_training_support(self.cv_dataset)
-        else:
-            if stage == "fit" or stage is None:
-                train_idx, val_idx, early_stop_idx = self._cv_split()
-
-                self.train_dataset = TorchData.Subset(self.ESMEDataset, train_idx)
-                self.val_dataset = TorchData.Subset(self.ESMEDataset, val_idx)
-                self.es_dataset = TorchData.Subset(self.ESMEDataset, early_stop_idx)
-                self._set_training_support(self.train_dataset)
-
-            if stage == "test" or stage is None:
-                self.test_dataset = self.holdout_dataset
-                if not hasattr(self, "train_dataset"):
-                    raise RuntimeError(
-                        "Call setup('fit') before standalone test for CV mode so "
-                        "the fold-specific training support mask is available."
-                    )
+        if self.propensity_overlap_model is None:
+            self._set_training_support(self.train_dataset)
 
     # ========= DataLoaders ==========
 
@@ -867,15 +939,15 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            persistent_workers=True,
+            persistent_workers=self.num_workers > 0,
         )
 
     def val_dataloader(self):
         dataloader_kwargs = {
             "batch_size": len(self.val_dataset),
             "shuffle": False,
-            "num_workers": 1,
-            "persistent_workers": True,
+            "num_workers": min(self.num_workers, 1),
+            "persistent_workers": self.num_workers > 0,
         }
         if not self.final_training:
             return [
@@ -890,12 +962,12 @@ class ESMEOnlineDataModuleCV(L.LightningDataModule):
             self.test_dataset,
             batch_size=len(self.test_dataset),
             shuffle=False,
-            num_workers=1,
+            num_workers=min(self.num_workers, 1),
             persistent_workers=False,
         )
 
     def get_data_dimensions(self):
-        column_map = self._build_column_map(*self._load_data())
+        column_map = self.column_map
 
         x_dim = len(column_map["x"])
         p_dim = len(self.treatment_dict)

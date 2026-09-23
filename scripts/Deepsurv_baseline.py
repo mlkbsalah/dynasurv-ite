@@ -405,6 +405,7 @@ def evaluate_deepsurv(
         event=test_events,
         time=test_times,
         new_time=bs_eval_times,
+        weight=ci_ipcw_weights,
         weight_new_time=bs_ipcw_weights,
     )
     ibs = bs_fun.integral().item()

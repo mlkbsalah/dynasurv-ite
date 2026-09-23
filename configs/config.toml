@@ -23,7 +23,7 @@ subtype = "HR+HER2-"
 n_lines = 4
 
 # NOTE: batch_size and n_intervals are NOT here. Both are datamodule inputs that
-# the Optuna study tunes, so they live together in configs/best_config.json.
+# the Optuna study configures, so they live in configs/hpo_v3/best_config.json.
 # Splitting them -- n_intervals in the tuned file, batch_size here -- is what let
 # the study's winning batch_size be silently replaced by this file's value.
 
@@ -45,6 +45,10 @@ cohort_start_year = 2018
 # RMST figure would be extrapolation past the last observation. 2021 keeps
 # 67% of line-1 holdout records to 24 months and gives a 68/32 split.
 temporal_split_year = 2021
+# Reserve a fixed patient-level validation sample from the pre-2021 development
+# pool. Only this split drives tuning/stopping. 2021+ is final test data.
+validation_size = 0.2
+validation_seed = 0
 
 # Expose calendar time to the encoder. Safe only inside the restricted window,
 # where it is an ordinary confounder rather than a determinant of availability.

@@ -23,6 +23,10 @@ class NLLogisticHazard:
         Returns:
             torch.Tensor: computed loss value with specified reduction
         """
+        # The cumulative survival likelihood stays FP32 under BF16 autocast.
+        # This also makes scatter's source/destination dtypes agree and keeps
+        # gradients connected to the mixed-precision logits.
+        hazard_estimate = hazard_estimate.float()
         events = events.view(-1, 1).float()
         idx_durations = idx_durations.view(-1, 1)
         y_true = torch.zeros_like(hazard_estimate).scatter(1, idx_durations, events)

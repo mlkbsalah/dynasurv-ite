@@ -14,7 +14,7 @@ Two files feed a run:
 
 - `configs/config.toml`  -- hand-authored, stays TOML because its comments
   justifying the identifiability settings are load-bearing.
-- `configs/best_config.json` -- machine-written by the Optuna study. JSON so it
+- `configs/hpo_v3/best_config.json` -- written by the new Optuna study. JSON so it
   round-trips through `dataclasses.asdict` and cannot drift from the schema.
 """
 
@@ -79,8 +79,9 @@ class ArchConfig(StrictConfig):
 
     Note on what is absent. `init_h_hidden`, `init_p_hidden`, `init_h_dropout`,
     `init_p_dropout`, `mlpp_hidden_units` and `mlpp_dropout` used to be accepted
-    and reach nothing: the `init_h_mlp`/`init_p_mlp` projections are commented
-    out in the model, and no `MLPp` is ever built (P goes through `nn.Embedding`).
+    and reach nothing: the old configurable initialization MLPs were unused.
+    Static features now use learned linear+tanh initial-state projections,
+    and no `MLPp` is built (P goes through `nn.Embedding`).
     They are omitted here so the strict loader rejects them rather than letting
     a tuned-looking value sit in the config doing nothing.
     """
@@ -167,6 +168,12 @@ class ModelConfigFile(StrictConfig):
 
     @classmethod
     def from_json(cls, path: str | Path) -> "ModelConfigFile":
+        if not Path(path).is_file():
+            raise FileNotFoundError(
+                f"Model configuration not found: {path}. Legacy winners were archived; "
+                "run scripts/hyperopt/run_optuna.py (or slurm/RunHPO.sh) to export "
+                "configs/hpo_v3/best_config.json, or pass --model-config explicitly."
+            )
         with open(path, "rb") as f:
             return cls.from_dict(json.load(f))
 
@@ -216,6 +223,8 @@ class DataConfig(StrictConfig):
     n_lines: int
     cohort_start_year: int | None = None
     temporal_split_year: int | None = None
+    validation_size: float = 0.2
+    validation_seed: int = 0
     add_calendar_feature: bool = False
     excluded_treatment_arms: tuple[str, ...] | None = None
     excluded_x_columns: tuple[str, ...] | None = None
