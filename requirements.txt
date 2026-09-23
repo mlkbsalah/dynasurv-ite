@@ -26,6 +26,10 @@ POT==0.9.6.post1
 # --- Hyperparameter search ---
 optuna==4.7.0
 optuna-integration==4.8.0   # provides `optuna.integration.PyTorchLightningPruningCallback`
+# Optional shared Optuna RDB backend (the NFS journal needs no database driver).
+SQLAlchemy>=2.0,<3
+psycopg[binary]==3.3.6
+PyMySQL[rsa]==1.2.3
 
 # --- Plotting / reporting ---
 matplotlib==3.10.8
