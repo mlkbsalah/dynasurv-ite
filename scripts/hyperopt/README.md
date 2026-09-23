@@ -12,11 +12,12 @@ two workers, eight CPU cores (four per worker) and 64 GB host RAM: four workers,
 with `sbatch --partition=...` if necessary; verify the site's `h100` GRES name.
 
 Both nodes must see the **same shared project, data, output directories and
-container image**. The default backend is now an **NFS journal**, not a database
-service. The supplied screenshot shows `/home/m-ben-salah` mounted `nfs4,rw`
-with `vers=4.1`. That is the mount root, not the exact project/data directory;
-no project subdirectory is assumed. A read/write mount alone does not prove
-your account has directory write permission or that both nodes see it.
+container image**. The launcher fixes `PROJECT_DIR` to
+`/home/m-ben-salah/repos/dynasurv-ite`, with data at `PROJECT_DIR/data` and the
+image at `PROJECT_DIR/dynasurv.sif`. The supplied screenshot shows
+`/home/m-ben-salah` mounted `nfs4,rw` with `vers=4.1`. A read/write mount alone
+does not prove directory write permission or cross-node visibility; the cluster
+probe checks these before training. The default backend is an **NFS journal**.
 
 The launcher verifies the real journal directory is on read/write NFSv3+ inside
 each container. It uses Optuna's `JournalFileOpenLock` with forced lock expiry
@@ -25,11 +26,12 @@ follows the project's pinned [Optuna 4.7 NFS journal recipe](https://optuna.read
 and [exclusive-create lock API](https://optuna.readthedocs.io/en/v4.7.0/reference/generated/optuna.storages.journal.JournalFileOpenLock.html).
 Do not put a SQLite study on NFS. PostgreSQL/MySQL remain optional (below).
 
-Submit from the **host/login shell in the shared repository root**, not from an
-interactive `Apptainer>` shell. These examples assume `data/` and `dynasurv.sif`
-are under that root; override the paths if they are elsewhere.
+Submit from the **host/login shell**, not from an interactive `Apptainer>` shell.
+The examples below use the fixed project path:
 
 ```bash
+cd /home/m-ben-salah/repos/dynasurv-ite
+
 # Inspect without allocating resources or creating output files.
 DRY_RUN=1 bash slurm/RunHPO.sh
 
@@ -45,12 +47,10 @@ STUDY_TAG=hpo_v3_ibs \
   METRIC=average_ibs N_TRIALS=100 sbatch slurm/RunHPO.sh
 ```
 
-Set `PROJECT_DIR=/absolute/shared/project`, `DATA_DIR=/absolute/shared/data`
-and/or `SIF=/absolute/shared/image.sif` when paths differ. Defaults are the
-submission directory, its `data/` subdirectory and its `dynasurv.sif` file.
-The project is mounted at `/workspace`; data is mounted separately at
-`/hpo_data` read-only. Outputs remain under the project. Paths with spaces are
-supported; colons/commas are rejected because they conflict with bind syntax.
+The launcher uses these fixed host paths regardless of the submission directory
+or inherited `PROJECT_DIR`, `DATA_DIR`, or `SIF` environment variables. The
+project is mounted at `/workspace`; its `data/` directory is mounted separately
+at `/hpo_data` read-only. Outputs remain under the project.
 
 The image needs the pinned Optuna 4.7, other training dependencies, CUDA PyTorch
 and `findmnt` (from `util-linux`, now explicit in the Dockerfile). NFS mode does

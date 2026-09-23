@@ -12,21 +12,21 @@
 #SBATCH --signal=B:USR1@120
 
 # Four independent one-GPU trial streams, TWO per node, NOT DDP.
-# From the SHARED repository root: sbatch slurm/RunHPO.sh
+# Submit from the host shell: sbatch /home/m-ben-salah/repos/dynasurv-ite/slurm/RunHPO.sh
 # Default storage is one shared NFSv3+ journal; no database service is needed.
 # Optional: HPO_STORAGE_BACKEND=rdb with OPTUNA_STORAGE_URL for PostgreSQL/MySQL.
 # Never pass credentials in CLI arguments or enable shell tracing.
 # N_TRIALS=100 is TOTAL additional attempts, divided across the four workers.
-# PROJECT_DIR, DATA_DIR, SIF, N_TRIALS, MAX_EPOCHS, PATIENCE, METRIC, PRECISION, THREADS,
-# STUDY_TAG, STUDY_NAME and heartbeat settings may be overridden in the environment.
+# N_TRIALS, MAX_EPOCHS, PATIENCE, METRIC, PRECISION, THREADS, STUDY_TAG,
+# STUDY_NAME and heartbeat settings may be overridden in the environment.
 # DRY_RUN=1 bash slurm/RunHPO.sh prints commands without touching files.
 set +x
 set -euo pipefail
 umask 077
 
-PROJECT_DIR=${PROJECT_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}
-DATA_DIR=${DATA_DIR:-"$PROJECT_DIR/data"}
-SIF=${SIF:-"$PROJECT_DIR/dynasurv.sif"}
+PROJECT_DIR=/home/m-ben-salah/repos/dynasurv-ite
+DATA_DIR="$PROJECT_DIR/data"
+SIF="$PROJECT_DIR/dynasurv.sif"
 HPO_STORAGE_BACKEND=${HPO_STORAGE_BACKEND:-nfs-journal}
 STUDY_TAG=${STUDY_TAG:-hpo_v3}
 STUDY_NAME=${STUDY_NAME:-dynasurv_$STUDY_TAG}

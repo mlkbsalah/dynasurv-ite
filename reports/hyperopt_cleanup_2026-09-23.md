@@ -100,9 +100,10 @@ see the [Optuna 4.7 recipe](https://optuna.readthedocs.io/en/v4.7.0/tutorial/20_
 and [NFSv3+ exclusive-create lock API](https://optuna.readthedocs.io/en/v4.7.0/reference/generated/optuna.storages.journal.JournalFileOpenLock.html).
 GPU requests/binding follow [Slurm's typed GRES rules](https://slurm.schedmd.com/gres.html).
 
-`PROJECT_DIR`, `DATA_DIR` and `SIF` accept separate absolute shared paths. Data
-is bind-mounted read-only at `/hpo_data`; all study/checkpoint outputs stay under
-the project. `findmnt`/`util-linux` is explicitly included in the Dockerfile.
+The launcher now fixes its cluster project path to
+`/home/m-ben-salah/repos/dynasurv-ite`, with `data/` and `dynasurv.sif` beneath
+it. Data is bind-mounted read-only at `/hpo_data`; all study/checkpoint outputs
+stay under the project. `findmnt`/`util-linux` is explicitly included in the Dockerfile.
 
 ## Verification
 

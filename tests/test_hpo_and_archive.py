@@ -2,6 +2,7 @@ import importlib.util
 import json
 import math
 import os
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -361,6 +362,9 @@ def test_slurm_launcher_dry_run_uses_four_typed_gpus(backend):
             DRY_RUN="1",
             N_TRIALS="101",
             HPO_STORAGE_BACKEND=backend,
+            PROJECT_DIR="/ignored/project",
+            DATA_DIR="/ignored/data",
+            SIF="/ignored/image.sif",
             OPTUNA_STORAGE_URL="postgresql+psycopg://user:SENTINEL_SECRET@db/optuna",
         ),
         text=True,
@@ -381,6 +385,12 @@ def test_slurm_launcher_dry_run_uses_four_typed_gpus(backend):
         assert "check_shared_storage.py" in result.stdout
         assert "--time=00:05:00" in result.stdout
     assert "/hpo_data:ro" in result.stdout and "--data-dir /hpo_data" in result.stdout
+    assert "--bind /home/m-ben-salah/repos/dynasurv-ite:/workspace" in result.stdout
+    assert (
+        "--bind /home/m-ben-salah/repos/dynasurv-ite/data:/hpo_data:ro" in result.stdout
+    )
+    assert "/home/m-ben-salah/repos/dynasurv-ite/dynasurv.sif" in result.stdout
+    assert "/ignored/" not in result.stdout
     assert "SENTINEL_SECRET" not in result.stdout + result.stderr
     script = (ROOT / "slurm/RunHPO.sh").read_text()
     assert "#SBATCH --nodes=2" in script and "#SBATCH --gres=gpu:h100:2" in script
@@ -652,9 +662,17 @@ def test_two_node_launcher_flow_and_failure_cleanup(tmp_path, backend, failure):
     """Exercise real shell orchestration with mock Slurm/Apptainer commands."""
     project = tmp_path / "project"
     (project / "src/CausalSurv").mkdir(parents=True)
-    data_dir = tmp_path / "separate shared data"
-    data_dir.mkdir()
+    (project / "data").mkdir()
     (project / "dynasurv.sif").touch()
+    # Only the location is substituted in this test copy. Production does not
+    # accept path overrides, and the fixture must not write to the cluster path.
+    source = (ROOT / "slurm/RunHPO.sh").read_text()
+    fixed_path = "PROJECT_DIR=/home/m-ben-salah/repos/dynasurv-ite"
+    assert source.count(fixed_path) == 1
+    mock_launcher = tmp_path / "RunHPO.sh"
+    mock_launcher.write_text(
+        source.replace(fixed_path, "PROJECT_DIR=" + shlex.quote(str(project)), 1)
+    )
     binaries = tmp_path / "bin"
     binaries.mkdir()
     apptainer = binaries / "apptainer"
@@ -673,8 +691,10 @@ if os.environ['HPO_STORAGE_BACKEND'] == 'rdb':
 else:
     assert '--storage-url-env' not in args
     assert probe or '--shared-journal' in args
-assert os.environ['DATA_DIR'] + ':/hpo_data:ro' in args
-marker = args[args.index('--launch-token-file') + 1].replace('/workspace/', os.environ['PROJECT_DIR'] + '/', 1)
+assert os.environ['MOCK_PROJECT_DIR'] + ':/workspace' in args
+assert os.environ['MOCK_PROJECT_DIR'] + '/data:/hpo_data:ro' in args
+assert os.environ['MOCK_PROJECT_DIR'] + '/dynasurv.sif' in args
+marker = args[args.index('--launch-token-file') + 1].replace('/workspace/', os.environ['MOCK_PROJECT_DIR'] + '/', 1)
 assert pathlib.Path(marker).read_text().strip() == os.environ['SLURM_JOB_ID']
 with open(os.environ['MOCK_LOG'], 'a') as stream:
     stream.write(json.dumps({'phase': phase, 'rank': rank}) + '\\n')
@@ -703,8 +723,10 @@ for rank in range(4):
     env = dict(
         os.environ,
         PATH=str(binaries) + os.pathsep + os.environ["PATH"],
-        PROJECT_DIR=str(project),
-        DATA_DIR=str(data_dir),
+        PROJECT_DIR=str(tmp_path / "ignored-project"),
+        DATA_DIR=str(tmp_path / "ignored-data"),
+        SIF=str(tmp_path / "ignored-image.sif"),
+        MOCK_PROJECT_DIR=str(project),
         DRY_RUN="0",
         N_TRIALS="4",
         HPO_STORAGE_BACKEND=backend,
@@ -719,7 +741,7 @@ for rank in range(4):
         MOCK_FAIL=failure,
     )
     result = subprocess.run(
-        ["bash", str(ROOT / "slurm/RunHPO.sh")],
+        ["bash", str(mock_launcher)],
         env=env,
         text=True,
         capture_output=True,
