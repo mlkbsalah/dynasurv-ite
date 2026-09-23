@@ -32,6 +32,8 @@ cohort_start_year = 2018
 # 2021 as in the real config: the holdout is the latest entry years (deliberate policy-era
 # shift). All prefix samples of a patient share the entry year, so none straddles the split.
 temporal_split_year = 2021
+validation_size = 0.2
+validation_seed = 0
 # The DGP uses calendar time as an instrument, so the model must see it.
 add_calendar_feature = true
 

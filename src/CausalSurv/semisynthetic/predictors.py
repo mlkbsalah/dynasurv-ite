@@ -2,8 +2,8 @@
 
 The evaluator (`evaluate.py`) never sees a model: it is handed a `Prediction`, a
 (n_samples, n_arms, n_grid) array of S_a(t) on `t_grid`. Three producers live here --
-the oracle (the true Weibull curves, the floor), the naive per-arm Kaplan-Meier (no
-covariates, the ceiling) and an adapter around a trained `DynaSurvCausalOnline`.
+the oracle (the true Weibull curves), the naive per-arm Kaplan-Meier (no
+covariates; a comparator, not an error ceiling) and a trained-model adapter.
 
 Arms are always in sorted order, as everywhere in this package.
 """

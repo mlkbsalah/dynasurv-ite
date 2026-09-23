@@ -6,9 +6,12 @@
 
 Administrative censoring is a fact of the real cohort and is kept. Dropout is added
 only where the cutoff alone leaves the simulated event rate above the real one, with
-`rate_line` bisected so the rates agree. Both parts are independent of the outcome
-and the arm, so censoring is non-informative given nothing at all and IPCW estimators
-are consistent by construction.
+`rate_line` bisected so the rates agree. Dropout draws are independent conditional
+on line and fitted generator parameters. Administrative follow-up depends on the
+calendar date, which is associated with assignment and patient characteristics;
+marginal independent censoring and transfer of training-cohort IPCW weights to a
+later test cohort are NOT guaranteed. Use the known truth/latent outcomes for
+primary simulation scores.
 """
 
 from __future__ import annotations

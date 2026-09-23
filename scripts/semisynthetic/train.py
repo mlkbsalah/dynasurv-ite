@@ -3,7 +3,7 @@
     python semisynthetic/train.py --axis gamma --level 1.0 --rep 0 --seed 0
 
 Reads   ../data/semisynthetic/{axis}/{level}/rep{rep}/   (from semisynthetic/generate.py)
-Writes  ../models/semisynthetic/{axis}/{level}/rep{rep}/seed_{seed}/
+Writes  ../models/semisynthetic_v2/{axis}/{level}/rep{rep}/seed_{seed}/
 """
 
 import argparse
@@ -33,6 +33,7 @@ def cli() -> None:
     parser.add_argument("--config", default=CONFIG_PATH)
     parser.add_argument("--model-config", default=MODEL_CONFIG_PATH)
     parser.add_argument("--fast_dev_run", action="store_true")
+    parser.add_argument("--models-dir", default="../models/semisynthetic_v2")
     args = parser.parse_args()
 
     cell = f"{args.axis}/{args.level}/rep{args.rep}"
@@ -46,7 +47,7 @@ def cli() -> None:
         date="",
         fast_dev_run=args.fast_dev_run,
         datamodule_cls=SemiSyntheticDataModule,
-        run_dir=f"../models/semisynthetic/{cell}/seed_{args.seed}",
+        run_dir=f"{args.models_dir}/{cell}/seed_{args.seed}",
         wandb_project="DynaSurvSemiSynthetic",
     )
 

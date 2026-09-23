@@ -9,7 +9,8 @@
 #SBATCH --array=1-30
 
 # One (sweep cell, replicate) per array task: generate the semi-synthetic replicate,
-# train DynaSurv on it, then score every checkpoint kind against the simulated truth.
+# train DynaSurv, compare checkpoint kinds on DEVELOPMENT validation, and score
+# one prespecified checkpoint rule on the reserved test set.
 # Cells vary ONE knob of configs/semisynthetic/dgp.toml at a time; the others stay at
 # the file's values (gamma = 1, hidden strength = 0, heterogeneity = 1):
 #   gamma          0 0.25 0.5 1.0 1.5   assignment confounding (1.0 is the reference cell)
@@ -22,15 +23,15 @@
 #   sbatch --array=1-30%5 slurm/sweep.sh        # at most 5 running at once
 #   sbatch --array=4,14,24 slurm/sweep.sh       # rerun single tasks
 #   N_REPS=5 sbatch --array=1-50 slurm/sweep.sh # 5 replicates -> 10 x 5 = 50 tasks
-#   EVAL_KINDS="bestCALIB" sbatch slurm/sweep.sh
+#   TEST_KIND="bestCALIB" sbatch slurm/sweep.sh  # choose BEFORE inspecting test results
+#   MODEL_CONFIG="../configs/hpo_v3/best_config.json" sbatch slurm/sweep.sh
 #   DRY_RUN=1 SLURM_ARRAY_TASK_ID=7 bash slurm/sweep.sh   # print the task, run nothing
-# Every checkpoint kind is scored by default (val_loss, bestCI, bestCALIB, final_epoch):
-# on the first local run the kind changed the counterfactual error by a factor of two,
-# so no kind is privileged before the sweep. A missing checkpoint kind only skips its
-# own evaluation.
+# Every checkpoint kind is scored on development validation only. TEST_KIND is
+# fixed before launching the sweep (default val_loss); aggregation never chooses
+# it by optimizing test oracle regret. A failed training/evaluation stops the task.
 # Outputs, all under the project directory:
 #   data/semisynthetic/{axis}/{level}/rep{r}/        expanded data, truth.parquet, manifest.json
-#   models/semisynthetic/{axis}/{level}/rep{r}/seed_{r}/eval_{kind}/*.csv
+#   models/semisynthetic_v2/{axis}/{level}/rep{r}/seed_{r}/eval_v2_{split}_{kind}/*.csv
 # `make sync` pulls models/ (the eval CSVs); data/ stays on the cluster, so rsync
 # data/semisynthetic/*/*/rep*/manifest.json too if you want the achieved rates locally.
 # Set WANDB_MODE=offline in the submitting shell if the nodes have no internet.
@@ -49,7 +50,10 @@ CELLS=(
     "heterogeneity 0.0" "heterogeneity 0.5" "heterogeneity 2.0"
 )
 N_REPS=${N_REPS:-3}
-EVAL_KINDS=${EVAL_KINDS:-"val_loss bestCI bestCALIB final_epoch"}
+VALIDATION_KINDS=${VALIDATION_KINDS:-"val_loss bestCI bestIBS bestCALIB final_epoch"}
+TEST_KIND=${TEST_KIND:-"val_loss"}
+MODEL_CONFIG=${MODEL_CONFIG:-"../configs/hpo_v3/best_config.json"}
+printf -v MODEL_CONFIG_ARG '%q' "$MODEL_CONFIG"
 
 TASK=$(( SLURM_ARRAY_TASK_ID - 1 ))
 if [ "$TASK" -ge $(( ${#CELLS[@]} * N_REPS )) ]; then
@@ -62,10 +66,11 @@ SEED=$REP
 CELL="$AXIS/$LEVEL/rep$REP"
 
 STEPS="python3 semisynthetic/generate.py --out ../data/semisynthetic/$CELL --replicate $REP --$AXIS $LEVEL"
-STEPS="$STEPS && python3 semisynthetic/train.py --axis $AXIS --level $LEVEL --rep $REP --seed $SEED"
-for KIND in $EVAL_KINDS; do
-    STEPS="$STEPS; python3 semisynthetic/evaluate.py --axis $AXIS --level $LEVEL --rep $REP --seed $SEED --kind $KIND"
+STEPS="$STEPS && python3 semisynthetic/train.py --axis $AXIS --level $LEVEL --rep $REP --seed $SEED --model-config $MODEL_CONFIG_ARG"
+for KIND in $VALIDATION_KINDS; do
+    STEPS="$STEPS && python3 semisynthetic/evaluate.py --axis $AXIS --level $LEVEL --rep $REP --seed $SEED --model-config $MODEL_CONFIG_ARG --kind $KIND --split validation"
 done
+STEPS="$STEPS && python3 semisynthetic/evaluate.py --axis $AXIS --level $LEVEL --rep $REP --seed $SEED --model-config $MODEL_CONFIG_ARG --kind $TEST_KIND --split test"
 
 if [ -n "$DRY_RUN" ]; then
     echo "task $SLURM_ARRAY_TASK_ID -> $CELL (seed $SEED)"

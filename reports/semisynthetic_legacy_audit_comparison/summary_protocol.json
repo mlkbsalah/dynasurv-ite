@@ -1,0 +1,9 @@
+{
+  "checkpoint_kind": "bestCI",
+  "selection": "fixed_input_not_test_optimized",
+  "evaluation_protocol": 1,
+  "split": "legacy_reused_holdout",
+  "evaluation_role": "exploratory",
+  "test_not_used_for_selection_by_aggregator": false,
+  "factual_estimator": "legacy_ipcw"
+}

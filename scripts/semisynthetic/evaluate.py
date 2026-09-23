@@ -3,11 +3,12 @@
     python semisynthetic/evaluate.py --axis gamma --level 1.0 --rep 0 --seed 0
 
 Reads   ../data/semisynthetic/{axis}/{level}/rep{rep}/            (truth, manifest)
-        ../models/semisynthetic/{axis}/{level}/rep{rep}/seed_{seed}/checkpoints/
-Writes  .../seed_{seed}/eval_{kind}/{curve,effect,policy,factual}.csv
+        ../models/semisynthetic_v2/{axis}/{level}/rep{rep}/seed_{seed}/checkpoints/
+Writes  .../seed_{seed}/eval_v2_{split}_{kind}/{curve,effect,policy,factual}.csv
 
 DynaSurv is scored on the temporal holdout next to two references: the oracle (true
-curves, the floor) and the naive per-arm Kaplan-Meier (no covariates, the ceiling).
+curves) and the naive per-arm Kaplan-Meier (no covariates). Use a checkpoint rule
+fixed using development data, never the test oracle metrics.
 """
 
 import argparse
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from torch.utils.data import Subset
 
 from CausalSurv.config import CHECKPOINT_KINDS, ExperimentConfig
 from CausalSurv.model.checkpoint_compat import load_dynasurv_checkpoint
@@ -30,7 +32,7 @@ from CausalSurv.semisynthetic.predictors import (
 )
 
 CONFIG_PATH = "../configs/semisynthetic/config.toml"
-MODEL_CONFIG_PATH = "../configs/best_config.json"
+MODEL_CONFIG_PATH = "../configs/hpo_v3/best_config.json"
 GRID_STEP = 0.1  # months; every horizon must be a multiple of it
 
 
@@ -41,13 +43,15 @@ def cli() -> None:
     parser.add_argument("--rep", type=int, default=0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--kind", choices=CHECKPOINT_KINDS, default="val_loss")
+    parser.add_argument("--split", choices=("validation", "test"), default="test")
     parser.add_argument("--config", default=CONFIG_PATH)
     parser.add_argument("--model-config", default=MODEL_CONFIG_PATH)
+    parser.add_argument("--models-dir", default="../models/semisynthetic_v2")
     args = parser.parse_args()
 
     cell = f"{args.axis}/{args.level}/rep{args.rep}"
     data_dir = Path(f"../data/semisynthetic/{cell}")
-    run_dir = Path(f"../models/semisynthetic/{cell}/seed_{args.seed}")
+    run_dir = Path(args.models_dir) / cell / f"seed_{args.seed}"
     cfg = ExperimentConfig.from_files(args.config, args.model_config)
     cfg = replace(cfg, data=replace(cfg.data, data_dir=str(data_dir)))
 
@@ -61,16 +65,25 @@ def cli() -> None:
         final_training=True,
     )
     dm.prepare_data()
-    train_set, holdout_set = dm._split_holdout()
-    train_ids = dm.ESMEDataset.patient_ids[np.asarray(train_set.indices)]
+    splits = dm._partition_indices
+    train_ids = dm.ESMEDataset.patient_ids[np.asarray(splits[0])]
+    evaluated_set = Subset(
+        dm.ESMEDataset, splits[1 if args.split == "validation" else 3]
+    )
 
     horizons = list(cfg.eval.horizon_times)
     steps = round(max(horizons) / GRID_STEP)
     t_grid = np.linspace(0.0, steps * GRID_STEP, steps + 1)
 
-    model = load_dynasurv_checkpoint(find_checkpoints([run_dir], args.kind)[0])
+    checkpoint = find_checkpoints([run_dir], args.kind)[0]
+    model = load_dynasurv_checkpoint(checkpoint)
+    if model.data_manifest != dm.data_manifest or not model.use_static_features:
+        raise ValueError(
+            "Checkpoint is incompatible with protocol-v2 preprocessing/splits. "
+            "Retrain before corrected evaluation; existing eval_* tables are legacy only."
+        )
     dyna, ids, line_support = dynasurv_prediction(
-        model, holdout_set, dm.treatment_dict, arms, t_grid
+        model, evaluated_set, dm.treatment_dict, arms, t_grid
     )
 
     held_out = truth.loc[ids]
@@ -87,13 +100,25 @@ def cli() -> None:
         train,
     )
 
-    out = run_dir / f"eval_{args.kind}"
+    out = run_dir / f"eval_v2_{args.split}_{args.kind}"
     out.mkdir(exist_ok=True)
+    metadata = {
+        "evaluation_protocol": 2,
+        "split": args.split,
+        "checkpoint_kind": args.kind,
+        "checkpoint": str(checkpoint),
+        "calibration_status": model.calibration_status,
+        "data_manifest": dm.data_manifest,
+        "factual_estimator": "exact_expected_and_uncensored_latent",
+    }
+    (out / "metadata.json").write_text(json.dumps(metadata, indent=2))
     for name, table in tables.items():
         table.to_csv(out / f"{name}.csv", index=False)
 
     pd.set_option("display.width", 200, "display.max_columns", 20)
-    print(f"\n{cell} seed {args.seed} [{args.kind}]: {len(held_out)} held-out samples")
+    print(
+        f"\n{cell} seed {args.seed} [{args.split}, {args.kind}]: {len(held_out)} samples"
+    )
     print("line-level support:", line_support.astype(int).tolist(), "arms:", list(arms))
     policy = tables["policy"]
     print(

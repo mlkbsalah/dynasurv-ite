@@ -1,10 +1,16 @@
 # Semi-synthetic counterfactual benchmark for DynaSurv
 
-Status as of 2026-09-21. Code: `src/CausalSurv/semisynthetic/`, `scripts/semisynthetic/`,
-`configs/semisynthetic/`, `slurm/sweep.sh`. **Nothing here is committed yet.** Every DynaSurv
-number below comes from one replicate, one seed, one sweep cell (gamma = 1, hidden strength = 0,
-heterogeneity = 1); the sweep has not been run. The LaTeX version of the design choices is
-`latex/appendix_semisynthetic.tex`.
+> Audit correction, 2026-09-23: the numerical results below are **historical/exploratory**, not corrected independent-test validation. Their holdout was reused for early stopping and checkpoint-kind selection; marginal training-cohort IPCW scores are also affected by temporal censoring shift. Protocol v2 separates training/validation/test by original patient, uses training-only preprocessing, a fixed checkpoint rule, and exact expected/uncensored latent factual metrics. Corrected checkpoints/results go to `models/semisynthetic_v2` and `reports/semisynthetic_sweep_v2`; retraining is required. See `reports/p1_fixes_2026-09-23.md` for migration instructions.
+
+> Comparator qualification: at historical bestCI, DynaSurv's mean pair PEHE is worse than naive per-arm Kaplan–Meier in **9/10 cells** (reference 1.761 vs 1.705 months), although reference policy regret is lower (0.336 vs 0.516 months). Only heterogeneity 2 favors DynaSurv on PEHE (2.643 vs 2.773). This supports a possible ranking benefit, not superior effect estimation. The complete historical comparison is in `reports/semisynthetic_legacy_audit_comparison/comparator_summary.csv`; the new aggregator reports all comparators explicitly.
+
+Historical status as of 2026-09-22. Code: `src/CausalSurv/semisynthetic/`, `scripts/semisynthetic/`,
+`configs/semisynthetic/`, `slurm/sweep.sh`. The full 30-run
+sweep has now run on the cluster and been synced back (`make sync`); results below are
+aggregated across all 10 cells x 3 replicates by `scripts/semisynthetic/aggregate.py`, which
+writes the raw concatenated tables and summaries to `reports/semisynthetic_sweep/`. The LaTeX
+version of the design choices and the results is `latex/appendix_semisynthetic.tex` (section
+"Sweep results").
 
 ## 1. Why this exists
 
@@ -221,8 +227,10 @@ observed time  = min(T, C), event = 1{T <= C}
 * Targets are the ≥ 2018 event rates 0.442 / 0.547 / 0.578 / 0.596, **not** the full 2008+ cohort
   (0.73–0.85). Cutoff-only rates were 0.465 / 0.587 / 0.639 / 0.679, so dropout is on for all
   lines: 0.0024 / 0.0041 / 0.0073 / 0.0103 per month.
-* Censoring is non-informative by construction. Real censoring probably is not, so this is the
-  best case for IPCW estimators.
+* Independent dropout does not establish marginal independent censoring. Administrative
+  follow-up depends on calendar date, which also affects assignment and patient mix. Training
+  censoring weights need not transfer to the temporal test cohort; protocol v2 uses exact
+  expected and uncensored latent factual scores instead.
 
 ### 3.9 Seeds and common random numbers
 
@@ -277,7 +285,7 @@ Arms outside the model's line-level support are excluded from every table.
 | curve | RMSE of S(t) to the horizon and RMST error (MAE and bias), split into the factual arm and the counterfactual arms |
 | effect | Per arm pair: PEHE, bias of the average effect, sign agreement |
 | policy | Value (true RMST of the arm chosen), regret against the best arm, hit rate, abstention rate |
-| factual | IPCW C-index and Brier score of the factual curve against the training censoring distribution |
+| factual | Protocol v2: exact expected Brier, uncensored latent-outcome Brier and concordance at the specified horizon; historical tables below used training-cohort IPCW and require replacement |
 
 Policies: DynaSurv with the patient-level support mask (`supported`, uses the recommender's
 propensity-overlap mask; abstains to the assigned arm), DynaSurv with line-level support only
@@ -318,51 +326,98 @@ and 0.07 (strength 2), which measures extrapolation, not confounding.
 | Refactor hooks | identical holdout and validation indices vs pre-edit code on real data |
 | Evaluator | oracle: error 0, PEHE ≤ 1e-5, regret 0, quadrature residual ≤ 1e-4; naive-KM factual bias matches an independent computation exactly (0.6306, n = 365) |
 
-## 5. Results so far (one replicate, one seed)
+## 5. Results: the full sweep (30 runs, 10 cells x 3 replicates)
 
-Overlap at the reference cell (effective sample size / n, inverse propensity of the assigned arm):
-0.24 / 0.19 / 0.21 / 0.10 per line. By gamma at strength 0: 0.51 (0), 0.40 (0.5), 0.22 (1),
-0.01 (2), 0.00 (4); strength 2 at gamma 0: 0.07. At gamma = 1 the simulated arm counts are, for
-line 4, ET alone 25, CDK 57, MONOCT 780, POLYCT 493 (ET alone falls out of the recommendable set
-there).
+Manifests for all 30 runs are now synced (`rsync` of `data/semisynthetic/*/*/rep*/manifest.json`);
+the reference-cell training diagnostic still stands from the single-cell smoke test (val loss
+8.7 → 1.685 at epoch 8, drifting to ≈1.73 by early stop at epoch 28).
 
-Effect sizes are small on the RMST scale: average true pairwise effects between −0.44 and +0.42
-months. **Policy headroom** (oracle minus best single arm per line, months): 0.00, 0.11, 0.47,
-1.25, 1.71 at heterogeneity 0, 0.5, 1, 2, 3. At the default h = 1 regret differences between
-methods are small; report headroom next to every regret.
+**Overlap (effective sample size / n per line, mean over 3 replicates)** — this is the mechanism
+behind the gamma/strength results below: as either axis strengthens, overlap collapses, and PEHE
+degrades with it.
 
-Training: validation loss 8.7 → 1.685 at epoch 8, then drifts up to ≈ 1.73; early stop at epoch
-28. Converged and mildly overfit, not undertrained. Scores by checkpoint (holdout n = 3,453):
+| Axis | Level | Line 1 | Line 2 | Line 3 | Line 4 |
+|---|---|---|---|---|---|
+| gamma | 0 | 0.566 | 0.750 | 0.440 | 0.239 |
+| gamma | 0.25 | 0.539 | 0.709 | 0.422 | 0.217 |
+| gamma | 0.5 | 0.462 | 0.586 | 0.364 | 0.184 |
+| gamma | 1 (ref) | 0.251 | 0.282 | 0.198 | 0.086 |
+| gamma | 1.5 | 0.087 | 0.154 | 0.085 | 0.097 |
+| strength | 0.5 | 0.197 | 0.275 | 0.140 | 0.061 |
+| strength | 1.0 | 0.156 | 0.199 | 0.109 | 0.098 |
+| heterogeneity | any | 0.251 | 0.282 | 0.198 | 0.086 |
+
+Heterogeneity is identical to the gamma=1 reference at every level, as it should be: `h` only
+scales the outcome model, never the assignment mechanism, so it does not touch overlap. Achieved
+censoring event rates matched their per-line targets to within 0.0007 in every one of the 30
+runs (no cell needed re-calibration), confirming the bisection-based censoring calibration
+(`src/CausalSurv/semisynthetic/censoring.py`) generalizes across the whole sweep, not just the
+reference cell.
+
+**Checkpoint kind, pooled over all 30 runs and all 4 kinds** (`n`-weighted means; PEHE and
+`|`bias`|` in months, regret in months, oracle = 0):
 
 | Checkpoint | PEHE | mean \|ATE bias\| | Regret | Hit rate | Factual C |
 |---|---|---|---|---|---|
-| val_loss (epoch 8) | 3.36 | 2.17 | 0.45 | 0.59 | 0.67 |
-| bestCI (epoch 16) | 2.25 | 1.05 | 0.26 | 0.67 | 0.68 |
-| bestCALIB (epoch 27) | 1.76 | 0.54 | 0.19 | 0.71 | 0.66 |
-| final epoch (28) | 1.73 | 0.78 | 0.23 | 0.67 | 0.66 |
-| naive KM | 1.65 | 0.97 | 0.51 | 0.56 | 0.54–0.58 |
-| oracle | 0 | 0 | 0 | 1.00 | 0.70–0.75 |
+| val_loss (real-data default) | 2.37 | 1.51 | 0.42 | 0.62 | 0.666 |
+| bestCI | 1.95 | 1.14 | 0.36 | 0.64 | 0.675 |
+| bestCALIB | 2.43 | 1.35 | 0.37 | 0.58 | 0.665 |
+| final_epoch | 2.23 | 1.16 | 0.40 | 0.52 | 0.663 |
 
-Reading: factual fit is real (C-index clearly above the covariate-free KM on every line, below the
-oracle's ceiling). Individual effects are only partly recovered (PEHE about equal to the KM's at
-best); the gain is in the bias of the average effect and in the recommendations. The `val_loss`
-checkpoint is the worst counterfactually, with large POLYCT-contrast bias (≈ +3.5 to +3.9 months),
-so validation loss on factual outcomes did not track counterfactual quality here. The real-data
-recommender defaults to `checkpoint_kind = val_loss`; whether the pattern carries over to real data
-is untested.
+`bestCI` wins on PEHE, regret and factual C-index; `val_loss` is worst on every column except
+hit rate. This confirms, on 30 runs instead of 1, that validation loss on the factual likelihood
+does not track counterfactual quality here. The tables below use `bestCI`.
+
+**Sweep axes, mean ± std over 3 replicates** (PEHE and `|`bias`|` in months, pooled over lines
+and arm pairs; regret in months against the `line_only` policy; `h_r` = random-policy regret,
+an upper bound on that cell's headroom):
+
+| Axis | Level | PEHE | \|bias\| | Regret | Hit rate | h_r |
+|---|---|---|---|---|---|---|
+| gamma | 0 | 1.27 ± 0.15 | 0.34 ± 0.15 | 0.41 ± 0.03 | 0.57 ± 0.05 | 0.77 |
+| gamma | 0.25 | 1.45 ± 0.28 | 0.70 ± 0.40 | 0.45 ± 0.02 | 0.56 ± 0.02 | 0.78 |
+| gamma | 0.5 | 1.61 ± 0.19 | 0.85 ± 0.23 | 0.39 ± 0.04 | 0.59 ± 0.04 | 0.79 |
+| gamma | 1 (ref) | 1.76 ± 0.42 | 0.87 ± 0.33 | 0.34 ± 0.04 | 0.64 ± 0.04 | 0.80 |
+| gamma | 1.5 | 2.33 ± 1.10 | 1.49 ± 1.03 | 0.40 ± 0.05 | 0.62 ± 0.02 | 0.81 |
+| strength | 0.5 | 2.25 ± 0.32 | 1.49 ± 0.24 | 0.44 ± 0.04 | 0.59 ± 0.02 | 0.80 |
+| strength | 1.0 | 2.70 ± 0.15 | 2.14 ± 0.16 | 0.48 ± 0.01 | 0.57 ± 0.01 | 0.80 |
+| heterogeneity | 0 | 2.08 ± 0.75 | 1.28 ± 0.34 | 0.03 ± 0.03 | 0.95 ± 0.03 | 0.46 |
+| heterogeneity | 0.5 | 1.46 ± 0.29 | 0.94 ± 0.45 | 0.15 ± 0.08 | 0.67 ± 0.12 | 0.50 |
+| heterogeneity | 2.0 | 2.64 ± 0.53 | 1.35 ± 0.49 | 0.52 ± 0.07 | 0.62 ± 0.01 | 1.46 |
+
+Reading:
+- **gamma (observed-covariate confounding):** PEHE and average-effect bias roughly double from
+  gamma=0 to gamma=1.5, but the model's own regret stays flat within noise (0.34–0.45) while the
+  random-policy headroom barely moves (0.77 → 0.81). Ranking arms survives better than sizing the
+  effect does as overlap collapses — consistent with variance rather than bias, though 3
+  replicates cannot rule out a small true bias on this axis.
+- **strength (hidden confounder into assignment):** the sharper effect. Bias more than doubles
+  from the strength=0 reference (0.87) to strength=1 (2.14), and regret rises ~40% (0.34 → 0.48)
+  — the pattern expected of a confounder the model never sees.
+- **heterogeneity:** mostly changes the size of the task. At h=0 every line has one best arm, so
+  both the model and a constant policy score near-zero regret; as h grows to 2 the headroom
+  triples (0.46 → 1.46) and the model's regret grows with it (0.03 → 0.52) while staying well
+  under the random policy's ceiling; hit rate falls from 0.95 to 0.62 as there are more genuinely
+  different arms to pick between.
+
+**What this does not show:** no Cox/DeepSurv baseline is in this pipeline yet, so the sweep
+cannot reproduce the lost benchmark's observed-vs-hidden-confounding bias comparison for those
+methods — only DynaSurv itself is scored, against the oracle and the covariate-free KM. Raw and
+summary CSVs: `reports/semisynthetic_sweep/`.
 
 ## 6. Limitations and open decisions
 
-1. **One replicate, one seed.** No noise estimate yet; the sweep exists to provide it.
-2. **Checkpoint kinds were compared after seeing the truth**, so the ranking is a selection
-   effect. `slurm/sweep.sh` scores all four kinds for every run instead of choosing one.
+1. **3 replicates per cell.** Enough for a mean ± std, not for a significance test; the gamma
+   axis in particular has a std comparable to its trend (Section 5).
+2. **Checkpoint kinds were compared after seeing the truth**, so `bestCI`'s win is a selection
+   effect over 4 candidates, now measured on 30 runs instead of 1 but still not held out.
 3. **Open decision: early-stopping monitor.** The synthetic config stops on `val_loss`; the real
    config stops on `val/calib_gap_abs_mean`. The first run stopped one epoch after its
    best-calibration checkpoint. Mirroring the real pipeline would need a config change and a
    retrain. Not done.
 4. **Coefficients are hand-set**, not estimated; results describe this DGP's difficulty, not real
    effect sizes.
-5. **Weibull with one shape per line**, shared coupling across arms, non-informative censoring,
+5. **Weibull with one shape per line**, shared coupling across arms, calendar-dependent administrative censoring,
    no outcome feedback across lines, no time-varying treatment within a line.
 6. **Only 16 covariates matter.** The model sees 73–74 real columns; the rest are non-causal for
    the outcome by construction, which is easier than reality in one way (no unmodelled real
@@ -398,8 +453,10 @@ The wall-clock time per task on the cluster is untimed; the script asks for 4 h.
 ## 8. Files touched
 
 New: `src/CausalSurv/semisynthetic/{assignment,outcome,censoring,expand,generate,datamodule,predictors,evaluate}.py`,
-`scripts/semisynthetic/{generate,train,evaluate}.py`, `configs/semisynthetic/config.toml`,
-`slurm/sweep.sh`. Committed earlier (4a88a63): `semisynthetic/{__init__,config,drivers}.py`,
+`scripts/semisynthetic/{generate,train,evaluate,aggregate}.py`, `configs/semisynthetic/config.toml`,
+`slurm/sweep.sh`, `latex/appendix_semisynthetic.tex`, `reports/semisynthetic_sweep/` (aggregated
+sweep CSVs). Committed earlier (4a88a63): `semisynthetic/{__init__,config,drivers}.py`,
 `configs/semisynthetic/dgp.toml`. Modified: `configs/semisynthetic/dgp.toml` (τ for ET+CDK),
 `scripts/TrainDynasurvCausal.py` (datamodule, run dir, W&B project arguments),
-`src/CausalSurv/data/datamodule_cv.py` (two split hooks).
+`src/CausalSurv/data/datamodule_cv.py` (two split hooks), `latex/second_draft.tex`
+(Counterfactual Validation section: real 30-run sweep results, four arms instead of three).

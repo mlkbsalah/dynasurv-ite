@@ -1,0 +1,4 @@
+axis,level,n_reps,pehe_mean,pehe_std,ate_bias_abs_mean,ate_bias_abs_std,regret_mean,regret_std,hit_rate_mean,hit_rate_std,c_index_mean,c_index_std,c_index_naive_km,c_index_oracle,regret_best_constant,regret_random,regret_oracle
+heterogeneity,0.0,3,2.082,0.754,1.278,0.336,0.033,0.025,0.954,0.029,0.668,0.015,0.582,0.712,0.0,0.458,0.0
+heterogeneity,0.5,3,1.461,0.288,0.944,0.449,0.152,0.078,0.67,0.12,0.67,0.012,0.574,0.716,0.124,0.498,0.0
+heterogeneity,2.0,3,2.643,0.526,1.35,0.488,0.521,0.065,0.622,0.008,0.696,0.004,0.562,0.744,1.283,1.458,0.0

@@ -82,9 +82,10 @@ class SemiSyntheticDataModule(ESMEOnlineDataModuleCV):
         groups = self._permuted_groups(pool, self.split_seed)
         fold_of = {g: i % n_folds for i, g in enumerate(groups)}
         folds = np.array([fold_of[g] for g in self.group_ids[pool]])
-        val = pool[folds == self.fold_idx]
+        fold_idx = self.fold_idx or 0
+        val = pool[folds == fold_idx]
         train, early_stop = self._group_split(
-            pool[folds != self.fold_idx], 0.1, self.split_seed
+            pool[folds != fold_idx], 0.1, self.validation_seed
         )
         return train.tolist(), val.tolist(), early_stop.tolist()
 

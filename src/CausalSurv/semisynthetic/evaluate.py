@@ -8,11 +8,11 @@ curve    S(t) error to tau and RMST error, split into the FACTUAL arm (the one t
          on real data, and the gap between the two is the confounding penalty.
 effect   arm-pair contrasts of RMST: PEHE (root mean squared error of the individual
          effect) next to the bias of the average effect. They answer different
-         questions: hidden confounding shows up as bias, not as PEHE.
+         questions: hidden confounding can affect both bias and PEHE.
 policy   value of the arm a predictor would pick (true RMST), regret against the best
          arm, best-arm hit rate and abstention rate.
-factual  IPCW C-index and Brier score of the factual curve, the only part that real
-         data could also have measured.
+factual  exact expected Brier score and uncensored latent-outcome checks of the
+         factual curve. These are simulation diagnostics, not real-data estimators.
 
 `line == "all"` pools the lines. Arms outside the line-level support (too thin to be
 recommendable) are left out of every table, so a metric is never charged for an arm the
@@ -27,8 +27,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from scipy.integrate import cumulative_trapezoid
-from sksurv.metrics import brier_score, concordance_index_ipcw
-from sksurv.util import Surv
+from sksurv.exceptions import NoComparablePairException
+from sksurv.metrics import concordance_index_censored
 
 from CausalSurv.semisynthetic.outcome import rmst, survival
 from CausalSurv.semisynthetic.predictors import Prediction, truth_arrays
@@ -246,43 +246,54 @@ def policy_table(
 
 
 def factual_metrics(
-    predictions: dict[str, Prediction], truth: Truth, train: pd.DataFrame
+    predictions: dict[str, Prediction], truth: Truth, train: pd.DataFrame | None = None
 ) -> pd.DataFrame:
-    """IPCW C-index and Brier score at the line's horizon, against the line's training
-    censoring distribution. The horizon is pulled just inside the last evaluated time
-    where follow-up is shorter than it (recorded in `tau_used`)."""
+    """Score at the exact requested horizon, without censoring-distribution transfer.
+
+    If p is the true factual survival probability and q the prediction, the
+    conditional expected Brier loss is p(1-q)^2 + (1-p)q^2. We also score the
+    uncensored simulated outcome and its concordance with horizon-specific risk.
+    `brier` aliases `brier_expected`; `c_index` aliases `c_index_latent` for existing
+    table consumers. `train` is retained for API compatibility, but not used.
+    """
     rows = []
-    frame = truth.frame
     for line in np.unique(truth.line):
         in_line = truth.line == line
-        tr = train[train["lineid"] == line]
-        y_train = Surv.from_arrays(
-            tr["event"].to_numpy().astype(bool), tr["obs_time"].to_numpy()
-        )
-        y_test = Surv.from_arrays(
-            frame["event"].to_numpy()[in_line].astype(bool),
-            frame["obs_time"].to_numpy()[in_line],
-        )
         tau = float(truth.tau[in_line][0])
-        tau_used = min(tau, 0.999 * float(y_test["time"].max()))
-        grid_at = int(np.floor(tau_used / truth.dt))
+        grid_at = int(truth.tau_index(tau))
+        idx = np.arange(in_line.sum())
+        arm = truth.factual[in_line]
+        p = truth.survival[in_line][idx, arm, grid_at]
+        latent_time = truth.frame.loc[in_line, "latent_time"].to_numpy()
         for name, pred in predictions.items():
-            s = pred.survival[in_line][
-                np.arange(in_line.sum()), truth.factual[in_line], grid_at
-            ]
+            s = pred.survival[in_line][idx, arm, grid_at]
+            expected = float(np.mean(p * (1 - s) ** 2 + (1 - p) * s**2))
+            latent = float(np.mean(((latent_time > tau).astype(float) - s) ** 2))
+            try:
+                ci = (
+                    float(
+                        concordance_index_censored(
+                            np.ones(len(latent_time), dtype=bool), latent_time, 1 - s
+                        )[0]
+                    )
+                    if len(latent_time) >= 2
+                    else float("nan")
+                )
+            except NoComparablePairException:
+                ci = float("nan")
             rows.append(
                 dict(
                     predictor=name,
                     line=int(line),
                     n=int(in_line.sum()),
                     tau=tau,
-                    tau_used=tau_used,
-                    c_index=float(
-                        concordance_index_ipcw(y_train, y_test, 1 - s, tau=tau_used)[0]
-                    ),
-                    brier=float(
-                        brier_score(y_train, y_test, s[:, None], [tau_used])[1][0]
-                    ),
+                    tau_used=tau,
+                    estimator="exact_expected_and_uncensored_latent",
+                    c_index=ci,
+                    c_index_latent=ci,
+                    brier=expected,
+                    brier_expected=expected,
+                    brier_latent=latent,
                 )
             )
     return pd.DataFrame(rows)
