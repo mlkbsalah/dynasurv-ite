@@ -1,5 +1,10 @@
 # Semi-synthetic counterfactual benchmark for DynaSurv
 
+> Current workflow documentation is maintained in
+> [skills/semisynthetic_validation.md](../skills/semisynthetic_validation.md).
+> The 7 October 2026 local inventory found no corrected evaluation metadata;
+> the historical numbers below were not recomputed during that review.
+
 > Audit correction, 2026-09-23: the numerical results below are **historical/exploratory**, not corrected independent-test validation. Their holdout was reused for early stopping and checkpoint-kind selection; marginal training-cohort IPCW scores are also affected by temporal censoring shift. Protocol v2 separates training/validation/test by original patient, uses training-only preprocessing, a fixed checkpoint rule, and exact expected/uncensored latent factual metrics. Corrected checkpoints/results go to `models/semisynthetic_v2` and `reports/semisynthetic_sweep_v2`; retraining is required. See `reports/p1_fixes_2026-09-23.md` for migration instructions.
 
 > Comparator qualification: at historical bestCI, DynaSurv's mean pair PEHE is worse than naive per-arm Kaplan–Meier in **9/10 cells** (reference 1.761 vs 1.705 months), although reference policy regret is lower (0.336 vs 0.516 months). Only heterogeneity 2 favors DynaSurv on PEHE (2.643 vs 2.773). This supports a possible ranking benefit, not superior effect estimation. The complete historical comparison is in `reports/semisynthetic_legacy_audit_comparison/comparator_summary.csv`; the new aggregator reports all comparators explicitly.

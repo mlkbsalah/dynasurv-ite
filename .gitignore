@@ -70,7 +70,7 @@ dynasurv.tar
 dynasurv.sif
 
 # Generated recommendation-run output (timestamped, regenerates every run)
-reports/recommendations/
+/reports/
 
-# Untitled/default-named scratch file, not meant for version control
+# Local default-named presentation draft
 data_analysis/Présentation1.pptx

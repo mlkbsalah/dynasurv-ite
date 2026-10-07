@@ -1,5 +1,10 @@
 # DynaSurv project audit
 
+> Historical audit of the source snapshot identified below. For the current
+> implementation, see the [component index](../skills/README.md) and
+> [7 October 2026 project check](project_status_2026-10-07.md). Several defects
+> described here were subsequently fixed; the original evidence is preserved.
+
 Audit date: 23 September 2026
 
 Scope: model and its active data/training pipeline; recommendation package; semisynthetic validation; current second manuscript draft.

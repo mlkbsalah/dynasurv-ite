@@ -1,5 +1,10 @@
 # DynaSurv — Project State Report
 
+> Historical research narrative and results. For current code and execution
+> status, use the [component index](../skills/README.md) and
+> [7 October 2026 project check](project_status_2026-10-07.md). The numerical
+> findings below retain their original provenance and were not rerun here.
+
 **Causal treatment recommendation for metastatic breast cancer from real-world treatment sequences**
 Branch `feature/residual_survival` · HR+HER2− ESME cohort · 2026-08-28
 

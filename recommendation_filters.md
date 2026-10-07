@@ -1,178 +1,100 @@
 # Recommendation eligibility filters
 
-The model never recommends every observed treatment arm at every line. Four
-independent filters narrow the action space before `TreatmentRecommender.recommend()`
-ranks arms by RMST. This doc traces where each one is computed, where it is
-applied, and what it is protecting against.
+Last checked: **7 October 2026**. These are the current support rules in
+[datamodule_cv.py](src/CausalSurv/data/datamodule_cv.py),
+[propensity_overlap.py](src/CausalSurv/evaluation/propensity_overlap.py) and
+[recommender.py](src/CausalSurv/recommendation/recommender.py).
+The [recommendation component document](skills/recommendation.md) covers
+ensemble decisions and compatibility requirements.
 
-Code: `src/CausalSurv/model/dynasurv_causal_online.py`,
-`src/CausalSurv/data/datamodule_cv.py`,
-`src/CausalSurv/evaluation/propensity_overlap.py`,
-`src/CausalSurv/recommendation/recommender.py`.
-Config: `configs/config.toml` (`[data]` section).
+## Current configuration
 
-## Summary table
+| Filter | Scope | Current real-data setting |
+|---|---|---|
+| Training observations | Arm × line | At least 200 |
+| Explicit exclusions | Arm, all lines | `NO TREATMENT`, `OTHER`, `ET+TT` |
+| Events through RMST horizon | Arm × line | At least 30 |
+| Outcomes known through horizon | Arm × line | At least 100 |
+| Assignment probability | Arm × line × patient | At least 0.01 |
 
-| # | Filter | Level | Computed by | Threshold (current config) |
-|---|--------|-------|-------------|------------------------------|
-| 1 | Arm support (min count) | arm × line, global | `_compute_valid_treatments_per_line` | `min_samples_per_treatment = 200` |
-| 2 | Well-definedness (excluded arms) | arm, global | `_compute_recommendable_treatments_per_line` | `excluded_treatment_arms = ["NO TREATMENT", "OTHER", "ET+TT"]` |
-| 3 | Outcome/horizon support | arm × line, global | `_compute_recommendable_treatments_per_line` / `_compute_arm_support_summary` | `min_events_per_treatment = 30`, `min_followup_samples_per_treatment = 100` |
-| 4 | Propensity / positivity | arm × line **× patient** | `PropensityOverlapModel` | `propensity_min_probability = 0.01` |
+The horizons are `[24, 18, 12, 12]` months. Counts, horizon summaries and the
+assignment estimator are built from the training partition in
+`_set_training_support`. Explicit exclusions come from configuration; they are
+not learned from validation or test. Eligibility is a statistical support rule,
+not a check of individual contraindications or clinical suitability.
 
-All four are fit **only on the training partition** (`_set_training_support`,
-called from `setup()`), so validation/test outcomes can never change which
-arms are eligible.
+## Global support
 
----
+`_compute_valid_treatments_per_line` counts masked training observations for
+all treatment categories. An arm must meet `min_samples_per_treatment` at that
+line. These valid-arm sets also enter propensity-adversary and MMD/EMD losses;
+they do not alone define recommendation eligibility.
 
-## 1. Arm support filter (raw count)
+`_compute_recommendable_treatments_per_line` removes explicitly excluded arms
+and applies `_compute_arm_support_summary`:
 
-`ESMEOnlineDataModuleCV._compute_valid_treatments_per_line` (`datamodule_cv.py:389`)
+- `events_to_horizon`: observed deaths at or before the line's horizon.
+- `known_to_horizon`: records followed at least through the horizon, or observed
+  deaths (a death before the horizon also resolves survival status thereafter).
 
-For each line, an arm index `k` is kept only if it was observed at least
-`min_samples_per_treatment` (200) times in the training partition:
+The current configuration requires both minimum counts above. Excluded-arm
+records remain available for factual training and observed history. Historical
+regimen-count arguments for the exclusions are in `improvements.md`; those
+counts were not recomputed for this review.
 
-```python
-valid = [k for k in range(n_treatments) if (t_line == k).sum().item() >= min_samples]
-```
+In the normal pipeline every line/arm receives a support-summary entry. The
+lower-level helper skips horizon checks if an entry is missing (`stats is
+None`), so calling it without summaries is not equivalent to the fully checked
+training pipeline.
 
-This produces `valid_treatments_per_line`, the dataset's global notion of
-"this arm has enough data at this line to say anything at all." It is the
-**first and broadest** cut — everything downstream (filters 2-4) only ever
-removes arms from this set, never adds one back.
+## Patient-specific assignment support
 
-`valid_treatments_per_line` has a second life inside the model that has
-nothing to do with recommendation: `DynaSurvCausalOnline._valid_arm_mask`
-(`dynasurv_causal_online.py:629`) uses the exact same set to decide which
-observations contribute to the propensity adversary loss and the MMD/EMD
-balance losses (`_compute_propensity_loss`, `_compute_ipm_mmd/emd2`). Arms
-with only a handful of patients are excluded there too, so the encoder isn't
-adversarially pressured to "balance" what is really just noise.
+`PropensityOverlapModel` fits a multinomial logistic model per line over
+**all observed assignment classes**, including arms excluded from recommendation.
+A one-class fit uses `DummyClassifier`. Probabilities are not renormalized over
+the eligible set; otherwise low total probability of receiving any eligible arm
+would be concealed.
 
-## 2. Well-definedness filter (structural exclusion)
+Inputs include dynamic covariates through the current line, static patient
+covariates and prior-line treatments/elapsed durations. Current treatment is
+excluded. The static pretreatment-history tensor is not included by this
+assignment feature builder, even though the survival model uses it.
 
-`DEFAULT_EXCLUDED_ARMS` (`datamodule_cv.py:40`), applied in
-`_compute_recommendable_treatments_per_line` (`datamodule_cv.py:410`).
+Factual training propensities are estimated out of fold for ESS and
+low-propensity diagnostics. The requested five folds are reduced for rare
+classes; when stratification cannot be used, the code falls back to `KFold`.
+The final estimator fits all training observations at the line. These
+probability estimates and diagnostics are not proof of calibrated overlap on a
+new population.
 
-Three arms are dropped from the *recommendable* set regardless of how much
-data they have, because they are not a single well-defined intervention:
+At inference, `predict_mask` permits only fitted classes reaching the probability
+threshold. Missing line estimators stay false. A missing entire assignment model
+also yields an all-false patient mask; legacy models without
+`assignment_scope="all_observed"` raise an error. There is no bypass for lines
+with one globally eligible arm.
 
-- **`NO TREATMENT`** — 207/0/0/1 across lines 1-4: a line-1 coding artefact,
-  not a therapy. Structurally non-positive at every later line.
-- **`OTHER`** — 736 distinct drug-flag combinations, modal share only 0.16.
-  "Set arm = OTHER" doesn't correspond to one action (SUTVA violation).
-- **`ET+TT`** — 344 distinct combinations, same problem.
+## Combining support and decisions
 
-Their records are **not removed from the dataset** — a patient who received
-`OTHER` at line 2 still contributes that line to their history and to the
-shared encoder. Only the eligibility to be *recommended* is withdrawn. See
-`improvements.md` sections 3, 6, 7 for the supporting counts.
+`TreatmentRecommender.action_mask()` builds the global mask from persisted
+recommendable sets and raises if that metadata is absent.
+`patient_support_mask()` intersects it with the assignment-probability mask.
+`recommend()` ranks finite RMST predictions after masking unsupported arms to
+negative infinity, returning `-1` if no arm is supported.
 
-## 3. Outcome/horizon support filter
+The ensemble intersects masks across members before scoring. Its statuses are
+`no_support`, `only_supported_option`, `undecided` and `confident`. Exactly one
+eligible arm cannot produce a confident comparison, even with unanimous votes.
+The single-model method does not implement the ensemble's vote/margin rule.
 
-`_compute_arm_support_summary` (`datamodule_cv.py:471`) computes, per
-line/arm and relative to that line's RMST horizon `tau`
-(`evaluation_horizon_times`, currently `[24, 18, 12, 12]` months):
+Checkpoints persist eligibility, arm summaries, assignment models and data
+manifests. Ensemble loading rejects stale or missing provenance. The horizon
+sweep reuses the original support mask; it measures sensitivity of RMST ranking,
+not whether longer horizons have adequate additional follow-up.
 
-- `events_to_horizon` — deaths observed before `tau` (a death before `tau`
-  fixes survival at 0 for the rest of `[0, tau]`, so it's informative).
-- `known_to_horizon` — records followed at least to `tau`, *plus* the events
-  above (both have a fully known survival status on `[0, tau]`; a patient
-  censored before `tau` does not).
+## Balancing is a separate mechanism
 
-`_compute_recommendable_treatments_per_line` then requires, on top of filter
-1's raw count:
-
-```python
-enough_events    = events_to_horizon  >= min_events_per_treatment      # 30
-enough_followup  = known_to_horizon   >= min_followup_samples_per_treatment  # 100
-```
-
-This exists because filter 1 alone can pass an arm that has 200+ patients
-but almost no one has been followed long enough to say anything about
-survival at that line's horizon — raw count is not the same as identifiable
-outcome information.
-
-Filters 1-3 together produce `recommendable_treatments_per_line`, exposed on
-the model as `self.recommendable_treatments_per_line`
-(`_setup_valid_treatments`, `dynasurv_causal_online.py:1135`) and turned into
-a `(n_lines, n_treatments)` boolean tensor by
-`TreatmentRecommender.action_mask()` (`recommendation/recommender.py:71`).
-
-## 4. Propensity / positivity filter (patient-specific)
-
-`src/CausalSurv/evaluation/propensity_overlap.py` — `PropensityOverlapModel`,
-fit in `_set_training_support` (`datamodule_cv.py:519`) and consumed by
-`TreatmentRecommender.patient_support_mask()` (`recommendation/recommender.py:86`).
-
-Filters 1-3 are **global**: an arm is either recommendable at a line or it
-isn't, for every patient. This filter is the only one that is **patient
-level** — it asks "does *this patient's* pre-treatment history give this arm
-any real probability of having been chosen?"
-
-- One multinomial propensity model is fit **per line**, restricted to the
-  arms that already passed filters 1-3 (`eligible_arms_per_line`).
-- Features are strictly pre-treatment: dynamic covariates up to and
-  including the current line, static covariates, and the *prior* lines'
-  treatment history/buffer time — never the current line's treatment
-  (`features_from_tensors`, deliberately excludes `P[:, line]`).
-- Factual propensities are estimated **out-of-fold** (`StratifiedKFold`,
-  `propensity_cv_folds = 5`) so the diagnostic isn't inflated by the model
-  scoring its own training rows.
-- At inference, `predict_mask` marks an arm unsupported for a patient when
-  its predicted probability falls below `propensity_min_probability` (0.01):
-
-  ```python
-  supported = probabilities >= fitted.threshold
-  ```
-
-- Diagnostics are logged even when nothing is masked: `effective_sample_size`
-  (per arm, via propensity-based reweighting) and `low_propensity_rate` (share
-  of factual assignments below the floor) are printed by
-  `describe_cohort()` and meant to be read before raising the threshold —
-  the code comment on `propensity_min_probability` says as much: *"Set to
-  zero to audit propensities without masking recommendations; tune from the
-  resulting ESS/low-propensity reports."*
-
-This is the actual **positivity** filter in the causal-inference sense:
-filters 1-3 ask "is there enough data on this arm at all," filter 4 asks "is
-there enough data on this arm *for patients who look like this one*."
-
----
-
-## How the filters combine at inference
-
-`TreatmentRecommender.recommend()` (`recommendation/recommender.py:164`),
-built from the model's checkpointed support state via
-`TreatmentRecommender.from_model()`:
-
-1. `patient_support_mask()` starts from the global `action_mask()`
-   (filters 1-3) broadcast to the batch, then AND's in the per-patient
-   `PropensityOverlapModel.predict_mask()` (filter 4) — only for lines that
-   actually have a fitted propensity model, so lines without one keep only
-   the global mask.
-2. RMST is computed for every arm, then arms failing the combined mask are
-   set to `-inf` before the argmax — a masked arm can never win the
-   comparison and surface as advice, rather than being merely flagged.
-3. If every arm is masked for a patient/line, `best_idx` is set to
-   `NO_SUPPORTED_ARM` (`-1`) instead of defaulting to arm 0 — "no
-   recommendation" is a distinct output from "recommend arm 0."
-
-This logic used to live directly on `DynaSurvCausalOnline` as
-`recommendable_mask`/`recommend_treatment`; it moved out to
-`recommendation/recommender.py` since ranking arms and deciding when to
-abstain is a policy built on top of the model's predictions, not something
-the network itself computes. What stays on the model is the checkpointed
-support state (`recommendation_propensity_model`,
-`recommendable_treatments_per_line`, `valid_treatments_per_line`) that
-`from_model()` reads.
-
-## Related but *not* a recommendation filter
-
-`min_ipm_group_size` (`src/CausalSurv/config.py`, `TrainingConfig`, default 16) looks
-similar but serves a different purpose: it's the minimum per-batch group
-size for a treatment pair to contribute to the MMD/EMD **balance loss**
-during training. It affects what the causal regularizer sees, not which arms
-can be recommended. All `lambda_ipm_*` / `lambda_prop_loss` weights are
-currently 0 in every checked-in config, so these losses are inert regardless.
+`TrainingConfig.min_ipm_group_size` defaults to 16 observations per treatment
+group within a batch. It controls which pairs contribute to MMD/EMD, not which
+arms can be recommended. Current HPO fixes all balancing/adversarial weights
+to zero; their runtime values for any other experiment come from its model JSON
+or checkpoint, not merely the real-data TOML.
