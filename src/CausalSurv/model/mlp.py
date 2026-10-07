@@ -6,16 +6,23 @@ class MLP(nn.Module):
     """A simple Multi-Layer Perceptron (MLP) with ReLU activations."""
 
     def __init__(
-        self, input_dim: int, output_dim: int, n_units: list[int], dropout: float
+        self,
+        input_dim: int,
+        output_dim: int,
+        n_units: list[int],
+        dropout: float,
+        normalization: str = "batch",
     ) -> None:
         """Class constructor
         Args:
             input_dim (int): Dimension of the input features
             output_dim (int): Dimension of the output features
-            n_layers (int): Number of layers in the MLP
             n_units (list[int]): Number of units in each hidden layer
+            normalization (str): "batch" for legacy MLPs or "layer" for new runs
         """
         super().__init__()
+        if normalization not in {"batch", "layer"}:
+            raise ValueError(f"Unsupported MLP normalization: {normalization}")
         if len(n_units) == 0:
             print("Warning: MLP with 0 layers, using identity mapping.")
             self.mlp = nn.Identity()
@@ -28,7 +35,10 @@ class MLP(nn.Module):
             layers.append(nn.Linear(prev_layer, n_units[i]))
             layers.append(nn.Dropout(self.dropout))
             layers.append(nn.ReLU())
-            layers.append(nn.BatchNorm1d(n_units[i]))
+            if normalization == "layer":
+                layers.append(nn.LayerNorm(n_units[i]))
+            else:
+                layers.append(nn.BatchNorm1d(n_units[i]))
             prev_layer = n_units[i]
 
         layers.append(nn.Linear(prev_layer, output_dim))

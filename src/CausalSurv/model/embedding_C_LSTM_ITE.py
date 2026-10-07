@@ -26,6 +26,7 @@ class embed_LSTM_ITE(nn.Module):
         mlpsa_dropout: float,
         attention: bool = False,
         num_layers: int = 1,
+        mlp_normalization: str = "batch",
     ):
         """Class constructor
 
@@ -66,6 +67,7 @@ class embed_LSTM_ITE(nn.Module):
             output_dim=self.x_embed_dim,
             n_units=self.mlpx_hidden_units,
             dropout=self.mlpx_dropout,
+            normalization=mlp_normalization,
         )
 
         self.treatment_embedding = nn.Embedding(self.p_input_dim, self.p_embed_dim)
@@ -128,6 +130,7 @@ class embed_LSTM_ITE(nn.Module):
             output_dim=self.output_length,
             n_units=self.mlpsa_hidden_units,
             dropout=self.mlpsa_dropout,
+            normalization=mlp_normalization,
         )
 
     def _forget_gate(

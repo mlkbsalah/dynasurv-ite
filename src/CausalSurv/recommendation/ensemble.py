@@ -188,6 +188,7 @@ _STRICT_HPARAMS = (
     "n_lines",
     "output_length",
     "use_static_features",
+    "mlp_normalization",
 )
 
 

@@ -120,6 +120,8 @@ def load_dynasurv_checkpoint(
     kwargs.setdefault(
         "use_static_features", "init_h.weight" in checkpoint["state_dict"]
     )
+    # Checkpoints predating the normalization switch used BatchNorm in every MLP.
+    kwargs.setdefault("mlp_normalization", "batch")
 
     model = DynaSurvCausalOnline(**kwargs)
     model.load_state_dict(checkpoint["state_dict"], strict=strict)

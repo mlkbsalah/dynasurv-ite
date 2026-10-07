@@ -52,6 +52,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         arch: Layer widths, dropout and attention (`ArchConfig`).
         training: Optimiser and causal-balancing weights (`TrainingConfig`).
         evaluation: Reporting grid for the epoch metrics (`EvalConfig`).
+        mlp_normalization: LayerNorm for new runs; BatchNorm for legacy weights.
     """
 
     def __init__(
@@ -68,6 +69,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         training: TrainingConfig,
         evaluation: EvalConfig,
         use_static_features: bool = True,
+        mlp_normalization: str = "layer",
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -84,6 +86,7 @@ class DynaSurvCausalOnline(L.LightningModule):
         self.training_config = training
         self.eval_config = evaluation
         self.use_static_features = use_static_features
+        self.mlp_normalization = mlp_normalization
         self.data_manifest = None
         self.calibration_status = "joint_nll_only"
 
@@ -127,6 +130,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             mlpp_dropout=0.0,
             mlpsa_dropout=arch.mlpsa_dropout,
             attention=arch.attention,
+            mlp_normalization=mlp_normalization,
         )
 
         self.treatment_head = MLP(
@@ -134,6 +138,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             output_dim=output_length * n_treatments,
             n_units=list(arch.mlpsa_hidden_units),
             dropout=arch.mlpsa_dropout,
+            normalization=mlp_normalization,
         )
 
         # Both baseline covariates and pretreatment therapy history inform the
@@ -155,6 +160,7 @@ class DynaSurvCausalOnline(L.LightningModule):
             output_dim=self.n_treatments,
             n_units=list(arch.mlpprop_hidden_units),
             dropout=arch.mlpprop_dropout,
+            normalization=mlp_normalization,
         )
 
         self.surv_loss_fn = NLLogisticHazard(reduction="none")
