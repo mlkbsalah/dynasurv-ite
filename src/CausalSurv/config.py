@@ -127,7 +127,9 @@ class ModelConfigFile(StrictConfig):
     """The whole of `configs/best_config.json`.
 
     `n_intervals` and `batch_size` sit at the root rather than inside
-    `ArchConfig` because both are Optuna-tuned but consumed by the *datamodule*.
+    `ArchConfig` because both are consumed by the *datamodule*.
+    Optuna tunes `batch_size`; `n_intervals` is fixed at 100 in the current
+    HPO runner. Both are saved in the exported configuration.
     `n_intervals` comes back to the model as `output_length`; `batch_size` never
     reaches the model at all. Keeping them out of `ArchConfig` stops the model's
     config object carrying values the model never reads.
@@ -214,8 +216,8 @@ class DataConfig(StrictConfig):
 
     `batch_size` is absent on purpose -- it lives in the model config file next
     to `n_intervals`, because the Optuna study tunes it and both are datamodule
-    inputs. Keeping one tuned value here and one there is what let trial 33's
-    winning `batch_size = 64` be silently replaced by this file's 128.
+    inputs. Keeping `batch_size` here as well is what let trial 33's winning
+    `batch_size = 64` be silently replaced by this file's 128.
     """
 
     data_dir: str

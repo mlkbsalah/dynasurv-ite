@@ -22,10 +22,11 @@ data_dir = "../data"
 subtype = "HR+HER2-"
 n_lines = 4
 
-# NOTE: batch_size and n_intervals are NOT here. Both are datamodule inputs that
-# the Optuna study configures, so they live in configs/hpo_v3/best_config.json.
-# Splitting them -- n_intervals in the tuned file, batch_size here -- is what let
-# the study's winning batch_size be silently replaced by this file's value.
+# NOTE: batch_size and n_intervals are NOT here. Optuna tunes batch_size;
+# n_intervals is fixed at 100 in the current HPO runner.
+# Both are datamodule inputs saved in configs/hpo_v3/best_config.json.
+# Keeping batch_size here as well is what let the study's winning batch_size
+# be silently replaced by this file's value.
 
 # --- Identifiability controls (see improvements.md) ---
 # Keep only patients whose FIRST line starts in/after this year, so every arm in
