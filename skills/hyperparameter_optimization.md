@@ -4,9 +4,12 @@ Last checked: **8 October 2026**, including changes to
 [run_optuna.py](../scripts/hyperopt/run_optuna.py) and
 [RunHPO.sh](../slurm/RunHPO.sh). See the [run guide](../scripts/hyperopt/README.md)
 for commands. The new HPO protocol **v4 validation-loss** uses data protocol
-**v2** and the active model's LayerNorm MLPs. Its `hpo_v4_val_loss` namespace
+**v2** and defaults to the active model's LayerNorm MLPs. Its `hpo_v4_val_loss` namespace
 is separate from historical BatchNorm v4 and completed CI-minus-calibration v5
 studies. Their objective values are not directly comparable.
+`--mlp-normalization batch` runs the same search with BatchNorm MLPs in the
+separate `hpo_v4_val_loss_batchnorm` namespace. Normalization is fixed per study,
+not a sampled hyperparameter.
 
 ## Objective and selection
 
@@ -69,17 +72,21 @@ workers (25 each with four workers).
 | Cluster journal / study | `studies/hpo_v4_val_loss/cluster/study.journal` / `dynasurv_hpo_v4_val_loss_cluster` |
 | Winner, both modes | `configs/hpo_v3/best_config.json` |
 | Export provenance | `configs/hpo_v3/best_config.provenance.json` |
+| BatchNorm local/cluster journals | `studies/hpo_v4_val_loss_batchnorm/{local,cluster}/study.journal` |
+| BatchNorm winner and provenance | `configs/hpo_v4_batchnorm/best_config.json` and `best_config.provenance.json` |
 
 Journal storage uses `JournalFileOpenLock` with no automatic stale-lock grace
 period. Local optimization exports on completion. The Slurm launcher exports
 once after all workers succeed. `--export-only` refuses any RUNNING trials,
 requires a finite completed result and checks the winning trial's protocol
 attribute. It atomically writes the exact executed typed configuration plus
-trial/study attributes. This exports settings, not model weights.
+trial/study attributes. This exports settings, not model weights. The winning
+architecture stores `mlp_normalization`, which the main training script uses
+when refitting. Legacy configs without the field default to LayerNorm.
 
 ## Current limitations
 
-- `--export-only` is the only custom CLI option. Old v3 storage/backend,
+- `--export-only` and `--mlp-normalization {layer,batch}` are the custom CLI options. Old v3 storage/backend,
   preflight, trial-budget, metric, interval and recovery options are removed.
 - `load_if_exists=True` resumes the fixed study name. `protocol_details` is
   written only when absent; current data, source and settings are not compared

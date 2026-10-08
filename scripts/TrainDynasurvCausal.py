@@ -69,6 +69,7 @@ def main(
         arch=cfg.arch,
         training=cfg.training,
         evaluation=cfg.eval,
+        mlp_normalization=cfg.arch.mlp_normalization,
     )
 
     if run_dir is None:

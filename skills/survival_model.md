@@ -6,6 +6,7 @@ Last checked: **7 October 2026**. Scope: the active
 ## Entry points and configuration
 
 - [Training CLI](../scripts/TrainDynasurvCausal.py)
+- [Checkpoint validation CLI](../scripts/ValidateCheckpoint.py)
 - [Model](../src/CausalSurv/model/dynasurv_causal_online.py) and
   [history encoder](../src/CausalSurv/model/embedding_C_LSTM_ITE.py)
 - [Datamodule](../src/CausalSurv/data/datamodule_cv.py) and
@@ -69,10 +70,12 @@ produces treatment-specific discrete-hazard coordinates with shape
 `(batch, observed_lines, treatments, intervals)`. Per-line temperature and bias
 parameters are learned jointly with the survival loss.
 
-New active-model runs use LayerNorm in the encoder and both prediction-head
+New active-model runs default to LayerNorm in the encoder and both prediction-head
 MLPs. This normalizes each sample across hidden features, so training behavior
-does not depend on the other patients or padded rows in a batch. The shared MLP
-helper retains BatchNorm as its default for older model variants. Historical
+does not depend on the other patients or padded rows in a batch. Set
+`arch.mlp_normalization` to `batch` in the model config to use BatchNorm in
+training and HPO refits; older configs without this field default to `layer`.
+The shared MLP helper retains BatchNorm as its default for older model variants. Historical
 BatchNorm checkpoints must be loaded through `load_dynasurv_checkpoint`; their
 saved normalization is reconstructed as BatchNorm, not converted to LayerNorm.
 Changing normalization changes the fitted model and requires new training and
@@ -101,6 +104,16 @@ The main CLI allows up to 100 epochs and stops on
 `val_loss`, `bestCI`, `bestIBS`, `bestCALIB` and `final_epoch` checkpoint kinds.
 The configured rule for optional final testing and ensemble selection is
 `val_loss`; it is separate from the stopping metric.
+
+Run `python3 scripts/ValidateCheckpoint.py /path/to/checkpoint.ckpt` to rebuild
+the checkpoint's cohort and produce development-validation metrics, calibration
+and Brier tables, treatment counts, and diagnostic figures. The CLI checks the
+checkpoint and run manifests before evaluation and writes `validation_*` files
+to the run directory, directly above `checkpoints/`. It never scores the reserved
+temporal test partition. Its recommendation mix is descriptive; it does not
+estimate a causal policy effect. The older `notebooks/model_validation.ipynb`
+hardcodes a legacy path and uses `test_dataloader()`, so use the CLI for routine
+validation of newly trained checkpoints.
 
 Runs default to `models/{subtype}/{n_lines}lines/{date}_seed_{seed}/` with W&B
 logs. Existing checkpoint directories are rejected to prevent accidental mixing.

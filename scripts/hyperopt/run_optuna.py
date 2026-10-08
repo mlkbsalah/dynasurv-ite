@@ -99,7 +99,9 @@ def _suggest_mlp(trial, name: str) -> tuple[int, ...]:
     return (width,) * depth
 
 
-def suggest_config(trial) -> tuple[ArchConfig, TrainingConfig, int]:
+def suggest_config(
+    trial, mlp_normalization="layer"
+) -> tuple[ArchConfig, TrainingConfig, int]:
     arch = ArchConfig(
         lstm_hidden_length=trial.suggest_categorical(
             "lstm_hidden_length", [64, 128, 256]
@@ -114,6 +116,7 @@ def suggest_config(trial) -> tuple[ArchConfig, TrainingConfig, int]:
         mlpsa_dropout=trial.suggest_float("mlpsa_dropout", 0.0, 0.4),
         mlpprop_dropout=0.0,
         attention=True,
+        mlp_normalization=mlp_normalization,
     )
     training = TrainingConfig(
         lr=trial.suggest_float("lr", 1e-5, 1e-3, log=True),
@@ -183,10 +186,11 @@ def objective(
     precision="32-true",
     metric=HPO_METRIC,
     progress=False,
+    mlp_normalization="layer",
 ) -> float:
     # Fixed training seed across trials; separate processes isolate their RNGs.
     L.seed_everything(seed, workers=True)
-    arch, training, batch_size = suggest_config(trial)
+    arch, training, batch_size = suggest_config(trial, mlp_normalization)
     config = ModelConfigFile(data_module.n_intervals, batch_size, arch, training)
     trial.set_user_attr("model_config", config.to_dict())
     trial.set_user_attr("evaluation_protocol", PROTOCOL_VERSION)
@@ -206,6 +210,7 @@ def objective(
         arch=arch,
         training=training,
         evaluation=eval_config,
+        mlp_normalization=arch.mlp_normalization,
     )
     tracker = BestValidationMetric(trial, metric)
     callbacks = [
@@ -276,7 +281,7 @@ def atomic_json(path: Path, value):
     os.replace(temporary, path)
 
 
-def _write_best_config(study, out_path: Path):
+def _write_best_config(study, out_path: Path, mlp_normalization: str):
     if study.get_trials(states=(optuna.trial.TrialState.RUNNING,)):
         raise RuntimeError(
             "Stop all workers and resolve interrupted RUNNING trials before exporting"
@@ -298,11 +303,15 @@ def _write_best_config(study, out_path: Path):
     settings = details.get("settings", {})
     if settings.get("metric") != HPO_METRIC:
         raise ValueError("Study metric does not match the validation-loss protocol")
+    if settings.get("mlp_normalization") != mlp_normalization:
+        raise ValueError("Study normalization does not match the requested mode")
     best = study.best_trial
     if best.user_attrs.get("evaluation_protocol") != PROTOCOL_VERSION:
         raise ValueError("Winning trial has incompatible objective provenance")
     # Exact executed config: no parameter reconstruction or floating-point rounding.
     config = ModelConfigFile.from_dict(best.user_attrs["model_config"])
+    if config.arch.mlp_normalization != mlp_normalization:
+        raise ValueError("Winning trial normalization does not match the study")
     atomic_json(out_path, config.to_dict())
     atomic_json(
         out_path.with_suffix(".provenance.json"),
@@ -323,19 +332,31 @@ def _write_best_config(study, out_path: Path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--export-only", action="store_true")
+    parser.add_argument(
+        "--mlp-normalization", choices=("layer", "batch"), default="layer"
+    )
     args = parser.parse_args(argv)
 
     cluster = "SLURM_JOB_ID" in os.environ
     worker_id = int(os.environ.get("SLURM_PROCID", "0"))
     workers = int(os.environ.get("SLURM_NTASKS", "1")) if cluster else 1
     run_name = "cluster" if cluster else "local"
-    study_name = f"dynasurv_{PROTOCOL_NAMESPACE}_{run_name}"
-    run_dir = ROOT / "studies" / PROTOCOL_NAMESPACE / run_name
-    out_path = ROOT / "configs/hpo_v3/best_config.json"
+    namespace = (
+        PROTOCOL_NAMESPACE
+        if args.mlp_normalization == "layer"
+        else f"{PROTOCOL_NAMESPACE}_batchnorm"
+    )
+    study_name = f"dynasurv_{namespace}_{run_name}"
+    run_dir = ROOT / "studies" / namespace / run_name
+    out_path = ROOT / (
+        "configs/hpo_v3/best_config.json"
+        if args.mlp_normalization == "layer"
+        else "configs/hpo_v4_batchnorm/best_config.json"
+    )
     storage = make_storage(run_dir / "study.journal")
     if args.export_only:
         study = optuna.load_study(study_name=study_name, storage=storage)
-        _write_best_config(study, out_path)
+        _write_best_config(study, out_path, args.mlp_normalization)
         return
 
     accelerator = (
@@ -387,7 +408,7 @@ def main(argv=None):
                     "seed": HPO_SPLIT_SEED,
                     "accelerator": accelerator,
                     "precision": precision,
-                    "mlp_normalization": "layer",
+                    "mlp_normalization": args.mlp_normalization,
                 },
             },
         )
@@ -401,6 +422,7 @@ def main(argv=None):
             accelerator=accelerator,
             precision=precision,
             metric=HPO_METRIC,
+            mlp_normalization=args.mlp_normalization,
         ),
         n_trials=budget,
         n_jobs=1,
@@ -408,7 +430,7 @@ def main(argv=None):
         catch=(torch.cuda.OutOfMemoryError, NumericalTrialError),
     )
     if not cluster:
-        _write_best_config(study, out_path)
+        _write_best_config(study, out_path, args.mlp_normalization)
 
 
 if __name__ == "__main__":

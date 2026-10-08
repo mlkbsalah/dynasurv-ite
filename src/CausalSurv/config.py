@@ -97,6 +97,12 @@ class ArchConfig(StrictConfig):
     mlpsa_dropout: float
     mlpprop_dropout: float
     attention: bool
+    mlp_normalization: str = "layer"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.mlp_normalization not in {"layer", "batch"}:
+            raise ValueError("mlp_normalization must be 'layer' or 'batch'")
 
 
 @dataclass(frozen=True)

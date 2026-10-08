@@ -14,7 +14,7 @@
 /tmp/
 # New, versioned HPO runtime output
 /studies/
-/configs/hpo_v3/
+/configs/hpo_v*/
 
 # Experiment outputs
 /training_logs/
