@@ -1,4 +1,4 @@
-"""Optimize validation concordance minus calibration gap with single-device workers."""
+"""Minimize validation survival loss with single-device Optuna workers."""
 
 from __future__ import annotations
 
@@ -31,20 +31,19 @@ from CausalSurv.model import DynaSurvCausalOnline
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "configs/config.toml"
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 4
+PROTOCOL_NAMESPACE = "hpo_v4_val_loss"
 HPO_N_TRIALS = 100
-HPO_METRIC = "val/hpo_score"
+HPO_METRIC = "val_loss"
 HPO_MAX_EPOCHS = 100
 HPO_PATIENCE = 10
-HPO_STOPPING_METRIC = "val/calib_gap_abs_mean"
 HPO_SPLIT_SEED = 42
 HPO_N_INTERVALS = 100
 METRICS = {
-    HPO_METRIC: "max",
+    HPO_METRIC: "min",
     "average_ci": "max",
     "average_ibs": "min",
     "val/calib_gap_abs_mean": "min",
-    "val_loss": "min",
 }
 
 
@@ -128,19 +127,6 @@ def suggest_config(trial) -> tuple[ArchConfig, TrainingConfig, int]:
     return arch, training, trial.suggest_categorical("batch_size", [64, 128, 256])
 
 
-class HPOModel(DynaSurvCausalOnline):
-    def on_validation_epoch_end(self):
-        super().on_validation_epoch_end()
-        if not self.trainer.sanity_checking:
-            metrics = self.trainer.callback_metrics
-            self.log(
-                HPO_METRIC,
-                metrics["average_ci"] - metrics[HPO_STOPPING_METRIC],
-                on_step=False,
-                on_epoch=True,
-            )
-
-
 class NumericalTrialError(RuntimeError):
     """A non-finite objective invalidates this trial, not the whole study."""
 
@@ -208,7 +194,7 @@ def objective(
     data_module.batch_size = batch_size
     data_module.prepare_data()
     dims = data_module.get_data_dimensions()
-    model = HPOModel(
+    model = DynaSurvCausalOnline(
         x_input_dim=dims["x_input_dim"],
         x_static_dim=dims["x_static_dim"],
         p_input_dim=dims["p_input_dim"],
@@ -225,7 +211,7 @@ def objective(
     callbacks = [
         tracker,
         EarlyStopping(
-            monitor=HPO_STOPPING_METRIC,
+            monitor=HPO_METRIC,
             mode="min",
             min_delta=0.0,
             patience=patience,
@@ -306,6 +292,12 @@ def _write_best_config(study, out_path: Path):
         raise RuntimeError(
             "No finite completed trials; no winning configuration was written"
         )
+    if study.direction.name != "MINIMIZE":
+        raise ValueError("Expected a study minimizing validation survival loss")
+    details = study.user_attrs.get("protocol_details", {})
+    settings = details.get("settings", {})
+    if settings.get("metric") != HPO_METRIC:
+        raise ValueError("Study metric does not match the validation-loss protocol")
     best = study.best_trial
     if best.user_attrs.get("evaluation_protocol") != PROTOCOL_VERSION:
         raise ValueError("Winning trial has incompatible objective provenance")
@@ -337,8 +329,8 @@ def main(argv=None):
     worker_id = int(os.environ.get("SLURM_PROCID", "0"))
     workers = int(os.environ.get("SLURM_NTASKS", "1")) if cluster else 1
     run_name = "cluster" if cluster else "local"
-    study_name = f"dynasurv_hpo_v5_{run_name}"
-    run_dir = ROOT / "studies/hpo_v5" / run_name
+    study_name = f"dynasurv_{PROTOCOL_NAMESPACE}_{run_name}"
+    run_dir = ROOT / "studies" / PROTOCOL_NAMESPACE / run_name
     out_path = ROOT / "configs/hpo_v3/best_config.json"
     storage = make_storage(run_dir / "study.journal")
     if args.export_only:
@@ -373,7 +365,7 @@ def main(argv=None):
     study = optuna.create_study(
         study_name=study_name,
         storage=storage,
-        direction="maximize",
+        direction="minimize",
         load_if_exists=True,
         sampler=optuna.samplers.TPESampler(
             seed=HPO_SPLIT_SEED + worker_id, constant_liar=True
@@ -388,10 +380,10 @@ def main(argv=None):
                 "evaluation": evaluation.to_dict(),
                 "settings": {
                     "metric": HPO_METRIC,
-                    "objective": "average_ci - val/calib_gap_abs_mean",
+                    "objective": "minimum validation survival loss over completed epochs",
                     "max_epochs": HPO_MAX_EPOCHS,
                     "patience": HPO_PATIENCE,
-                    "stopping_metric": HPO_STOPPING_METRIC,
+                    "stopping_metric": HPO_METRIC,
                     "seed": HPO_SPLIT_SEED,
                     "accelerator": accelerator,
                     "precision": precision,

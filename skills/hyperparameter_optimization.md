@@ -1,28 +1,30 @@
 # Hyperparameter optimization
 
-Last checked: **7 October 2026**, including uncommitted changes to
+Last checked: **8 October 2026**, including changes to
 [run_optuna.py](../scripts/hyperopt/run_optuna.py) and
 [RunHPO.sh](../slurm/RunHPO.sh). See the [run guide](../scripts/hyperopt/README.md)
-for commands. HPO protocol **v5** uses data protocol **v2** and the active
-model's LayerNorm MLPs. The v5 study is separate from historical BatchNorm v4
-trials because their objective values are not directly comparable.
+for commands. The new HPO protocol **v4 validation-loss** uses data protocol
+**v2** and the active model's LayerNorm MLPs. Its `hpo_v4_val_loss` namespace
+is separate from historical BatchNorm v4 and completed CI-minus-calibration v5
+studies. Their objective values are not directly comparable.
 
 ## Objective and selection
 
-The default trial score is the maximum, over completed validation epochs, of
-`val/hpo_score = average_ci - val/calib_gap_abs_mean`.
-`HPOModel` emits it after the base model pools epoch metrics;
-`BestValidationMetric` reads it in `on_validation_end` and records the best
-epoch, score and available diagnostics in trial attributes.
+The trial score is the **minimum validation survival loss** (`val_loss`) over
+completed validation epochs. `BestValidationMetric` reads the base model's
+logged loss in `on_validation_end` and records the best epoch, score and
+available CI, IBS and calibration diagnostics in trial attributes.
 
-Pruning receives each epoch's score through a median pruner (5 startup trials,
-10 warm-up steps). Early stopping separately minimizes the calibration gap
-with patience 10. Maximum training length is 100 epochs. Stopping and ranking
-therefore do **not** use the same metric. No trial checkpoints are saved.
+Pruning receives each epoch's validation loss through a median pruner (5 startup
+trials, 10 warm-up steps). Early stopping minimizes that same loss with patience
+10. Maximum training length is 100 epochs. No trial checkpoints are saved.
 
 The training seed is fixed at 42 across trials. TPE samplers use `42 + worker_id`
 with `constant_liar=True`; each process runs `n_jobs=1` on one device. Numerical
 objective failures and CUDA OOM mark failed trials; unexpected errors propagate.
+The exported winner is refitted by the main training script. That script's
+calibration-gap stopping rule remains separate, but its configured `val_loss`
+checkpoint selector matches the new HPO objective.
 
 ## Search space
 
@@ -63,8 +65,8 @@ workers (25 each with four workers).
 
 | Artifact | Current location/name |
 |---|---|
-| Local journal / study | `studies/hpo_v5/local/study.journal` / `dynasurv_hpo_v5_local` |
-| Cluster journal / study | `studies/hpo_v5/cluster/study.journal` / `dynasurv_hpo_v5_cluster` |
+| Local journal / study | `studies/hpo_v4_val_loss/local/study.journal` / `dynasurv_hpo_v4_val_loss_local` |
+| Cluster journal / study | `studies/hpo_v4_val_loss/cluster/study.journal` / `dynasurv_hpo_v4_val_loss_cluster` |
 | Winner, both modes | `configs/hpo_v3/best_config.json` |
 | Export provenance | `configs/hpo_v3/best_config.provenance.json` |
 
@@ -81,7 +83,7 @@ trial/study attributes. This exports settings, not model weights.
   preflight, trial-budget, metric, interval and recovery options are removed.
 - `load_if_exists=True` resumes the fixed study name. `protocol_details` is
   written only when absent; current data, source and settings are not compared
-  against it on resume. The version check at export does not detect within-v5
+  against it on resume. The version check at export does not detect within-v4
   configuration drift.
 - The previous cross-node storage probe, launcher ownership lock, heartbeat and
   stale-trial recovery commands are absent. Cluster filesystem/GPU behavior has
@@ -89,8 +91,10 @@ trial/study attributes. This exports settings, not model weights.
 - Local and cluster modes have separate journals but share the winner path.
   A later successful export replaces that file. Trial budget applies per launch,
   not as a lifetime cap on the resumed study.
-- Despite the v5 study/objective, the output directory retains `hpo_v3` to match
+- Despite the v4 study/objective, the output directory retains `hpo_v3` to match
   downstream defaults. The executable parser does not accept `--n-intervals`.
 
-No active local journal or exported winner was present at this review. Source
-inspection and CLI/config checks do not establish completed tuning or model quality.
+The earlier v5 winner was copied locally and used for one training run. This new
+v4-loss study has not been run. Its successful export will replace the winner in
+`configs/hpo_v3/`, so save the v5 configuration and provenance if needed for
+comparison. Source/CLI checks do not establish new tuning or model quality.

@@ -1,8 +1,9 @@
 # HPO run guide
 
-Reviewed **7 October 2026** against the current working tree. The runner uses
-HPO protocol **v5** and the corrected **v2 data protocol**. New trials use
-LayerNorm MLPs in a separate study from BatchNorm v4 trials. Its only custom CLI
+Reviewed **8 October 2026** against the current working tree. The runner uses
+HPO protocol **v4 validation-loss** and the corrected **v2 data protocol**. New
+trials use LayerNorm MLPs in a distinct `hpo_v4_val_loss` study namespace, away
+from historical BatchNorm v4 and CI-minus-calibration v5 trials. Its only custom CLI
 option is `--export-only`. The previous v3 guide's configurable launch, storage
 probe, preflight, recovery and metric-selection commands no longer apply.
 
@@ -30,9 +31,10 @@ journal location must be available to both nodes. The current launcher does
 not perform the old cross-node storage probe or GPU preflight.
 
 There are 100 additional trial attempts per launch, divided into 25 per worker.
-GPU training uses BF16 mixed precision. The score is the best validation-epoch
-`average_ci - val/calib_gap_abs_mean`. Early stopping separately monitors the
-calibration gap, with patience 10 and a maximum of 100 epochs. These constants
+GPU training uses BF16 mixed precision. Optuna minimizes the best validation-epoch
+`val_loss`; pruning and early stopping monitor the same loss. Early stopping has
+patience 10 and training has a maximum of 100 epochs. CI, IBS and calibration
+gap remain trial diagnostics. These constants
 are in the Python source; old `N_TRIALS`, `METRIC`, `STUDY_TAG`, `DRY_RUN` and
 `HPO_STORAGE_BACKEND` overrides have no effect in this launcher.
 
@@ -68,14 +70,15 @@ for another study or journal.
 
 | Output | Path |
 |---|---|
-| Local study | `studies/hpo_v5/local/study.journal` (`dynasurv_hpo_v5_local`) |
-| Cluster study | `studies/hpo_v5/cluster/study.journal` (`dynasurv_hpo_v5_cluster`) |
+| Local study | `studies/hpo_v4_val_loss/local/study.journal` (`dynasurv_hpo_v4_val_loss_local`) |
+| Cluster study | `studies/hpo_v4_val_loss/cluster/study.journal` (`dynasurv_hpo_v4_val_loss_cluster`) |
 | Winning configuration, both modes | `configs/hpo_v3/best_config.json` |
 | Exported provenance | `configs/hpo_v3/best_config.provenance.json` |
 
 The `hpo_v3` export directory is retained by the current downstream defaults;
 it does not mean the study uses objective v3. Local and cluster exports target
-the same file. Trials store exact model settings, scores and best-epoch
+the same file and replace the earlier v5 winner; save its config and provenance
+before launching if needed. Trials store exact model settings, scores and best-epoch
 attributes in the journal. **No trial checkpoints are written.** Refit the
 winner with `TrainDynasurvCausal.py` to obtain model weights and recommendation
 support state.
@@ -93,7 +96,6 @@ lock, heartbeat, stale-trial recovery and database backend options are absent.
 Journal storage retains exclusive-create locking, but interrupted locks/trials
 have no recovery CLI in the current runner.
 
-As of this review, no local active journal or winning JSON was present. The
-runner's help/import path and typed configuration were checked; no trial or
-cluster job was run. Source validity does not demonstrate multi-node storage
-reliability or a completed tuning result.
+The earlier v5 winner is available locally; no v4 validation-loss trial or
+cluster job was run during this change. Source validity does not demonstrate
+multi-node storage reliability or a completed v4 tuning result.

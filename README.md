@@ -6,16 +6,17 @@ semisynthetic validation. The import package is `CausalSurv`.
 
 ## Current project state
 
-Reviewed **7 October 2026**, including local changes on top of `e9dcb87`.
+Reviewed **8 October 2026**.
 The active survival pipeline uses data protocol v2: static features, separate
 development validation and temporal test, training-only scaling/time grid, and
 checkpoint manifests. Recommendations enforce support and ensemble compatibility.
 Semisynthetic evaluation uses grouped splits and known-outcome scoring.
 
-The current local HPO runner uses protocol v5 and LayerNorm MLPs, and optimizes validation concordance
-minus calibration gap. It still exports to `configs/hpo_v3/best_config.json`.
-That file is absent locally, as is `studies/`. One model run with a protocol-v2
-manifest is present; no corrected semisynthetic evaluation metadata was found.
+The current HPO runner uses a distinct v4 validation-loss study with LayerNorm
+MLPs. It minimizes validation survival loss and still exports to
+`configs/hpo_v3/best_config.json`. The earlier v5 winner has been copied locally
+and used for a model run; the new v4 study has not been run. No corrected
+semisynthetic evaluation metadata was found.
 Historical reports do not establish performance of the corrected pipeline.
 
 Start with the [component index](skills/README.md):

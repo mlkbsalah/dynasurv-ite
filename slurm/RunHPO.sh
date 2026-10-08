@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=DynaSurvHPO5
+#SBATCH --job-name=DynaSurvHPO4Loss
 #SBATCH --output=%x.%j.out
 #SBATCH --time=24:00:00
 #SBATCH --nodes=2
